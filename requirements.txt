@@ -1,0 +1,11 @@
+Django>=6.0,<7.0
+django-jazzmin
+django-import-export
+psycopg2-binary
+django-storages[boto3]
+django-environ
+django-ses[events]
+django-post-office
+gunicorn
+Pillow
+python-freeipa

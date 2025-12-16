@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:18
+    container_name: almalinux_db2
+    restart: always
+    environment:
+      - POSTGRES_DB=almalinux_members
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data2:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: almalinux_mailhog
+    command:
+      - -jim-accept=0.1
+      - -jim-disconnect=0.1
+      - -jim-reject-sender=0.1
+      - -jim-reject-recipient=0.1
+      - -jim-reject-auth=0.1
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  web:
+    build: .
+    container_name: almalinux_web2
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app:z
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=dev_secret_key
+      - DJANGO_AUTO_MIGRATE=1
+      - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/almalinux_members
+      - EMAIL_URL=smtp://almalinux_mailhog:1025
+      - FREEIPA_HOST=ipa.tinystage.test
+      - FREEIPA_VERIFY_SSL=False
+      - FREEIPA_SERVICE_USER=admin
+      - FREEIPA_SERVICE_PASSWORD=password
+
+volumes:
+  postgres_data2:

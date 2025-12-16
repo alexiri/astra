@@ -1,0 +1,30 @@
+FROM python:3.14-slim
+
+# Install system dependencies for Postgres and Pillow
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libssl-dev \
+    libpq-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/almalinux_membership
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Keep entrypoint outside the bind-mounted /app volume (devcontainers/compose)
+COPY docker/entrypoint.sh /usr/local/bin/almalinux-entrypoint
+RUN chmod +x /usr/local/bin/almalinux-entrypoint
+
+COPY . .
+
+# Collect static files (placeholder for production build)
+# RUN python manage.py collectstatic --noinput
+
+EXPOSE 8000
+
+ENTRYPOINT ["/usr/local/bin/almalinux-entrypoint"]
+CMD ["gunicorn", "almalinux_membership.wsgi:application", "--bind", "0.0.0.0:8000"]
