@@ -8,6 +8,43 @@ from python_freeipa import ClientMeta, exceptions
 logger = logging.getLogger(__name__)
 
 
+def _freeipa_cache_timeout() -> int:
+    return int(getattr(settings, 'FREEIPA_CACHE_TIMEOUT', 300))
+
+
+def _user_cache_key(username: str) -> str:
+    # Keep legacy key format to avoid surprises.
+    return f'freeipa_user_{username}'
+
+
+def _group_cache_key(cn: str) -> str:
+    return f'freeipa_group_{cn}'
+
+
+def _users_list_cache_key() -> str:
+    return 'freeipa_users_all'
+
+
+def _groups_list_cache_key() -> str:
+    return 'freeipa_groups_all'
+
+
+def _invalidate_users_list_cache() -> None:
+    cache.delete(_users_list_cache_key())
+
+
+def _invalidate_groups_list_cache() -> None:
+    cache.delete(_groups_list_cache_key())
+
+
+def _invalidate_user_cache(username: str) -> None:
+    cache.delete(_user_cache_key(username))
+
+
+def _invalidate_group_cache(cn: str) -> None:
+    cache.delete(_group_cache_key(cn))
+
+
 def _session_user_id_for_username(username: str) -> int:
     """Return a stable integer id for storing in Django's session.
 
@@ -154,10 +191,18 @@ class FreeIPAUser:
         """
         Returns a list of all users from FreeIPA.
         """
+        cached = cache.get(_users_list_cache_key())
+        if cached:
+            return [cls(u['uid'][0], u) for u in cached]
+
         client = cls.get_client()
         try:
-            result = client.user_find(o_all=True, o_no_members=False)
-            return [cls(u['uid'][0], u) for u in result['result']]
+            # FreeIPA server/client may default to returning only 100 entries.
+            # Request an unlimited result set where supported.
+            result = client.user_find(o_all=True, o_no_members=False, o_sizelimit=0, o_timelimit=0)
+            users = result.get('result', [])
+            cache.set(_users_list_cache_key(), users, timeout=_freeipa_cache_timeout())
+            return [cls(u['uid'][0], u) for u in users]
         except Exception as e:
             logger.error(f"Failed to list users: {e}")
             return []
@@ -197,7 +242,7 @@ class FreeIPAUser:
         Fetch a single user by username.
         """
         # Check cache first
-        cache_key = f'freeipa_user_{username}'
+        cache_key = _user_cache_key(username)
         cached_data = cache.get(cache_key)
 
         if cached_data:
@@ -207,7 +252,7 @@ class FreeIPAUser:
         try:
             user_data = cls._fetch_full_user(client, username)
             if user_data:
-                cache.set(cache_key, user_data, timeout=300)
+                cache.set(cache_key, user_data, timeout=_freeipa_cache_timeout())
                 return cls(username, user_data)
         except Exception as e:
             logger.error(f"Failed to get user {username}: {e}")
@@ -247,6 +292,8 @@ class FreeIPAUser:
                     ipa_kwargs[f"o_{key}"] = value
 
             client.user_add(username, givenname, sn, cn, **ipa_kwargs)
+            # New user should appear in lists; invalidate list cache and warm this user's cache.
+            _invalidate_users_list_cache()
             return cls.get(username)
         except Exception as e:
             logger.error(f"Failed to create user {username}: {e}")
@@ -287,8 +334,11 @@ class FreeIPAUser:
         try:
             if updates:
                 client.user_mod(self.username, **updates)
-            # Invalidate cache
-            cache.delete(f'freeipa_user_{self.username}')
+            # Invalidate and refresh cache entries.
+            _invalidate_user_cache(self.username)
+            _invalidate_users_list_cache()
+            # Warm fresh data for subsequent reads.
+            FreeIPAUser.get(self.username)
         except Exception as e:
             logger.error(f"Failed to update user {self.username}: {e}")
             raise
@@ -300,7 +350,8 @@ class FreeIPAUser:
         client = self.get_client()
         try:
             client.user_del(self.username)
-            cache.delete(f'freeipa_user_{self.username}')
+            _invalidate_user_cache(self.username)
+            _invalidate_users_list_cache()
         except Exception as e:
             logger.error(f"Failed to delete user {self.username}: {e}")
             raise
@@ -347,7 +398,13 @@ class FreeIPAUser:
         client = self.get_client()
         try:
             client.group_add_member(group_name, o_user=[self.username])
-            cache.delete(f'freeipa_user_{self.username}')
+            # Membership affects both user and group views.
+            _invalidate_user_cache(self.username)
+            _invalidate_group_cache(group_name)
+            _invalidate_groups_list_cache()
+            # Warm both caches.
+            FreeIPAUser.get(self.username)
+            FreeIPAGroup.get(group_name)
         except Exception as e:
             logger.error(f"Failed to add user {self.username} to group {group_name}: {e}")
             raise
@@ -356,7 +413,11 @@ class FreeIPAUser:
         client = self.get_client()
         try:
             client.group_remove_member(group_name, o_user=[self.username])
-            cache.delete(f'freeipa_user_{self.username}')
+            _invalidate_user_cache(self.username)
+            _invalidate_group_cache(group_name)
+            _invalidate_groups_list_cache()
+            FreeIPAUser.get(self.username)
+            FreeIPAGroup.get(group_name)
         except Exception as e:
             logger.error(f"Failed to remove user {self.username} from group {group_name}: {e}")
             raise
@@ -394,10 +455,16 @@ class FreeIPAGroup:
         """
         Returns a list of all groups from FreeIPA.
         """
+        cached = cache.get(_groups_list_cache_key())
+        if cached:
+            return [cls(g['cn'][0], g) for g in cached]
+
         client = cls.get_client()
         try:
-            result = client.group_find(o_all=True, o_no_members=False)
-            return [cls(g['cn'][0], g) for g in result['result']]
+            result = client.group_find(o_all=True, o_no_members=False, o_sizelimit=0, o_timelimit=0)
+            groups = result.get('result', [])
+            cache.set(_groups_list_cache_key(), groups, timeout=_freeipa_cache_timeout())
+            return [cls(g['cn'][0], g) for g in groups]
         except Exception as e:
             logger.error(f"Failed to list groups: {e}")
             return []
@@ -407,7 +474,7 @@ class FreeIPAGroup:
         """
         Fetch a single group by cn.
         """
-        cache_key = f'freeipa_group_{cn}'
+        cache_key = _group_cache_key(cn)
         cached_data = cache.get(cache_key)
 
         if cached_data:
@@ -418,7 +485,7 @@ class FreeIPAGroup:
             result = client.group_find(o_cn=cn, o_all=True, o_no_members=False)
             if result['count'] > 0:
                 group_data = result['result'][0]
-                cache.set(cache_key, group_data, timeout=300)
+                cache.set(cache_key, group_data, timeout=_freeipa_cache_timeout())
                 return cls(cn, group_data)
         except Exception as e:
             logger.error(f"Failed to get group {cn}: {e}")
@@ -435,6 +502,7 @@ class FreeIPAGroup:
             if description:
                 kwargs['o_description'] = description
             client.group_add(cn, **kwargs)
+            _invalidate_groups_list_cache()
             return cls.get(cn)
         except Exception as e:
             logger.error(f"Failed to create group {cn}: {e}")
@@ -451,7 +519,9 @@ class FreeIPAGroup:
 
         try:
             client.group_mod(self.cn, **updates)
-            cache.delete(f'freeipa_group_{self.cn}')
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
         except Exception as e:
             logger.error(f"Failed to update group {self.cn}: {e}")
             raise
@@ -463,7 +533,8 @@ class FreeIPAGroup:
         client = self.get_client()
         try:
             client.group_del(self.cn)
-            cache.delete(f'freeipa_group_{self.cn}')
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
         except Exception as e:
             logger.error(f"Failed to delete group {self.cn}: {e}")
             raise
@@ -472,8 +543,12 @@ class FreeIPAGroup:
         client = self.get_client()
         try:
             client.group_add_member(self.cn, o_user=[username])
-            cache.delete(f'freeipa_group_{self.cn}')
-            cache.delete(f'freeipa_user_{username}') # User's group list changes
+            _invalidate_group_cache(self.cn)
+            _invalidate_user_cache(username)  # user's group list changes
+            _invalidate_groups_list_cache()
+            # Warm both caches.
+            FreeIPAGroup.get(self.cn)
+            FreeIPAUser.get(username)
         except Exception as e:
             logger.error(f"Failed to add user {username} to group {self.cn}: {e}")
             raise
@@ -482,8 +557,11 @@ class FreeIPAGroup:
         client = self.get_client()
         try:
             client.group_remove_member(self.cn, o_user=[username])
-            cache.delete(f'freeipa_group_{self.cn}')
-            cache.delete(f'freeipa_user_{username}') # User's group list changes
+            _invalidate_group_cache(self.cn)
+            _invalidate_user_cache(username)  # user's group list changes
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+            FreeIPAUser.get(username)
         except Exception as e:
             logger.error(f"Failed to remove user {username} from group {self.cn}: {e}")
             raise
