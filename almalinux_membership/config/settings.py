@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'avatar',
     'core',
 ]
 
@@ -146,6 +147,18 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+# django-avatar configuration
+# Avoid the PrimaryAvatarProvider (DB-backed Avatar records) to prevent ORM
+# lookups against AUTH_USER_MODEL for request.user objects.
+AVATAR_PROVIDERS = (
+    'avatar.providers.LibRAvatarProvider',
+    'avatar.providers.GravatarAvatarProvider',
+    'avatar.providers.DefaultAvatarProvider',
+)
+AVATAR_GRAVATAR_DEFAULT = env('AVATAR_GRAVATAR_DEFAULT', default='identicon')
+# Only used if Gravatar provider cannot produce a URL (e.g. missing email).
+AVATAR_DEFAULT_URL = env('AVATAR_DEFAULT_URL', default='')
 
 FREEIPA_CACHE_TIMEOUT = env.int("FREEIPA_CACHE_TIMEOUT", default=300)
 

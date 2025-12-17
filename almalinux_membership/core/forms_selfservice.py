@@ -102,11 +102,6 @@ class _StyledForm(forms.Form):
 
 
 class ProfileForm(_StyledForm):
-    avatar = forms.ImageField(
-        label="Avatar",
-        required=False,
-        widget=forms.ClearableFileInput(attrs={"class": "form-control-file"}),
-    )
     # Core identity fields
     givenname = forms.CharField(
         label="First Name",

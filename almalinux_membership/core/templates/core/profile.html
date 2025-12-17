@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load avatar_tags %}
+
 {% block title %}Profile{% endblock %}
 
 {% block content %}
@@ -7,13 +9,7 @@
   <div class="col-lg-4">
     <div class="card">
       <div class="card-body text-center">
-        {% if avatar_data_url %}
-          <img src="{{ avatar_data_url }}" class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" />
-        {% else %}
-          <div class="mb-3">
-            <i class="fas fa-user-circle" style="font-size:140px;"></i>
-          </div>
-        {% endif %}
+        {% avatar request.user 140 class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" %}
 
         <h3 class="profile-username text-center">{{ fu.get_full_name }}</h3>
         <p class="text-muted text-center">{{ fu.username }}</p>

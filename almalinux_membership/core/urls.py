@@ -6,6 +6,8 @@ urlpatterns = [
     path('', views.profile, name='profile'),
     path('groups/', views.groups, name='groups'),
 
+    path('settings/avatar/', views.avatar_manage, name='avatar-manage'),
+
     path('settings/profile/', views.settings_profile, name='settings-profile'),
     path('settings/emails/', views.settings_emails, name='settings-emails'),
     path('settings/keys/', views.settings_keys, name='settings-keys'),

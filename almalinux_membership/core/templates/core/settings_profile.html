@@ -7,7 +7,7 @@
 {% block content %}
 {% include 'core/_settings_tabs.html' %}
 <div class="card mt-3">
-  <form method="post" enctype="multipart/form-data" novalidate>
+  <form method="post" novalidate>
     {% csrf_token %}
 
     <div class="card-body">
@@ -15,10 +15,11 @@
         <div class="alert alert-danger">{{ form.non_field_errors }}</div>
       {% endif %}
 
-      <div class="form-group">
-        {{ form.avatar.label_tag }}
-        {{ form.avatar }}
-        {% if form.avatar.errors %}<div class="invalid-feedback d-block">{{ form.avatar.errors }}</div>{% endif %}
+      <div class="mb-3">
+        <a class="btn btn-outline-secondary" href="{% url 'avatar-manage' %}" target="_blank" rel="noopener">Change avatar</a>
+        <small class="form-text text-muted">
+          We don’t host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).
+        </small>
       </div>
 
       <div class="form-row">

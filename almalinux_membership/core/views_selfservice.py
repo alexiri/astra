@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import logging
 import re
 
@@ -9,7 +8,9 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.module_loading import import_string
 
 from python_freeipa import ClientMeta, exceptions
 
@@ -374,6 +375,47 @@ def _get_full_user(username: str) -> FreeIPAUser | None:
     return FreeIPAUser.get(username)
 
 
+def _detect_avatar_provider(user: object, *, size: int = 140) -> tuple[str | None, str | None]:
+    """Return (provider_path, avatar_url) for the first provider that yields a URL.
+
+    This follows django-avatar's provider ordering semantics.
+    """
+
+    providers = getattr(settings, "AVATAR_PROVIDERS", ()) or ()
+    for provider_path in providers:
+        try:
+            provider_cls = import_string(provider_path)
+        except Exception:
+            continue
+
+        get_url = getattr(provider_cls, "get_avatar_url", None)
+        if not callable(get_url):
+            continue
+
+        try:
+            url = get_url(user, size, size)
+        except Exception:
+            continue
+
+        if url:
+            return provider_path, url
+
+    return None, None
+
+
+def _avatar_manage_url_for_provider(provider_path: str | None) -> str | None:
+    if not provider_path:
+        return None
+
+    if provider_path.endswith("LibRAvatarProvider"):
+        return "https://www.libravatar.org/"
+    if provider_path.endswith("GravatarAvatarProvider"):
+        return "https://gravatar.com/"
+
+    # Only these two are supported in this project.
+    return None
+
+
 @login_required(login_url="/login/")
 def profile(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
@@ -390,14 +432,6 @@ def profile(request: HttpRequest) -> HttpResponse:
 
     groups = getattr(fu, "groups_list", []) or []
 
-    # Avatar (optional): FreeIPA jpegphoto may be bytes or base64-ish.
-    avatar_data_url = None
-    jpeg = data.get("jpegphoto")
-    if isinstance(jpeg, list):
-        jpeg = jpeg[0] if jpeg else None
-    if isinstance(jpeg, (bytes, bytearray)):
-        avatar_data_url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
-
     context = {
         "fu": fu,
         "groups": sorted(groups),
@@ -406,9 +440,21 @@ def profile(request: HttpRequest) -> HttpResponse:
         "timezone": tz_name,
         "current_time": now_local,
         "pronouns": _value_to_text(_data_get(data, "fasPronoun", "")),
-        "avatar_data_url": avatar_data_url,
     }
     return render(request, "core/profile.html", context)
+
+
+@login_required(login_url="/login/")
+def avatar_manage(request: HttpRequest) -> HttpResponse:
+    """Redirect the user to the appropriate place to manage their avatar."""
+
+    provider_path, _ = _detect_avatar_provider(request.user)
+    manage_url = _avatar_manage_url_for_provider(provider_path)
+    if manage_url:
+        return redirect(manage_url)
+
+    messages.info(request, "Your current avatar provider does not support direct avatar updates here.")
+    return redirect("settings-profile")
 
 
 @login_required(login_url="/login/")
@@ -545,11 +591,6 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
         new_private = bool(form.cleaned_data["fasIsPrivate"])
         if current_private != new_private:
             setattrs.append(f"fasIsPrivate={_bool_to_ipa(new_private)}")
-
-        # Optional avatar upload -> jpegphoto.
-        avatar = request.FILES.get("avatar")
-        if avatar:
-            setattrs.append(f"jpegphoto={base64.b64encode(avatar.read()).decode('ascii')}")
 
         try:
             if not direct_updates and not addattrs and not setattrs and not delattrs:

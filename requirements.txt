@@ -9,3 +9,4 @@ django-post-office
 gunicorn
 Pillow
 python-freeipa
+django-avatar

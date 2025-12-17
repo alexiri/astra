@@ -345,6 +345,20 @@ try:
 except admin.sites.NotRegistered:
     pass
 
+# django-avatar registers an Avatar admin that depends on Django's User admin
+# being registered (it uses autocomplete_fields=['user']). This project
+# intentionally unregisters the DB-backed User/Group admin in favor of FreeIPA
+# listings, so we also remove the django-avatar admin integration.
+try:
+    from avatar.models import Avatar
+
+    try:
+        admin.site.unregister(Avatar)
+    except admin.sites.NotRegistered:
+        pass
+except ImportError:
+    pass
+
 
 # Keep the traditional admin URLs working.
 if not getattr(admin.site, "_freeipa_aliases_patched", False):
