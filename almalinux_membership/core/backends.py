@@ -60,10 +60,6 @@ def _session_user_id_for_username(username: str) -> int:
     return int.from_bytes(digest[:8], 'big') & 0x7FFFFFFFFFFFFFFF
 
 
-def _session_uid_cache_key(session_uid: int) -> str:
-    return f'freeipa_session_uid_{session_uid}'
-
-
 class _FreeIPAPK:
     attname = 'username'
     name = 'username'
@@ -204,7 +200,7 @@ class FreeIPAUser:
             cache.set(_users_list_cache_key(), users, timeout=_freeipa_cache_timeout())
             return [cls(u['uid'][0], u) for u in users]
         except Exception as e:
-            logger.error(f"Failed to list users: {e}")
+            logger.exception("Failed to list users")
             return []
 
     @classmethod
@@ -214,26 +210,34 @@ class FreeIPAUser:
         Prefer user_show (returns full attribute set including custom schema
         like Fedora's FAS fields). Fallback to user_find if needed.
         """
+        def _try(label: str, fn):
+            try:
+                return fn()
+            except TypeError as e:
+                # Signature mismatch across python-freeipa versions.
+                logger.debug("FreeIPA call failed (TypeError) label=%s username=%s error=%s", label, username, e)
+                return None
+            except exceptions.FreeIPAError as e:
+                # FreeIPA returned an API-level error.
+                logger.debug("FreeIPA call failed label=%s username=%s error=%s", label, username, e)
+                return None
+            except Exception:
+                logger.exception("FreeIPA call failed (unexpected) label=%s username=%s", label, username)
+                return None
+
         # Try common call styles across python-freeipa versions.
-        try:
-            res = client.user_show(username, o_all=True, o_no_members=False)
-            if res and 'result' in res:
-                return res['result']
-        except Exception:
-            pass
-        try:
-            res = client.user_show(a_uid=username, o_all=True, o_no_members=False)
-            if res and 'result' in res:
-                return res['result']
-        except Exception:
-            pass
+        res = _try("user_show(username)", lambda: client.user_show(username, o_all=True, o_no_members=False))
+        if res and 'result' in res:
+            return res['result']
+
+        res = _try("user_show(a_uid=...)", lambda: client.user_show(a_uid=username, o_all=True, o_no_members=False))
+        if res and 'result' in res:
+            return res['result']
+
         # Fallback to a targeted find.
-        try:
-            res = client.user_find(o_uid=username, o_all=True, o_no_members=False)
-            if res and res.get('count', 0) > 0:
-                return res['result'][0]
-        except Exception:
-            pass
+        res = _try("user_find(o_uid=...)", lambda: client.user_find(o_uid=username, o_all=True, o_no_members=False))
+        if res and res.get('count', 0) > 0:
+            return res['result'][0]
         return None
 
     @classmethod
@@ -255,7 +259,7 @@ class FreeIPAUser:
                 cache.set(cache_key, user_data, timeout=_freeipa_cache_timeout())
                 return cls(username, user_data)
         except Exception as e:
-            logger.error(f"Failed to get user {username}: {e}")
+            logger.exception("Failed to get user username=%s", username)
         return None
 
     @classmethod
@@ -296,7 +300,7 @@ class FreeIPAUser:
             _invalidate_users_list_cache()
             return cls.get(username)
         except Exception as e:
-            logger.error(f"Failed to create user {username}: {e}")
+            logger.exception("Failed to create user username=%s", username)
             raise
 
     def save(self, *args, **kwargs):
@@ -340,7 +344,7 @@ class FreeIPAUser:
             # Warm fresh data for subsequent reads.
             FreeIPAUser.get(self.username)
         except Exception as e:
-            logger.error(f"Failed to update user {self.username}: {e}")
+            logger.exception("Failed to update user username=%s", self.username)
             raise
 
     def delete(self):
@@ -353,7 +357,7 @@ class FreeIPAUser:
             _invalidate_user_cache(self.username)
             _invalidate_users_list_cache()
         except Exception as e:
-            logger.error(f"Failed to delete user {self.username}: {e}")
+            logger.exception("Failed to delete user username=%s", self.username)
             raise
 
 
@@ -406,7 +410,7 @@ class FreeIPAUser:
             FreeIPAUser.get(self.username)
             FreeIPAGroup.get(group_name)
         except Exception as e:
-            logger.error(f"Failed to add user {self.username} to group {group_name}: {e}")
+            logger.exception("Failed to add user to group username=%s group=%s", self.username, group_name)
             raise
 
     def remove_from_group(self, group_name):
@@ -419,7 +423,7 @@ class FreeIPAUser:
             FreeIPAUser.get(self.username)
             FreeIPAGroup.get(group_name)
         except Exception as e:
-            logger.error(f"Failed to remove user {self.username} from group {group_name}: {e}")
+            logger.exception("Failed to remove user from group username=%s group=%s", self.username, group_name)
             raise
 
 
@@ -466,7 +470,7 @@ class FreeIPAGroup:
             cache.set(_groups_list_cache_key(), groups, timeout=_freeipa_cache_timeout())
             return [cls(g['cn'][0], g) for g in groups]
         except Exception as e:
-            logger.error(f"Failed to list groups: {e}")
+            logger.exception("Failed to list groups")
             return []
 
     @classmethod
@@ -488,7 +492,7 @@ class FreeIPAGroup:
                 cache.set(cache_key, group_data, timeout=_freeipa_cache_timeout())
                 return cls(cn, group_data)
         except Exception as e:
-            logger.error(f"Failed to get group {cn}: {e}")
+            logger.exception("Failed to get group cn=%s", cn)
         return None
 
     @classmethod
@@ -505,7 +509,7 @@ class FreeIPAGroup:
             _invalidate_groups_list_cache()
             return cls.get(cn)
         except Exception as e:
-            logger.error(f"Failed to create group {cn}: {e}")
+            logger.exception("Failed to create group cn=%s", cn)
             raise
 
     def save(self):
@@ -523,7 +527,7 @@ class FreeIPAGroup:
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception as e:
-            logger.error(f"Failed to update group {self.cn}: {e}")
+            logger.exception("Failed to update group cn=%s", self.cn)
             raise
 
     def delete(self):
@@ -536,7 +540,7 @@ class FreeIPAGroup:
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
         except Exception as e:
-            logger.error(f"Failed to delete group {self.cn}: {e}")
+            logger.exception("Failed to delete group cn=%s", self.cn)
             raise
 
     def add_member(self, username):
@@ -550,7 +554,7 @@ class FreeIPAGroup:
             FreeIPAGroup.get(self.cn)
             FreeIPAUser.get(username)
         except Exception as e:
-            logger.error(f"Failed to add user {username} to group {self.cn}: {e}")
+            logger.exception("Failed to add member username=%s group=%s", username, self.cn)
             raise
 
     def remove_member(self, username):
@@ -563,7 +567,7 @@ class FreeIPAGroup:
             FreeIPAGroup.get(self.cn)
             FreeIPAUser.get(username)
         except Exception as e:
-            logger.error(f"Failed to remove user {username} from group {self.cn}: {e}")
+            logger.exception("Failed to remove member username=%s group=%s", username, self.cn)
             raise
 
 
@@ -584,8 +588,6 @@ class FreeIPAAuthBackend(BaseBackend):
             if user_data:
                 logger.debug("authenticate: success username=%s", username)
                 user = FreeIPAUser(username, user_data)
-                # Map the numeric session uid back to username for later requests.
-                cache.set(_session_uid_cache_key(_session_user_id_for_username(username)), username, timeout=None)
                 # Persist username inside the session so reloads don't depend on LocMemCache.
                 if request is not None and hasattr(request, 'session'):
                     request.session['_freeipa_username'] = username
@@ -632,44 +634,17 @@ class FreeIPAAuthBackend(BaseBackend):
                 setattr(request, "_freeipa_auth_error", "Login failed due to a FreeIPA error.")
             return None
         except Exception as e:
-            logger.error(f"FreeIPA authentication error: {e}")
+            logger.exception("FreeIPA authentication error username=%s", username)
             if request is not None:
                 setattr(request, "_freeipa_auth_error", "Login failed due to an internal error.")
             return None
 
     def get_user(self, user_id):
-        # Django's default session loader expects an integer user_id.
-        try:
-            session_uid = int(user_id)
-        except (TypeError, ValueError):
-            return None
-
-        username = cache.get(_session_uid_cache_key(session_uid))
-        if not username:
-            return None
-
-        logger.debug("get_user: session_uid=%s username=%s", session_uid, username)
-
-        # Check cache first (keyed by username)
-        cache_key = f'freeipa_user_{username}'
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            logger.debug("get_user: cache hit username=%s", username)
-            return FreeIPAUser(username, cached_data)
-
-        # Fetch from FreeIPA using service account
-        try:
-            client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-            # We need a service account to fetch user details without their password
-            if hasattr(settings, 'FREEIPA_SERVICE_USER') and hasattr(settings, 'FREEIPA_SERVICE_PASSWORD'):
-                client.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
-                user_data = FreeIPAUser._fetch_full_user(client, username)
-                if user_data:
-                    logger.debug("get_user: fetched from FreeIPA username=%s", username)
-                    # Cache the user data
-                    cache.set(cache_key, user_data, timeout=300) # Cache for 5 minutes
-                    return FreeIPAUser(username, user_data)
-        except Exception as e:
-            logger.error(f"Error fetching user {username} from FreeIPA: {e}")
-
+        # Intentionally return None.
+        #
+        # This project stores the FreeIPA username in the session at login
+        # (request.session['_freeipa_username']). Our middleware restores the
+        # user object from that value on every request, which works across
+        # restarts and multi-process deployments without depending on a shared
+        # cache backend.
         return None

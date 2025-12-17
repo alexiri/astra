@@ -11,7 +11,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from python_freeipa import ClientMeta
+from python_freeipa import ClientMeta, exceptions
 
 from .backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
 from .forms_selfservice import (
@@ -144,16 +144,24 @@ def _update_user_attrs(
             break
         except Exception as e:
             attr = _parse_not_allowed_attr(e)
-            logger.warning(
-                "FreeIPA user_mod failed: username=%s error=%s direct_keys=%s addattr_attrs=%s setattr_attrs=%s delattr_attrs=%s",
-                username,
-                e,
-                sorted(direct_updates.keys()),
-                _attr_names_from_setattrs(working_addattrs),
-                _attr_names_from_setattrs(working_setattrs),
-                _attr_names_from_delattrs(working_delattrs),
-                exc_info=True,
-            )
+            if attr:
+                # Expected on some FreeIPA deployments: certain schema attrs are not editable.
+                logger.info(
+                    "FreeIPA user_mod rejected attribute: username=%s attr=%s direct_keys=%s",
+                    username,
+                    attr,
+                    sorted(direct_updates.keys()),
+                )
+            else:
+                logger.warning(
+                    "FreeIPA user_mod failed: username=%s error=%s direct_keys=%s addattr_attrs=%s setattr_attrs=%s delattr_attrs=%s",
+                    username,
+                    e,
+                    sorted(direct_updates.keys()),
+                    _attr_names_from_setattrs(working_addattrs),
+                    _attr_names_from_setattrs(working_setattrs),
+                    _attr_names_from_delattrs(working_delattrs),
+                )
 
             if attr:
                 if attempts >= 5:
@@ -198,6 +206,8 @@ def _update_user_attrs(
                 working_delattrs = []
                 continue
 
+            # Anything else is unexpected; keep the traceback.
+            logger.exception("FreeIPA user_mod unexpected failure username=%s", username)
             raise
 
     # Invalidate caches so lists/details refresh immediately.
@@ -567,7 +577,11 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
                 messages.info(request, "No changes were applied.")
             return redirect("settings-profile")
         except Exception as e:
-            messages.error(request, f"Failed to update profile: {e}")
+            logger.exception("Failed to update profile username=%s", username)
+            if settings.DEBUG:
+                messages.error(request, f"Failed to update profile (debug): {e}")
+            else:
+                messages.error(request, "Failed to update profile due to an internal error.")
 
     context = {"form": form, **_settings_context("profile")}
     return render(request, "core/settings_profile.html", context)
@@ -622,7 +636,11 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
                 messages.info(request, "No changes were applied.")
             return redirect("settings-emails")
         except Exception as e:
-            messages.error(request, f"Failed to update email settings: {e}")
+            logger.exception("Failed to update email settings username=%s", username)
+            if settings.DEBUG:
+                messages.error(request, f"Failed to update email settings (debug): {e}")
+            else:
+                messages.error(request, "Failed to update email settings due to an internal error.")
 
     context = {"form": form, **_settings_context("emails")}
     return render(request, "core/settings_emails.html", context)
@@ -726,7 +744,11 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
                 messages.info(request, "No changes were applied.")
             return redirect("settings-keys")
         except Exception as e:
-            messages.error(request, f"Failed to update keys: {e}")
+            logger.exception("Failed to update keys username=%s", username)
+            if settings.DEBUG:
+                messages.error(request, f"Failed to update keys (debug): {e}")
+            else:
+                messages.error(request, "Failed to update keys due to an internal error.")
 
     context = {"form": form, **_settings_context("keys")}
     return render(request, "core/settings_keys.html", context)
@@ -757,7 +779,16 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
         if request.method == "POST" and form.is_valid():
             add = getattr(client, "otptoken_add", None)
             if not callable(add):
-                raise RuntimeError("OTP token API not available in this python-freeipa version")
+                logger.info(
+                    "OTP token API not available; cannot create token username=%s",
+                    username,
+                )
+                messages.error(
+                    request,
+                    "OTP token creation is not available (python-freeipa does not expose the OTP API).",
+                )
+                context = {"form": form, "tokens": tokens, "created": created, **_settings_context("otp")}
+                return render(request, "core/settings_otp.html", context)
 
             # Create a basic TOTP token. FreeIPA typically returns the secret.
             desc = form.cleaned_data.get("description") or f"TOTP for {username}"
@@ -768,9 +799,17 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
                 o_all=True,
             )
             messages.success(request, "OTP token created. Capture the secret now; it may not be shown again.")
-    except Exception as e:
+    except exceptions.FreeIPAError as e:
+        logger.warning("OTP management failed username=%s error=%s", username, e)
         if request.method == "POST":
-            messages.error(request, f"Failed to manage OTP tokens: {e}")
+            messages.error(request, "Failed to manage OTP tokens due to a FreeIPA error.")
+    except Exception as e:
+        logger.exception("OTP management failed username=%s", username)
+        if request.method == "POST":
+            if settings.DEBUG:
+                messages.error(request, f"Failed to manage OTP tokens (debug): {e}")
+            else:
+                messages.error(request, "Failed to manage OTP tokens due to an internal error.")
 
     context = {"form": form, "tokens": tokens, "created": created, **_settings_context("otp")}
     return render(request, "core/settings_otp.html", context)
@@ -809,7 +848,11 @@ def settings_password(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Password changed.")
             return redirect("settings-password")
         except Exception as e:
-            messages.error(request, f"Failed to change password: {e}")
+            logger.exception("Failed to change password username=%s", username)
+            if settings.DEBUG:
+                messages.error(request, f"Failed to change password (debug): {e}")
+            else:
+                messages.error(request, "Failed to change password due to an internal error.")
 
     context = {"form": form, **_settings_context("password")}
     return render(request, "core/settings_password.html", context)

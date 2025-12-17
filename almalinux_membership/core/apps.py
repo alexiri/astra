@@ -12,7 +12,7 @@ def _patch_jazzmin_format_html() -> None:
 
     try:
         import jazzmin.templatetags.jazzmin as jazzmin_tags
-    except Exception:
+    except ImportError:
         return
 
     # Idempotent.
@@ -22,7 +22,7 @@ def _patch_jazzmin_format_html() -> None:
     try:
         from django.utils.html import format_html as django_format_html
         from django.utils.safestring import mark_safe
-    except Exception:
+    except ImportError:
         return
 
     def compat_format_html(format_string, *args, **kwargs):

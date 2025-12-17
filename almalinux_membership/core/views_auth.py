@@ -81,6 +81,9 @@ def password_expired(request: HttpRequest) -> HttpResponse:
             form.add_error(None, "Unable to change password due to a FreeIPA error.")
         except Exception as e:
             logger.exception("password_expired: unexpected error username=%s", username)
-            form.add_error(None, f"Unable to change password: {e}")
+            if settings.DEBUG:
+                form.add_error(None, f"Unable to change password (debug): {e}")
+            else:
+                form.add_error(None, "Unable to change password due to an internal error.")
 
     return render(request, "core/password_expired.html", {"form": form})

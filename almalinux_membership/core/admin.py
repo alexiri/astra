@@ -347,21 +347,21 @@ except admin.sites.NotRegistered:
 
 
 # Keep the traditional admin URLs working.
-_orig_get_urls = admin.site.get_urls
+if not getattr(admin.site, "_freeipa_aliases_patched", False):
+    _orig_get_urls = admin.site.get_urls
 
+    def _get_urls_with_freeipa_aliases():
+        def redirect_to_ipa_users(request):
+            return HttpResponseRedirect(reverse("admin:auth_ipauser_changelist"))
 
-def _get_urls_with_freeipa_aliases():
-    def redirect_to_ipa_users(request):
-        return HttpResponseRedirect(reverse("admin:auth_ipauser_changelist"))
+        def redirect_to_ipa_groups(request):
+            return HttpResponseRedirect(reverse("admin:auth_ipagroup_changelist"))
 
-    def redirect_to_ipa_groups(request):
-        return HttpResponseRedirect(reverse("admin:auth_ipagroup_changelist"))
+        custom = [
+            path("auth/user/", admin.site.admin_view(redirect_to_ipa_users)),
+            path("auth/group/", admin.site.admin_view(redirect_to_ipa_groups)),
+        ]
+        return custom + _orig_get_urls()
 
-    custom = [
-        path("auth/user/", admin.site.admin_view(redirect_to_ipa_users)),
-        path("auth/group/", admin.site.admin_view(redirect_to_ipa_groups)),
-    ]
-    return custom + _orig_get_urls()
-
-
-admin.site.get_urls = _get_urls_with_freeipa_aliases
+    admin.site.get_urls = _get_urls_with_freeipa_aliases
+    admin.site._freeipa_aliases_patched = True

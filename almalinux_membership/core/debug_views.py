@@ -72,7 +72,6 @@ def cache_debug_view(request):
             "freeipa_groups_all",
             "freeipa_user_<username>",
             "freeipa_group_<cn>",
-            "freeipa_session_uid_<int>",
         ],
     }
 

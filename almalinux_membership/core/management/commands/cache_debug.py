@@ -37,7 +37,7 @@ class Command(BaseCommand):
     help = "Inspect Django cache entries (handy for FreeIPA cache debugging)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--list", action="store_true", help="List known FreeIPA cache keys and session mapping keys.")
+        parser.add_argument("--list", action="store_true", help="List known FreeIPA cache keys.")
         parser.add_argument(
             "--keys",
             action="store_true",
@@ -84,7 +84,6 @@ class Command(BaseCommand):
             self.stdout.write("- freeipa_groups_all")
             self.stdout.write("- freeipa_user_<username>")
             self.stdout.write("- freeipa_group_<cn>")
-            self.stdout.write("- freeipa_session_uid_<int>")
 
         if options.get("keys"):
             keys = _try_locmem_keys()

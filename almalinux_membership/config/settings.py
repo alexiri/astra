@@ -1,6 +1,8 @@
 from pathlib import Path
 import os
+
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -8,11 +10,25 @@ env = environ.Env(
     DEBUG=(bool, False),
 )
 
-SECRET_KEY = 'django-insecure-change-me-in-production'
+# Optional local env file support (docker-compose already sets env vars).
+environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 
-DEBUG = True
+DEBUG = env.bool("DEBUG", default=False)
 
-ALLOWED_HOSTS = []
+SECRET_KEY = env(
+    "SECRET_KEY",
+    default="django-insecure-dev-only-change-me",
+)
+if not DEBUG and SECRET_KEY.startswith("django-insecure-dev-only"):
+    raise ImproperlyConfigured("SECRET_KEY must be set in production.")
+
+_dev_allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=_dev_allowed_hosts if DEBUG else [],
+)
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("ALLOWED_HOSTS must be set in production.")
 
 INSTALLED_APPS = [
     'jazzmin',
@@ -99,15 +115,39 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
+# Security
+# Keep these production-oriented but configurable; many deployments sit behind
+# a TLS-terminating proxy/load balancer.
+if not DEBUG:
+    # If you're behind a reverse proxy that sets X-Forwarded-Proto.
+    if env.bool("SECURE_PROXY_SSL", default=True):
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+    SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+    SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=True)
+    CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=True)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = env("SECURE_REFERRER_POLICY", default="same-origin")
+
+    # HSTS is opt-in by default because it can brick HTTP-only deployments.
+    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
+    SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)
+
+    CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.0/howto/static-files/
 STATIC_URL = 'static/'
+
+# Production collectstatic target.
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
 
-FREEIPA_CACHE_TIMEOUT = int(os.environ.get('FREEIPA_CACHE_TIMEOUT', '300'))
+FREEIPA_CACHE_TIMEOUT = env.int("FREEIPA_CACHE_TIMEOUT", default=300)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
@@ -119,11 +159,13 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # FreeIPA Configuration
-FREEIPA_HOST = os.environ.get('FREEIPA_HOST', 'ipa.demo1.freeipa.org')
-FREEIPA_VERIFY_SSL = os.environ.get('FREEIPA_VERIFY_SSL', 'False') == 'True'
-FREEIPA_SERVICE_USER = os.environ.get('FREEIPA_SERVICE_USER', 'admin')
-FREEIPA_SERVICE_PASSWORD = os.environ.get('FREEIPA_SERVICE_PASSWORD', 'Secret123')
-FREEIPA_ADMIN_GROUP = os.environ.get('FREEIPA_ADMIN_GROUP', 'admins')
+FREEIPA_HOST = env("FREEIPA_HOST", default="ipa.demo1.freeipa.org")
+FREEIPA_VERIFY_SSL = env.bool("FREEIPA_VERIFY_SSL", default=True)
+FREEIPA_SERVICE_USER = env("FREEIPA_SERVICE_USER", default="admin")
+FREEIPA_SERVICE_PASSWORD = env("FREEIPA_SERVICE_PASSWORD", default="")
+if not FREEIPA_SERVICE_PASSWORD:
+    raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
+FREEIPA_ADMIN_GROUP = env("FREEIPA_ADMIN_GROUP", default="admins")
 
 # Map FreeIPA groups to Django permissions
 # Format: {'freeipa_group_name': {'app_label.permission_codename', ...}}

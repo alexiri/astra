@@ -37,19 +37,22 @@ def _get_user_timezone_name(user) -> str | None:
 
 
 def _get_freeipa_or_default_user(request):
+    # Prefer Django's standard session-based user restoration first.
+    user = django_get_user(request)
+    if getattr(user, "is_authenticated", False):
+        return user
+
     # If this is a FreeIPA session, we store the username directly so it survives reloads.
-    username = None
     try:
         username = request.session.get("_freeipa_username")
     except Exception:
         username = None
 
     if username:
-        user = FreeIPAUser.get(username)
-        return user if user is not None else AnonymousUser()
+        freeipa_user = FreeIPAUser.get(username)
+        return freeipa_user if freeipa_user is not None else AnonymousUser()
 
-    # Fallback to Django's normal session-based user loading.
-    return django_get_user(request)
+    return user
 
 
 class FreeIPAAuthenticationMiddleware:
@@ -64,7 +67,13 @@ class FreeIPAAuthenticationMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        request.user = SimpleLazyObject(lambda: _get_freeipa_or_default_user(request))
+        # If an upstream middleware already attached an authenticated user,
+        # preserve it. Otherwise, wrap request.user so we can restore a FreeIPA
+        # user from session-stored username even if Django resolves to
+        # AnonymousUser (e.g. when no DB row exists).
+        existing_user = getattr(request, "user", None)
+        if not getattr(existing_user, "is_authenticated", False):
+            request.user = SimpleLazyObject(lambda: _get_freeipa_or_default_user(request))
 
         # Activate the user's timezone for this request so template tags/filters
         # (and timezone.localtime) reflect the user's configured FreeIPA timezone.
