@@ -1,7 +1,12 @@
 from pathlib import Path
 import os
+import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env(
+    DEBUG=(bool, False),
+)
 
 SECRET_KEY = 'django-insecure-change-me-in-production'
 
@@ -23,9 +28,10 @@ INSTALLED_APPS = [
 # Disable migrations for Django's built-in 'auth' app to silence
 # warnings caused by unmanaged models that share the 'auth' label. Enable via
 # env var DISABLE_AUTH_MIGRATIONS=1 in container/env when running without a DB.
-MIGRATION_MODULES = {
-    'auth': None,
-}
+if os.environ.get('DISABLE_AUTH_MIGRATIONS') == '1':
+    MIGRATION_MODULES = {
+        'auth': None,
+    }
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -62,8 +68,10 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        **env.db(
+            'DATABASE_URL',
+            default='postgres://postgres:postgres@db:5432/almalinux_members',
+        ),
     }
 }
 
