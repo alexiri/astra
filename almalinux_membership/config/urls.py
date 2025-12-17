@@ -3,10 +3,11 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
 
-from core.views_auth import FreeIPALoginView, password_expired
+from core.views_auth import FreeIPALoginView, otp_sync, password_expired
 
 urlpatterns = [
     path('login/', FreeIPALoginView.as_view(), name='login'),
+    path('otp/sync/', otp_sync, name='otp-sync'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('password-expired/', password_expired, name='password-expired'),
     path('admin/', admin.site.urls),

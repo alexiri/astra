@@ -30,11 +30,20 @@
             {% if form.password.errors %}<div class="text-danger">{{ form.password.errors }}</div>{% endif %}
           </div>
 
+          <div class="form-group">
+            <label for="id_otp">One-Time Password</label>
+            <input type="text" name="otp" class="form-control" id="id_otp" autocomplete="off">
+            {% if form.otp.errors %}<div class="text-danger">{{ form.otp.errors }}</div>{% endif %}
+            <small class="form-text text-muted">If your account has OTP enabled, enter the 6-digit code from your authenticator app.</small>
+          </div>
+
           <input type="hidden" name="next" value="{{ next }}" />
         </div>
-        <div class="card-footer">
+        <div class="card-footer d-flex justify-content-between align-items-center">
           <button type="submit" class="btn btn-primary">Login</button>
-          <a href="/admin/" class="btn btn-outline-secondary">Admin</a>
+          <small class="text-muted">
+            <a href="{% url 'otp-sync' %}" class="text-muted">Sync Token</a>
+          </small>
         </div>
       </form>
     </div>

@@ -3,13 +3,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pyotp
+
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
-from core.views_selfservice import settings_otp
+from core.views_selfservice import OTP_KEY_LENGTH, settings_otp
 
 
 class SettingsOTPViewTests(TestCase):
@@ -28,7 +30,7 @@ class SettingsOTPViewTests(TestCase):
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
     )
-    def test_get_without_otptoken_api_renders_empty(self):
+    def test_get_populates_tokens(self):
         factory = RequestFactory()
         request = factory.get("/settings/otp/")
         self._add_session_and_messages(request)
@@ -44,14 +46,19 @@ class SettingsOTPViewTests(TestCase):
             with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
                 mocked_client = mocked_client_cls.return_value
                 mocked_client.login.return_value = None
-                # No otptoken_find attribute -> no tokens.
-                if hasattr(mocked_client, "otptoken_find"):
-                    delattr(mocked_client, "otptoken_find")
+                mocked_client.otptoken_find.return_value = {
+                    "result": [
+                        {"ipatokenuniqueid": ["t2"], "description": "b"},
+                        {"ipatokenuniqueid": ["t1"], "description": "a"},
+                    ]
+                }
 
                 response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured["context"]["tokens"], [])
+        tokens = captured["context"]["tokens"]
+        self.assertEqual(len(tokens), 2)
+        self.assertEqual(tokens[0]["ipatokenuniqueid"][0], "t1")
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
@@ -59,9 +66,16 @@ class SettingsOTPViewTests(TestCase):
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
     )
-    def test_get_with_otptoken_find_populates_tokens(self):
+    def test_post_add_step_generates_secret_and_uri(self):
         factory = RequestFactory()
-        request = factory.get("/settings/otp/")
+        request = factory.post(
+            "/settings/otp/",
+            data={
+                "add-description": "my phone",
+                "add-password": "pw",
+                "add-submit": "1",
+            },
+        )
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
@@ -71,16 +85,21 @@ class SettingsOTPViewTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
-                mocked_client.login.return_value = None
-                mocked_client.otptoken_find.return_value = {"result": [{"ipatokenuniqueid": ["t1"]}]}
+        # First ClientMeta instance: service client (list tokens)
+        # Second ClientMeta instance: user client (reauth)
+        svc_client = SimpleNamespace(
+            login=lambda *a, **k: None,
+            otptoken_find=lambda **k: {"result": []},
+        )
+        user_client = SimpleNamespace(login=lambda *a, **k: None)
 
-                response = settings_otp(request)
+        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
+            with patch("core.views_selfservice.ClientMeta", autospec=True, side_effect=[svc_client, user_client]):
+                with patch("core.views_selfservice.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
+                    response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(captured["context"]["tokens"]), 1)
+        self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
@@ -88,31 +107,36 @@ class SettingsOTPViewTests(TestCase):
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
     )
-    def test_post_without_otptoken_add_shows_error(self):
+    def test_post_confirm_step_creates_token_and_redirects(self):
+        secret = pyotp.random_base32()
+        code = pyotp.TOTP(secret).now()
+
         factory = RequestFactory()
-        request = factory.post("/settings/otp/", data={"description": "My token"})
+        request = factory.post(
+            "/settings/otp/",
+            data={
+                "confirm-secret": secret,
+                "confirm-description": "my phone",
+                "confirm-code": code,
+                "confirm-submit": "1",
+            },
+        )
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
-        captured = {}
+        svc_client = SimpleNamespace(
+            login=lambda *a, **k: None,
+            otptoken_find=lambda **k: {"result": []},
+            otptoken_add=lambda **k: {"result": {"ipatokenuniqueid": ["t1"]}},
+        )
 
-        def fake_render(req, template, context):
-            captured["context"] = context
-            return HttpResponse("ok")
+        # Only service client is required for confirm.
+        with patch("core.views_selfservice.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
+            response = settings_otp(request)
 
-        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
-                mocked_client.login.return_value = None
-                # otptoken_add missing triggers capability-mismatch messaging.
-                if hasattr(mocked_client, "otptoken_add"):
-                    delattr(mocked_client, "otptoken_add")
-
-                response = settings_otp(request)
-
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         msgs = [m.message for m in get_messages(request)]
-        self.assertTrue(any("OTP token creation is not available" in m for m in msgs))
+        self.assertTrue(any("token has been created" in m.lower() for m in msgs))
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
@@ -120,9 +144,25 @@ class SettingsOTPViewTests(TestCase):
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
     )
-    def test_post_with_otptoken_add_shows_success(self):
+    def test_post_confirm_invalid_does_not_trigger_add_modal(self):
+        """Regression test: confirm POST should not bind add_form.
+
+        If add_form is bound on confirm POST, it becomes invalid and the template
+        will open the Add Token modal alongside the confirm modal.
+        """
+
+        secret = pyotp.random_base32()
+
         factory = RequestFactory()
-        request = factory.post("/settings/otp/", data={"description": "My token"})
+        request = factory.post(
+            "/settings/otp/",
+            data={
+                "confirm-secret": secret,
+                "confirm-description": "my phone",
+                "confirm-code": "000000",  # invalid
+                "confirm-submit": "1",
+            },
+        )
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
@@ -132,14 +172,16 @@ class SettingsOTPViewTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
-                mocked_client.login.return_value = None
-                mocked_client.otptoken_add.return_value = {"result": {"ipatokenuniqueid": ["t1"]}}
+        svc_client = SimpleNamespace(
+            login=lambda *a, **k: None,
+            otptoken_find=lambda **k: {"result": []},
+        )
 
+        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
+            with patch("core.views_selfservice.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
                 response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
-        msgs = [m.message for m in get_messages(request)]
-        self.assertTrue(any("OTP token created" in m for m in msgs))
+        self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))
+        self.assertEqual(captured["context"]["add_form"].errors, {})
+

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from base64 import b32encode
+import base64
+import io
 import logging
+import os
 import re
 
 from django.conf import settings
@@ -14,17 +18,28 @@ from django.utils.module_loading import import_string
 
 from python_freeipa import ClientMeta, exceptions
 
+import pyotp
+import qrcode
+
 from .backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
 from .forms_selfservice import (
     EmailsForm,
     KeysForm,
     OTPAddForm,
+    OTPConfirmForm,
+    OTPTokenActionForm,
+    OTPTokenRenameForm,
     PasswordChangeFreeIPAForm,
     ProfileForm,
 )
 
 
 logger = logging.getLogger(__name__)
+
+
+# Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
+# For maximum compatibility, must be a multiple of 5.
+OTP_KEY_LENGTH = 35
 
 
 _ATTR_NOT_ALLOWED_RE = re.compile(r"attribute\s+['\"]?([a-zA-Z0-9_-]+)['\"]?\s+not\s+allowed", re.IGNORECASE)
@@ -797,63 +812,237 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="/login/")
 def settings_otp(request: HttpRequest) -> HttpResponse:
-    """Best-effort OTP management.
+    """Noggin-style OTP management.
 
-    If FreeIPA's otptoken API isn't available in python-freeipa version, this page
-    will fall back to read-only messaging.
+    Flow:
+    1) Reauthenticate with current password (and OTP if already enabled).
+    2) Generate a new TOTP secret locally.
+    3) Show the otpauth:// URI + QR code, then require the first code.
+    4) On successful verification, create the FreeIPA token using that secret.
     """
 
     username = request.user.get_username()
-    form = OTPAddForm(request.POST or None)
-    tokens = []
-    created = None
+
+    is_add = request.method == "POST" and "add-submit" in request.POST
+    is_confirm = request.method == "POST" and "confirm-submit" in request.POST
+
+    # Important: only bind/validate the submitted form.
+    # If we bind both, the non-submitted form becomes invalid and the template
+    # may open the wrong modal, causing overlapping modal UI.
+    add_form = OTPAddForm(request.POST if is_add else None, prefix="add")
+    confirm_form = OTPConfirmForm(request.POST if is_confirm else None, prefix="confirm")
+
+    tokens: list[dict] = []
+    otp_uri: str | None = None
+    otp_qr_png_b64: str | None = None
+
+    def _service_client() -> ClientMeta:
+        c = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+        c.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
+        return c
+
+    def _user_can_reauth(password: str) -> bool:
+        c = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+        c.login(username, password)
+        return True
 
     try:
-        client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-        client.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
+        svc = _service_client()
+        res = svc.otptoken_find(o_ipatokenowner=username, o_all=True)
+        tokens = res.get("result", []) if isinstance(res, dict) else []
+    except Exception:
+        # Read-only failures shouldn't block page load.
+        tokens = []
 
-        find = getattr(client, "otptoken_find", None)
-        if callable(find):
-            res = find(o_owner=username, o_all=True)
-            tokens = res.get("result", []) if isinstance(res, dict) else []
+    try:
+        tokens.sort(key=lambda t: (t.get("description") or "").lower())
+    except Exception:
+        pass
 
-        if request.method == "POST" and form.is_valid():
-            add = getattr(client, "otptoken_add", None)
-            if not callable(add):
-                logger.info(
-                    "OTP token API not available; cannot create token username=%s",
-                    username,
-                )
-                messages.error(
-                    request,
-                    "OTP token creation is not available (python-freeipa does not expose the OTP API).",
-                )
-                context = {"form": form, "tokens": tokens, "created": created, **_settings_context("otp")}
-                return render(request, "core/settings_otp.html", context)
+    secret: str | None = None
 
-            # Create a basic TOTP token. FreeIPA typically returns the secret.
-            desc = form.cleaned_data.get("description") or f"TOTP for {username}"
-            created = add(
-                o_type="totp",
-                o_owner=username,
-                o_description=desc,
-                o_all=True,
-            )
-            messages.success(request, "OTP token created. Capture the secret now; it may not be shown again.")
-    except exceptions.FreeIPAError as e:
-        logger.warning("OTP management failed username=%s error=%s", username, e)
-        if request.method == "POST":
-            messages.error(request, "Failed to manage OTP tokens due to a FreeIPA error.")
-    except Exception as e:
-        logger.exception("OTP management failed username=%s", username)
-        if request.method == "POST":
+    if is_add and add_form.is_valid():
+        description = (add_form.cleaned_data.get("description") or "").strip()
+        password = (add_form.cleaned_data.get("password") or "")
+        otp = (add_form.cleaned_data.get("otp") or "").strip()
+        if otp:
+            password = f"{password}{otp}"
+
+        try:
+            _user_can_reauth(password)
+        except exceptions.InvalidSessionPassword:
+            add_form.add_error("password", "Incorrect password")
+        except exceptions.Unauthorized:
+            add_form.add_error("password", "Incorrect password")
+        except Exception as e:
+            logger.exception("OTP reauthentication failed username=%s", username)
             if settings.DEBUG:
-                messages.error(request, f"Failed to manage OTP tokens (debug): {e}")
+                add_form.add_error(None, f"Unable to reauthenticate (debug): {e}")
             else:
-                messages.error(request, "Failed to manage OTP tokens due to an internal error.")
+                add_form.add_error(None, "Unable to reauthenticate due to an internal error.")
+        else:
+            secret = b32encode(os.urandom(OTP_KEY_LENGTH)).decode("ascii")
+            confirm_form = OTPConfirmForm(
+                initial={
+                    "secret": secret,
+                    "description": description,
+                },
+                prefix="confirm",
+            )
 
-    context = {"form": form, "tokens": tokens, "created": created, **_settings_context("otp")}
+    if is_confirm:
+        # Keep QR/URI visible while showing form errors.
+        secret = (request.POST.get("confirm-secret") or "").strip() or None
+
+        if confirm_form.is_valid():
+            description = (confirm_form.cleaned_data.get("description") or "").strip()
+            try:
+                svc = _service_client()
+                svc.otptoken_add(
+                    o_ipatokenowner=username,
+                    o_description=description,
+                    o_type="totp",
+                    o_ipatokenotpkey=confirm_form.cleaned_data["secret"],
+                )
+            except exceptions.FreeIPAError as e:
+                logger.warning("OTP token creation failed username=%s error=%s", username, e)
+                confirm_form.add_error(None, "Cannot create the token.")
+            except Exception as e:
+                logger.exception("OTP token creation unexpected failure username=%s", username)
+                if settings.DEBUG:
+                    confirm_form.add_error(None, f"Cannot create the token (debug): {e}")
+                else:
+                    confirm_form.add_error(None, "Cannot create the token.")
+            else:
+                messages.success(request, "The token has been created.")
+                return redirect("settings-otp")
+
+    if secret:
+        # Noggin uses issuer_name=user.krbname (username@REALM). We don't always
+        # have the realm, so derive a reasonable default from FREEIPA_HOST.
+        host = getattr(settings, "FREEIPA_HOST", "") or ""
+        parts = host.split(".")
+        realm = ".".join(parts[1:]).upper() if len(parts) > 1 else host.upper()
+        issuer = f"{username}@{realm}" if realm else username
+
+        if is_confirm:
+            description = (request.POST.get("confirm-description") or "").strip()
+        elif is_add:
+            description = (add_form.cleaned_data.get("description") or "").strip()
+        else:
+            description = (getattr(confirm_form, "initial", {}) or {}).get("description") or ""
+            description = (description or "").strip()
+
+        token = pyotp.TOTP(secret)
+        otp_uri = token.provisioning_uri(name=description or "(no name)", issuer_name=issuer)
+
+        qr = qrcode.QRCode(box_size=6, border=2)
+        qr.add_data(otp_uri)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        otp_qr_png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    context = {
+        "add_form": add_form,
+        "confirm_form": confirm_form,
+        "tokens": tokens,
+        "otp_uri": otp_uri,
+        "otp_qr_png_b64": otp_qr_png_b64,
+        **_settings_context("otp"),
+    }
     return render(request, "core/settings_otp.html", context)
+
+
+@login_required(login_url="/login/")
+def otp_enable(request: HttpRequest) -> HttpResponse:
+    form = OTPTokenActionForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        token = form.cleaned_data["token"]
+        try:
+            client = FreeIPAUser.get_client()
+            client.otptoken_mod(a_ipatokenuniqueid=token, o_ipatokendisabled=False)
+        except exceptions.FreeIPAError as e:
+            logger.warning("Enable OTP token failed username=%s token=%s error=%s", request.user.get_username(), token, e)
+            messages.error(request, f"Cannot enable the token. {e}")
+        else:
+            messages.success(request, "OTP token enabled.")
+    else:
+        messages.error(request, "Token must not be empty")
+    return redirect("settings-otp")
+
+
+@login_required(login_url="/login/")
+def otp_disable(request: HttpRequest) -> HttpResponse:
+    form = OTPTokenActionForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        token = form.cleaned_data["token"]
+        try:
+            client = FreeIPAUser.get_client()
+            client.otptoken_mod(a_ipatokenuniqueid=token, o_ipatokendisabled=True)
+        except exceptions.FreeIPAError as e:
+            logger.warning("Disable OTP token failed username=%s token=%s error=%s", request.user.get_username(), token, e)
+            messages.error(request, f"Cannot disable the token. {e}")
+        else:
+            messages.success(request, "OTP token disabled.")
+    else:
+        messages.error(request, "Token must not be empty")
+    return redirect("settings-otp")
+
+
+@login_required(login_url="/login/")
+def otp_delete(request: HttpRequest) -> HttpResponse:
+    form = OTPTokenActionForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        token = form.cleaned_data["token"]
+        try:
+            client = FreeIPAUser.get_client()
+            client.otptoken_del(a_ipatokenuniqueid=token)
+        except exceptions.BadRequest as e:
+            # Match Noggin behavior: handle last-token protection nicely.
+            if "can't delete last active token" in str(e).lower():
+                messages.warning(request, "Sorry, you cannot delete your last active token.")
+            else:
+                logger.warning("Delete OTP token bad request username=%s token=%s error=%s", request.user.get_username(), token, e)
+                messages.error(request, "Cannot delete the token.")
+        except exceptions.FreeIPAError as e:
+            logger.warning("Delete OTP token failed username=%s token=%s error=%s", request.user.get_username(), token, e)
+            messages.error(request, "Cannot delete the token.")
+        else:
+            messages.success(request, "OTP token deleted.")
+    else:
+        messages.error(request, "Token must not be empty")
+    return redirect("settings-otp")
+
+
+@login_required(login_url="/login/")
+def otp_rename(request: HttpRequest) -> HttpResponse:
+    form = OTPTokenRenameForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        token = form.cleaned_data["token"]
+        description = (form.cleaned_data.get("description") or "").strip()
+        try:
+            client = FreeIPAUser.get_client()
+            client.otptoken_mod(a_ipatokenuniqueid=token, o_description=description)
+        except exceptions.BadRequest as e:
+            # Ignore "no modifications" like Noggin.
+            if "no modifications" not in str(e).lower():
+                logger.warning("Rename OTP token bad request username=%s token=%s error=%s", request.user.get_username(), token, e)
+                messages.error(request, "Cannot rename the token.")
+        except exceptions.FreeIPAError as e:
+            logger.warning("Rename OTP token failed username=%s token=%s error=%s", request.user.get_username(), token, e)
+            messages.error(request, "Cannot rename the token.")
+        else:
+            messages.success(request, "OTP token renamed.")
+    else:
+        if form.errors:
+            first_field_errors = next(iter(form.errors.values()))
+            first_error = first_field_errors[0] if first_field_errors else "Invalid form"
+            messages.error(request, first_error)
+        else:
+            messages.error(request, "Token must not be empty")
+    return redirect("settings-otp")
 
 
 @login_required(login_url="/login/")
@@ -861,8 +1050,19 @@ def settings_password(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     form = PasswordChangeFreeIPAForm(request.POST or None)
 
+    using_otp = False
+    try:
+        client = FreeIPAUser.get_client()
+        res = client.otptoken_find(o_ipatokenowner=username, o_all=True)
+        using_otp = bool((res or {}).get("result"))
+    except Exception:
+        using_otp = False
+
     if request.method == "POST" and form.is_valid():
         current = form.cleaned_data["current_password"]
+        otp = (form.cleaned_data.get("otp") or "").strip()
+        if otp:
+            current = f"{current}{otp}"
         new = form.cleaned_data["new_password"]
 
         try:
@@ -895,7 +1095,7 @@ def settings_password(request: HttpRequest) -> HttpResponse:
             else:
                 messages.error(request, "Failed to change password due to an internal error.")
 
-    context = {"form": form, **_settings_context("password")}
+    context = {"form": form, "using_otp": using_otp, **_settings_context("password")}
     return render(request, "core/settings_password.html", context)
 
 

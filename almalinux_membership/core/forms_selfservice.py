@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 from django import forms
 
+import pyotp
+
 
 # Noggin-inspired nickname validation (adapted for our simpler fields)
 _IRC_NICK_RE = re.compile(r"^[a-z_\[\]\\^{}|`-][a-z0-9_\[\]\\^{}|`-]*$", re.IGNORECASE)
@@ -385,11 +387,61 @@ class KeysForm(_StyledForm):
 
 
 class OTPAddForm(_StyledForm):
-    description = forms.CharField(label="Description", required=False)
+    description = forms.CharField(
+        label="Token name",
+        required=False,
+        help_text="Optional: helps you identify this token.",
+    )
+    password = forms.CharField(
+        label="Enter your current password",
+        required=True,
+        widget=forms.PasswordInput,
+        help_text="Please reauthenticate so we know it is you.",
+    )
+    otp = forms.CharField(
+        label="One-Time Password",
+        required=False,
+        help_text="If your account already has OTP enabled, enter your current OTP.",
+    )
+
+
+class OTPConfirmForm(_StyledForm):
+    secret = forms.CharField(widget=forms.HiddenInput, required=True)
+    description = forms.CharField(widget=forms.HiddenInput, required=False)
+    code = forms.CharField(
+        label="Verification Code",
+        required=True,
+        help_text="Generate a code in your authenticator app and enter it here.",
+    )
+
+    def clean_code(self):
+        code = (self.cleaned_data.get("code") or "").strip()
+        secret = (self.cleaned_data.get("secret") or "").strip()
+        if not secret:
+            raise forms.ValidationError("Could not find the token secret")
+
+        totp = pyotp.TOTP(secret)
+        if not totp.verify(code, valid_window=1):
+            raise forms.ValidationError("The code is wrong, please try again.")
+        return code
+
+
+class OTPTokenActionForm(_StyledForm):
+    token = forms.CharField(widget=forms.HiddenInput, required=True)
+
+
+class OTPTokenRenameForm(_StyledForm):
+    token = forms.CharField(widget=forms.HiddenInput, required=True)
+    description = forms.CharField(required=False)
 
 
 class PasswordChangeFreeIPAForm(_StyledForm):
     current_password = forms.CharField(label="Current Password", widget=forms.PasswordInput)
+    otp = forms.CharField(
+        label="One-Time Password",
+        required=False,
+        help_text="If your account has OTP enabled, enter your current OTP.",
+    )
     new_password = forms.CharField(label="New Password", widget=forms.PasswordInput)
     confirm_new_password = forms.CharField(label="Confirm New Password", widget=forms.PasswordInput)
 

@@ -12,6 +12,10 @@ urlpatterns = [
     path('settings/emails/', views.settings_emails, name='settings-emails'),
     path('settings/keys/', views.settings_keys, name='settings-keys'),
     path('settings/otp/', views.settings_otp, name='settings-otp'),
+    path('settings/otp/enable/', views.otp_enable, name='otp-enable'),
+    path('settings/otp/disable/', views.otp_disable, name='otp-disable'),
+    path('settings/otp/delete/', views.otp_delete, name='otp-delete'),
+    path('settings/otp/rename/', views.otp_rename, name='otp-rename'),
     path('settings/password/', views.settings_password, name='settings-password'),
     path('settings/agreements/', views.settings_agreements, name='settings-agreements'),
 ]

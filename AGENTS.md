@@ -2,6 +2,9 @@
 
 - If you're not entirely sure how to use a library or module, look it up. Find the source code,
   docs, whatever. It's ok to ask the user for a link to the documentation or code if needed.
+  - Noggin source code: githubRepo `fedora-infra/noggin`
+  - FreeIPA FAS extensions (user attributes): githubRepo `fedora-infra/freeipa-fas`
+  - python-freeipa: githubRepo `waldur/python-freeipa`
 - Add clean code with sensible comments. Consider what you're implementing and the context, as well
   as how you can generalize functions to reduce code duplication and sources of bugs.
 - Do Test-Driven development: Add tests before you implement a new feature, make sure they cover all the

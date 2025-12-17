@@ -8,9 +8,11 @@ from django.contrib.auth import views as auth_views
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
+import requests
+
 from python_freeipa import ClientMeta, exceptions
 
-from .forms_auth import ExpiredPasswordChangeForm
+from .forms_auth import ExpiredPasswordChangeForm, FreeIPAAuthenticationForm, SyncTokenForm
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,7 @@ class FreeIPALoginView(auth_views.LoginView):
     """LoginView that can redirect / message based on FreeIPA backend signals."""
 
     template_name = "core/login.html"
+    authentication_form = FreeIPAAuthenticationForm
 
     def form_invalid(self, form) -> HttpResponse:
         request: HttpRequest = self.request
@@ -51,12 +54,13 @@ def password_expired(request: HttpRequest) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         username = form.cleaned_data["username"]
         current_password = form.cleaned_data["current_password"]
+        otp = (form.cleaned_data.get("otp") or "").strip() or None
         new_password = form.cleaned_data["new_password"]
 
         try:
             client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
             # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
-            client.change_password(username, new_password, current_password)
+            client.change_password(username, new_password, current_password, otp=otp)
 
             try:
                 request.session.pop("_freeipa_pwexp_username", None)
@@ -87,3 +91,61 @@ def password_expired(request: HttpRequest) -> HttpResponse:
                 form.add_error(None, "Unable to change password due to an internal error.")
 
     return render(request, "core/password_expired.html", {"form": form})
+
+
+def otp_sync(request: HttpRequest) -> HttpResponse:
+    """Noggin-style OTP sync.
+
+    This is intentionally *not* behind login: users may need it when their
+    token has drifted and they can't log in.
+
+    FreeIPA supports syncing via a special endpoint:
+    POST https://<host>/ipa/session/sync_token
+    with form data: user, password, first_code, second_code, token (optional).
+    """
+
+    form = SyncTokenForm(request.POST or None)
+
+    if request.method == "POST" and form.is_valid():
+        username = form.cleaned_data["username"]
+        password = form.cleaned_data["password"]
+        first_code = form.cleaned_data["first_code"]
+        second_code = form.cleaned_data["second_code"]
+        token = (form.cleaned_data.get("token") or "").strip() or None
+
+        host = getattr(settings, "FREEIPA_HOST", None)
+        if not host:
+            form.add_error(None, "FreeIPA host is not configured")
+        else:
+            url = f"https://{host}/ipa/session/sync_token"
+            data = {
+                "user": username,
+                "password": password,
+                "first_code": first_code,
+                "second_code": second_code,
+                "token": token or "",
+            }
+
+            try:
+                session = requests.Session()
+                response = session.post(
+                    url=url,
+                    data=data,
+                    verify=getattr(settings, "FREEIPA_VERIFY_SSL", True),
+                    timeout=10,
+                )
+                if response.ok and "Token sync rejected" not in (response.text or ""):
+                    messages.success(request, "Token successfully synchronized")
+                    return redirect("login")
+
+                form.add_error(None, "The username, password or token codes are not correct.")
+            except requests.exceptions.RequestException:
+                form.add_error(None, "No IPA server available")
+            except Exception as e:
+                logger.exception("otp_sync: unexpected error username=%s", username)
+                if settings.DEBUG:
+                    form.add_error(None, f"Something went wrong (debug): {e}")
+                else:
+                    form.add_error(None, "Something went wrong")
+
+    return render(request, "core/sync_token.html", {"form": form})
