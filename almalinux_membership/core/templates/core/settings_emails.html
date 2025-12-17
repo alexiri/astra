@@ -1,0 +1,34 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Settings - Emails{% endblock %}
+
+{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+
+{% block content %}
+{% include 'core/_settings_tabs.html' %}
+<div class="card mt-3">
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="form-group">
+        <label for="{{ form.mail.id_for_label }}">{{ form.mail.label }}</label>
+        {{ form.mail }}
+        {% if form.mail.errors %}<div class="text-danger">{{ form.mail.errors }}</div>{% endif %}
+      </div>
+
+      <div class="form-group">
+        <label for="{{ form.fasRHBZEmail.id_for_label }}">{{ form.fasRHBZEmail.label }}</label>
+        {{ form.fasRHBZEmail }}
+        {% if form.fasRHBZEmail.errors %}<div class="text-danger">{{ form.fasRHBZEmail.errors }}</div>{% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

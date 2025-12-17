@@ -1,0 +1,20 @@
+<ul class="nav nav-tabs">
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'profile' %}active{% endif %}" href="{% url 'settings-profile' %}">Profile</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'emails' %}active{% endif %}" href="{% url 'settings-emails' %}">Emails</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'keys' %}active{% endif %}" href="{% url 'settings-keys' %}">SSH &amp; GPG Keys</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'otp' %}active{% endif %}" href="{% url 'settings-otp' %}">OTP</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'password' %}active{% endif %}" href="{% url 'settings-password' %}">Password</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'agreements' %}active{% endif %}" href="{% url 'settings-agreements' %}">Agreements</a>
+  </li>
+</ul>

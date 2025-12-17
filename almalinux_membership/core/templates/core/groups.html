@@ -1,0 +1,24 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Groups{% endblock %}
+
+{% block header %}<h1 class="m-0">Groups</h1>{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    {% if groups %}
+      <ul class="list-group">
+        {% for g in groups %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ g }}
+            <span class="badge badge-secondary">member</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted mb-0">You are not a member of any groups.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

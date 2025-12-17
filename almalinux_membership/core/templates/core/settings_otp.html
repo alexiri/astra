@@ -1,0 +1,55 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Settings - OTP{% endblock %}
+
+{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+
+{% block content %}
+{% include 'core/_settings_tabs.html' %}
+<div class="card mt-3">
+  <div class="card-body">
+    <h5 class="mb-3">Your OTP tokens</h5>
+
+    {% if tokens %}
+      <ul class="list-group mb-4">
+        {% for t in tokens %}
+          <li class="list-group-item">
+            <div class="d-flex justify-content-between">
+              <div>
+                <div><strong>{{ t.description|default:'OTP token' }}</strong></div>
+                <small class="text-muted">{{ t.ipatokenuniqueid|default:'' }}</small>
+              </div>
+              <div class="text-muted">{{ t.type|default:'totp' }}</div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted">No OTP tokens found (or token API unavailable).</p>
+    {% endif %}
+
+    <hr />
+
+    <h5 class="mb-3">Add token</h5>
+
+    {% if created %}
+      <div class="alert alert-warning">
+        <div><strong>Token created.</strong> Save the secret now.</div>
+        <pre class="mb-0">{{ created }}</pre>
+      </div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="form-group">
+        <label for="{{ form.description.id_for_label }}">{{ form.description.label }}</label>
+        {{ form.description }}
+        {% if form.description.errors %}<div class="text-danger">{{ form.description.errors }}</div>{% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Create OTP token</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

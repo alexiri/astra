@@ -1,0 +1,22 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Settings - Agreements{% endblock %}
+
+{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+
+{% block content %}
+{% include 'core/_settings_tabs.html' %}
+<div class="card mt-3">
+  <div class="card-body">
+    {% if agreements %}
+      <ul class="list-group">
+        {% for a in agreements %}
+          <li class="list-group-item">{{ a }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted mb-0">No agreements to show yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

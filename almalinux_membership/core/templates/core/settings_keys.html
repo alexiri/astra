@@ -1,0 +1,36 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Settings - Keys{% endblock %}
+
+{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+
+{% block content %}
+{% include 'core/_settings_tabs.html' %}
+<div class="card mt-3">
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="form-group">
+        <label for="{{ form.fasGPGKeyId.id_for_label }}">{{ form.fasGPGKeyId.label }}</label>
+        {{ form.fasGPGKeyId }}
+        {% if form.fasGPGKeyId.help_text %}<small class="form-text text-muted">{{ form.fasGPGKeyId.help_text }}</small>{% endif %}
+        {% if form.fasGPGKeyId.errors %}<div class="text-danger">{{ form.fasGPGKeyId.errors }}</div>{% endif %}
+      </div>
+
+      <div class="form-group">
+        <label for="{{ form.ipasshpubkey.id_for_label }}">{{ form.ipasshpubkey.label }}</label>
+        {{ form.ipasshpubkey }}
+        {% if form.ipasshpubkey.help_text %}<small class="form-text text-muted">{{ form.ipasshpubkey.help_text }}</small>{% endif %}
+        {% if form.ipasshpubkey.errors %}<div class="text-danger">{{ form.ipasshpubkey.errors }}</div>{% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-body text-center">
+        {% if avatar_data_url %}
+          <img src="{{ avatar_data_url }}" class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" />
+        {% else %}
+          <div class="mb-3">
+            <i class="fas fa-user-circle" style="font-size:140px;"></i>
+          </div>
+        {% endif %}
+
+        <h3 class="profile-username text-center">{{ fu.get_full_name }}</h3>
+        <p class="text-muted text-center">{{ fu.username }}</p>
+        <p class="text-center">{{ fu.email }}</p>
+
+        <a class="btn btn-primary btn-block" href="{% url 'settings-profile' %}">Edit Profile</a>
+      </div>
+
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item">
+          <b>Pronouns</b> <span class="float-right">{{ pronouns|default:"" }}</span>
+        </li>
+        <li class="list-group-item">
+          <b>Timezone</b> <span class="float-right">{{ timezone }}</span>
+        </li>
+        <li class="list-group-item">
+          <b>Current Time</b>
+          <span class="float-right">{{ current_time|date:"l, H:i" }}</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">{{ groups_count }} Group(s), {{ agreements_count }} Agreement(s)</h3>
+      </div>
+      <div class="card-body">
+        {% if groups %}
+          <ul class="list-unstyled">
+            {% for g in groups %}
+              <li><i class="fas fa-users mr-2"></i>{{ g }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="text-muted">{{ fu.username }} has no group memberships</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -572,6 +572,8 @@ class FreeIPAAuthBackend(BaseBackend):
         if not username or not password:
             return None
 
+        logger.debug("authenticate: username=%s", username)
+
         client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
         try:
             # Try to login with provided credentials
@@ -580,7 +582,7 @@ class FreeIPAAuthBackend(BaseBackend):
             # Fetch full user data (includes custom/FAS attributes)
             user_data = FreeIPAUser._fetch_full_user(client, username)
             if user_data:
-                logger.error(f'authenticate: {user_data}')
+                logger.debug("authenticate: success username=%s", username)
                 user = FreeIPAUser(username, user_data)
                 # Map the numeric session uid back to username for later requests.
                 cache.set(_session_uid_cache_key(_session_user_id_for_username(username)), username, timeout=None)
@@ -589,10 +591,50 @@ class FreeIPAAuthBackend(BaseBackend):
                     request.session['_freeipa_username'] = username
                 return user
             return None
+        except exceptions.PasswordExpired:
+            logger.debug("authenticate: password expired username=%s", username)
+            if request is not None:
+                setattr(request, "_freeipa_password_expired", True)
+                try:
+                    request.session["_freeipa_pwexp_username"] = username
+                except Exception:
+                    pass
+            return None
+        except exceptions.UserLocked:
+            logger.debug("authenticate: user locked username=%s", username)
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Your account is locked. Please contact support.")
+            return None
+        except exceptions.KrbPrincipalExpired:
+            logger.debug("authenticate: principal expired username=%s", username)
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Your account credentials have expired. Please contact support.")
+            return None
+        except exceptions.InvalidSessionPassword:
+            logger.debug("authenticate: invalid session password username=%s", username)
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Invalid username or password.")
+            return None
+        except exceptions.Denied:
+            logger.debug("authenticate: denied username=%s", username)
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Login denied.")
+            return None
         except exceptions.Unauthorized:
+            logger.debug("authenticate: unauthorized username=%s", username)
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Invalid username or password.")
+            return None
+        except exceptions.BadRequest as e:
+            # Catch-all for FreeIPA-side errors that are still a 4xx-style response.
+            logger.warning("authenticate: bad request username=%s error=%s", username, e)
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Login failed due to a FreeIPA error.")
             return None
         except Exception as e:
             logger.error(f"FreeIPA authentication error: {e}")
+            if request is not None:
+                setattr(request, "_freeipa_auth_error", "Login failed due to an internal error.")
             return None
 
     def get_user(self, user_id):
@@ -606,11 +648,13 @@ class FreeIPAAuthBackend(BaseBackend):
         if not username:
             return None
 
+        logger.debug("get_user: session_uid=%s username=%s", session_uid, username)
+
         # Check cache first (keyed by username)
         cache_key = f'freeipa_user_{username}'
         cached_data = cache.get(cache_key)
         if cached_data:
-            logger.error(f'get_user (cached): {cached_data}')
+            logger.debug("get_user: cache hit username=%s", username)
             return FreeIPAUser(username, cached_data)
 
         # Fetch from FreeIPA using service account
@@ -621,7 +665,7 @@ class FreeIPAAuthBackend(BaseBackend):
                 client.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
                 user_data = FreeIPAUser._fetch_full_user(client, username)
                 if user_data:
-                    logger.error(f'get_user: {user_data}')
+                    logger.debug("get_user: fetched from FreeIPA username=%s", username)
                     # Cache the user data
                     cache.set(cache_key, user_data, timeout=300) # Cache for 5 minutes
                     return FreeIPAUser(username, user_data)
