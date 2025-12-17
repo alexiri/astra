@@ -3,14 +3,13 @@ from __future__ import annotations
 import base64
 import logging
 import re
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
 from python_freeipa import ClientMeta
 
@@ -375,12 +374,9 @@ def profile(request: HttpRequest) -> HttpResponse:
         return redirect("login")
 
     data = getattr(fu, "_user_data", {})
-    tz_name = _first(data, "fasTimezone", None) or "UTC"
-    try:
-        now_local = datetime.now(tz=ZoneInfo(tz_name))
-    except Exception:
-        now_local = datetime.now(tz=ZoneInfo("UTC"))
-        tz_name = "UTC"
+
+    tz_name = timezone.get_current_timezone_name()
+    now_local = timezone.localtime(timezone.now())
 
     groups = getattr(fu, "groups_list", []) or []
 
