@@ -38,6 +38,18 @@ services:
       - .:/app:z
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, requests; r = requests.get('http://127.0.0.1:8000/readyz/', timeout=2); sys.exit(0 if (r.status_code == 200 and r.text.strip() == 'ok') else 1)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy

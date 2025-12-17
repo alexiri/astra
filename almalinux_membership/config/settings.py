@@ -201,6 +201,11 @@ CACHES = {
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'filters': {
+        'skip_healthz': {
+            '()': 'core.logging_filters.SkipHealthzFilter',
+        },
+    },
     'formatters': {
         'console': {
             'format': '[{asctime}] {levelname} {name}: {message}',
@@ -211,6 +216,7 @@ LOGGING = {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'console',
+            'filters': ['skip_healthz'],
         },
     },
     'loggers': {
@@ -230,6 +236,12 @@ LOGGING = {
         'django.request': {
             'handlers': ['console'],
             'level': 'WARNING',
+            'propagate': False,
+        },
+        # Access logs from `runserver`.
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
             'propagate': False,
         },
     },
