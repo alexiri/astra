@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.sessions.middleware import SessionMiddleware
+from django.test import RequestFactory, TestCase
+from django.utils import timezone
+
+from core.middleware import FreeIPAAuthenticationMiddleware
+
+
+class FreeIPAMiddlewareRestoreTests(TestCase):
+    def _add_session(self, request):
+        # Attach a working session to the request.
+        middleware = SessionMiddleware(lambda r: None)
+        middleware.process_request(request)
+        request.session.save()
+        return request
+
+    def test_restores_freeipa_user_from_session_username(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "alice"
+        request.session.save()
+
+        fake_user = SimpleNamespace(is_authenticated=True, username="alice")
+
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            mocked_get.return_value = fake_user
+
+            middleware = FreeIPAAuthenticationMiddleware(lambda req: req.user)
+            user = middleware(request)
+
+        self.assertTrue(getattr(user, "is_authenticated", False))
+        self.assertEqual(getattr(user, "username", None), "alice")
+        mocked_get.assert_called_once_with("alice")
+
+    def test_restores_anonymous_when_freeipa_user_missing(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "missing"
+        request.session.save()
+
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            mocked_get.return_value = None
+            middleware = FreeIPAAuthenticationMiddleware(lambda req: req.user)
+            user = middleware(request)
+
+        self.assertIsInstance(user, AnonymousUser)
+        mocked_get.assert_called_once_with("missing")
+
+    def test_activates_and_deactivates_timezone_from_user_data(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "alice"
+        request.session.save()
+
+        fake_user = SimpleNamespace(
+            is_authenticated=True,
+            username="alice",
+            _user_data={"fasTimezone": "Europe/Paris"},
+        )
+
+        observed = {}
+
+        def get_response(req):
+            observed["in_request_tz"] = timezone.get_current_timezone_name()
+            return req.user
+
+        before = timezone.get_current_timezone_name()
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            mocked_get.return_value = fake_user
+            middleware = FreeIPAAuthenticationMiddleware(get_response)
+            user = middleware(request)
+
+        after = timezone.get_current_timezone_name()
+
+        self.assertEqual(getattr(user, "username", None), "alice")
+        self.assertEqual(observed.get("in_request_tz"), "Europe/Paris")
+        # Middleware should deactivate, restoring the previous timezone.
+        self.assertEqual(after, before)
+
+    def test_invalid_timezone_falls_back_to_utc(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "alice"
+        request.session.save()
+
+        fake_user = SimpleNamespace(
+            is_authenticated=True,
+            username="alice",
+            _user_data={"fasTimezone": "Not/AZone"},
+        )
+
+        observed = {}
+
+        def get_response(req):
+            observed["in_request_tz"] = timezone.get_current_timezone_name()
+            return req.user
+
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            mocked_get.return_value = fake_user
+            middleware = FreeIPAAuthenticationMiddleware(get_response)
+            middleware(request)
+
+        self.assertEqual(observed.get("in_request_tz"), "UTC")
+
+    def test_does_not_call_freeipa_when_django_user_authenticated(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+
+        # Simulate Django already having an authenticated user.
+        request.user = SimpleNamespace(is_authenticated=True, _user_data={"fasTimezone": "UTC"})
+
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            middleware = FreeIPAAuthenticationMiddleware(lambda req: req.user)
+            user = middleware(request)
+
+        self.assertTrue(getattr(user, "is_authenticated", False))
+        mocked_get.assert_not_called()
+
+    def test_preserves_authenticated_user_and_still_applies_timezone(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            username="already",
+            _user_data={"fasTimezone": "Europe/Paris"},
+        )
+
+        observed = {}
+
+        def get_response(req):
+            observed["in_request_tz"] = timezone.get_current_timezone_name()
+            return req.user
+
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            middleware = FreeIPAAuthenticationMiddleware(get_response)
+            user = middleware(request)
+
+        self.assertEqual(getattr(user, "username", None), "already")
+        self.assertEqual(observed.get("in_request_tz"), "Europe/Paris")
+        mocked_get.assert_not_called()
