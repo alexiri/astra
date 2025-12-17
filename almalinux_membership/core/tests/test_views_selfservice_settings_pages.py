@@ -6,6 +6,7 @@ from unittest.mock import patch
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
@@ -21,6 +22,45 @@ class SelfServiceSettingsPagesTests(TestCase):
 
     def _auth_user(self, username: str = "alice"):
         return SimpleNamespace(is_authenticated=True, get_username=lambda: username)
+
+    def test_settings_profile_get_accepts_boolean_fasisprivate(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            first_name="Alice",
+            last_name="User",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                # Reproduces the real-world crash: value comes back as a bool.
+                "fasIsPrivate": [True],
+            },
+        )
+
+        request = factory.get("/settings/profile/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_selfservice.render", autospec=True, side_effect=fake_render):
+                response = views_selfservice.settings_profile(request)
+
+        self.assertEqual(response.status_code, 200)
+        ctx = captured.get("context")
+        self.assertIsNotNone(ctx)
+        form = ctx["form"]
+        self.assertTrue(form.initial.get("fasIsPrivate"))
 
     @override_settings(
         FREEIPA_HOST="ipa.test",

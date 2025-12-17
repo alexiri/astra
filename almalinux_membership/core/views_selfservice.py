@@ -72,6 +72,28 @@ def _bool_to_ipa(value: bool) -> str:
     return "TRUE" if value else "FALSE"
 
 
+def _bool_from_ipa(value: object, default: bool = False) -> bool:
+    """Parse FreeIPA boolean-ish attribute values.
+
+    FreeIPA may return boolean LDAP-ish values as strings ("TRUE"/"FALSE") or
+    actual Python bools depending on the client and schema.
+    """
+
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, list):
+        return _bool_from_ipa(value[0], default=default) if value else default
+
+    s = str(value).strip().upper()
+    if s in {"TRUE", "T", "YES", "Y", "1", "ON"}:
+        return True
+    if s in {"FALSE", "F", "NO", "N", "0", "OFF", ""}:
+        return False
+    return default
+
+
 def _update_user_attrs(
     username: str,
     *,
@@ -525,7 +547,7 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
         "fasMatrix": _first(data, "fasMatrix", "") or "",
         "fasGitHubUsername": _first(data, "fasGitHubUsername", "") or "",
         "fasGitLabUsername": _first(data, "fasGitLabUsername", "") or "",
-        "fasIsPrivate": (_first(data, "fasIsPrivate", "FALSE") or "FALSE").upper() == "TRUE",
+        "fasIsPrivate": _bool_from_ipa(_data_get(data, "fasIsPrivate", "FALSE"), default=False),
     }
 
     form = ProfileForm(request.POST or None, request.FILES or None, initial=initial)

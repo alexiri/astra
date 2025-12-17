@@ -9,6 +9,8 @@
   as how you can generalize functions to reduce code duplication and sources of bugs.
 - Do Test-Driven development: Add tests before you implement a new feature, make sure they cover all the
   failure scenarios and that they really *do* fail. Then implement the new feature and make sure your tests pass.
+  - WHENEVER I REPORT A PROBLEM, I WANT YOU TO CREATE A TEST CASE FIRST, RUN IT TO SHOW THE FAILURE, THEN ASK 
+  FOR CONFIRMATION BEFORE FIXING IT.
 
 ## Test tips
 - You don't need to restart the web container after code changes; it refreshes automatically.
