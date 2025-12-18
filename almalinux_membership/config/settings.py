@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 
 import environ
+import datetime
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,6 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'post_office',
+    'django_ses',
     'avatar',
     'core',
 ]
@@ -91,6 +94,60 @@ DATABASES = {
         ),
     }
 }
+
+# Email
+# In DEBUG, docker-compose provides EMAIL_URL pointing to Mailhog.
+EMAIL_CONFIG = env.email_url('EMAIL_URL', default=None)
+if EMAIL_CONFIG:
+    globals().update(EMAIL_CONFIG)
+
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
+
+# Queue all Django mail through django-post_office.
+EMAIL_BACKEND = 'post_office.EmailBackend'
+
+# Configure post_office delivery backends.
+# - DEBUG: deliver immediately via SMTP to Mailhog.
+# - non-DEBUG: default delivery backend is AWS SES (django-ses); delivery still
+#   requires running `python manage.py send_queued_mail` (or enabling Celery).
+POST_OFFICE = {
+    'DEFAULT_PRIORITY': 'now' if DEBUG else 'medium',
+    'MESSAGE_ID_ENABLED': True,
+    'MAX_RETRIES': 4,
+    'RETRY_INTERVAL': datetime.timedelta(minutes=5),
+    'BACKENDS': {
+        'default': 'django.core.mail.backends.smtp.EmailBackend' if DEBUG else 'django_ses.SESBackend',
+        'smtp': 'django.core.mail.backends.smtp.EmailBackend',
+        'ses': 'django_ses.SESBackend',
+    },
+}
+
+# django-ses (AWS SES)
+# Used as the production delivery backend (see POST_OFFICE['BACKENDS']).
+# Also provides a stats dashboard and an SNS event webhook (bounces, complaints,
+# deliveries, opens, clicks).
+AWS_SES_REGION_NAME = env('AWS_SES_REGION_NAME', default='us-east-1')
+
+# Signature verification is recommended for production SNS webhooks. For local
+# dev, allowing unsigned test payloads is convenient.
+AWS_SES_VERIFY_EVENT_SIGNATURES = env.bool('AWS_SES_VERIFY_EVENT_SIGNATURES', default=not DEBUG)
+
+# Restrict certificate download domains for SNS signature verification.
+# Prefer the full SNS domain for your region.
+AWS_SNS_EVENT_CERT_TRUSTED_DOMAINS = env.list(
+    'AWS_SNS_EVENT_CERT_TRUSTED_DOMAINS',
+    default=[f'sns.{AWS_SES_REGION_NAME}.amazonaws.com'],
+)
+
+# Optional blacklisting behavior: when enabled, bounce/complaint signals will
+# add recipients to django_ses.BlacklistedEmail and the SES backend will avoid
+# sending to them.
+AWS_SES_USE_BLACKLIST = env.bool('AWS_SES_USE_BLACKLIST', default=not DEBUG)
+AWS_SES_ADD_BOUNCE_TO_BLACKLIST = env.bool('AWS_SES_ADD_BOUNCE_TO_BLACKLIST', default=not DEBUG)
+AWS_SES_ADD_COMPLAINT_TO_BLACKLIST = env.bool('AWS_SES_ADD_COMPLAINT_TO_BLACKLIST', default=not DEBUG)
+
+# Optional: tag outgoing mail with a configuration set for event publishing.
+AWS_SES_CONFIGURATION_SET = env('AWS_SES_CONFIGURATION_SET', default='') or None
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators

@@ -5,6 +5,8 @@
   - Noggin source code: githubRepo `fedora-infra/noggin`
   - FreeIPA FAS extensions (user attributes): githubRepo `fedora-infra/freeipa-fas`
   - python-freeipa: githubRepo `waldur/python-freeipa`
+  - django-post-office: githubRepo `ui/django-post_office`
+  - django-ses: githubRepo `django-ses/django-ses`
 - Add clean code with sensible comments. Consider what you're implementing and the context, as well
   as how you can generalize functions to reduce code duplication and sources of bugs.
 - Do Test-Driven development: Add tests before you implement a new feature, make sure they cover all the

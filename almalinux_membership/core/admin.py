@@ -13,6 +13,37 @@ from .backends import FreeIPAGroup, FreeIPAUser
 from .models import IPAGroup, IPAUser
 
 
+def _override_post_office_log_admin():
+    """Disable manual creation of django-post-office Log rows in admin.
+
+    This is a temporary local workaround until https://github.com/ui/django-post_office/pull/503 is merged and released.
+    """
+
+    try:
+        from django.contrib.admin.sites import NotRegistered
+        from post_office.admin import LogAdmin as PostOfficeLogAdmin
+        from post_office.models import Log
+    except Exception:
+        return
+
+    class ReadOnlyAddLogAdmin(PostOfficeLogAdmin):
+        def has_add_permission(self, request):
+            return False
+        def has_change_permission(self, request, obj=None):
+            return False
+        def has_delete_permission(self, request, obj=None):
+            return False
+
+    try:
+        admin.site.unregister(Log)
+    except NotRegistered:
+        pass
+
+    admin.site.register(Log, ReadOnlyAddLogAdmin)
+
+
+_override_post_office_log_admin()
+
 class _ListBackedQuerySet:
     """Minimal QuerySet-like wrapper for Django admin changelist.
 
@@ -118,6 +149,53 @@ class _NoAdminLogMixin:
 
     def log_deletions(self, request, queryset):
         return
+
+
+def _override_django_ses_admin():
+    """Register django-ses models with admin logging disabled.
+
+    django-ses registers SESStat itself, but this project cannot write Django
+    admin LogEntry rows because users are not DB-backed.
+    """
+
+    try:
+        from django.contrib.admin.sites import NotRegistered
+        from django_ses.models import BlacklistedEmail, SESStat
+    except Exception:
+        return
+
+    class SESStatAdmin(_NoAdminLogMixin, admin.ModelAdmin):
+        list_display = ("date", "delivery_attempts", "bounces", "complaints", "rejects")
+        ordering = ("-date",)
+
+        def has_add_permission(self, request):
+            return False
+
+        def has_change_permission(self, request, obj=None):
+            return False
+
+        def has_delete_permission(self, request, obj=None):
+            return False
+
+    class BlacklistedEmailAdmin(_NoAdminLogMixin, admin.ModelAdmin):
+        list_display = ("email",)
+        search_fields = ("email",)
+        ordering = ("email",)
+
+    try:
+        admin.site.unregister(SESStat)
+    except NotRegistered:
+        pass
+    try:
+        admin.site.unregister(BlacklistedEmail)
+    except NotRegistered:
+        pass
+
+    admin.site.register(SESStat, SESStatAdmin)
+    admin.site.register(BlacklistedEmail, BlacklistedEmailAdmin)
+
+
+_override_django_ses_admin()
 
 
 class IPAUserForm(forms.ModelForm):
