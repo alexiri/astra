@@ -114,9 +114,12 @@ class FreeIPAUser:
             return value
 
         # Map FreeIPA attributes to Django attributes
-        self.first_name = _first('givenname')
-        self.last_name = _first('sn')
-        self.email = _first('mail')
+        self.first_name = _first('givenname') or ""
+        self.last_name = _first('sn') or ""
+        # Some upstream template tags (e.g. django-avatar gravatar provider)
+        # assume the email attribute is always a string and call .encode().
+        # FreeIPA users may not have a mail attribute, so normalize to "".
+        self.email = _first('mail') or ""
 
         # Determine status based on FreeIPA data
         # nsaccountlock: True means locked (inactive)

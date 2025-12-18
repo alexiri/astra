@@ -130,32 +130,13 @@ def _split_lines(value: str) -> list[str]:
     return [line.strip() for line in (value or "").splitlines() if line.strip()]
 
 
-class _NoAdminLogMixin:
-    """Disable DB-backed admin LogEntry writes.
-
-    Django admin normally writes to `django_admin_log` with a FK to
-    `AUTH_USER_MODEL` (default `auth.User`). Since this project uses FreeIPA
-    users without a local DB row, those FK writes fail.
-    """
-
-    def log_addition(self, request, obj, message):
-        return
-
-    def log_change(self, request, obj, message):
-        return
-
-    def log_deletion(self, request, obj, object_repr):
-        return
-
-    def log_deletions(self, request, queryset):
-        return
-
-
 def _override_django_ses_admin():
-    """Register django-ses models with admin logging disabled.
+    """Register django-ses models with sensible admin defaults.
 
-    django-ses registers SESStat itself, but this project cannot write Django
-    admin LogEntry rows because users are not DB-backed.
+    Note: Django admin LogEntry writes require a DB-backed user row.
+    This project authenticates via FreeIPA, but the middleware
+    `core.middleware_admin_log.AdminShadowUserLogEntryMiddleware` provides a
+    minimal DB "shadow user" in /admin/ so auditing works normally.
     """
 
     try:
@@ -164,7 +145,7 @@ def _override_django_ses_admin():
     except Exception:
         return
 
-    class SESStatAdmin(_NoAdminLogMixin, admin.ModelAdmin):
+    class SESStatAdmin(admin.ModelAdmin):
         list_display = ("date", "delivery_attempts", "bounces", "complaints", "rejects")
         ordering = ("-date",)
 
@@ -177,7 +158,7 @@ def _override_django_ses_admin():
         def has_delete_permission(self, request, obj=None):
             return False
 
-    class BlacklistedEmailAdmin(_NoAdminLogMixin, admin.ModelAdmin):
+    class BlacklistedEmailAdmin(admin.ModelAdmin):
         list_display = ("email",)
         search_fields = ("email",)
         ordering = ("email",)
@@ -271,7 +252,7 @@ class IPAGroupForm(forms.ModelForm):
 
 
 @admin.register(IPAUser)
-class IPAUserAdmin(_NoAdminLogMixin, admin.ModelAdmin):
+class IPAUserAdmin(admin.ModelAdmin):
     form = IPAUserForm
     list_display = ("username", "first_name", "last_name", "email", "is_active", "is_staff")
     ordering = ("username",)
@@ -353,7 +334,7 @@ class IPAUserAdmin(_NoAdminLogMixin, admin.ModelAdmin):
 
 
 @admin.register(IPAGroup)
-class IPAGroupAdmin(_NoAdminLogMixin, admin.ModelAdmin):
+class IPAGroupAdmin(admin.ModelAdmin):
     form = IPAGroupForm
     list_display = ("cn", "description")
     ordering = ("cn",)
