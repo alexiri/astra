@@ -1,4 +1,9 @@
 import logging
+from functools import lru_cache
+import threading
+from collections.abc import Callable
+from typing import TypeVar
+
 from django.conf import settings
 from django.contrib.auth.backends import BaseBackend
 from django.core.cache import cache
@@ -7,9 +12,59 @@ from python_freeipa import ClientMeta, exceptions
 
 logger = logging.getLogger(__name__)
 
+_service_client_local = threading.local()
 
-def _freeipa_cache_timeout() -> int:
-    return int(getattr(settings, 'FREEIPA_CACHE_TIMEOUT', 300))
+_T = TypeVar("_T")
+
+
+def _get_freeipa_client(username: str, password: str) -> ClientMeta:
+    """Create and login a FreeIPA client.
+
+    Centralize client construction + login so we don't duplicate host/SSL/login
+    wiring across user/group helpers and the auth backend.
+    """
+
+    client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+    client.login(username, password)
+    return client
+
+
+def _get_freeipa_service_client_cached() -> ClientMeta:
+    """Return a cached service-account client for the current thread.
+
+    FreeIPA operations often happen in bursts during a single request.
+    Reusing the service client's logged-in session avoids repeated logins.
+    The per-request middleware clears this cache at request boundaries.
+    """
+
+    client = getattr(_service_client_local, "client", None)
+    if client is None:
+        client = _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
+        _service_client_local.client = client
+    return client
+
+
+def clear_freeipa_service_client_cache() -> None:
+    """Clear any cached service client for the current thread."""
+
+    if hasattr(_service_client_local, "client"):
+        delattr(_service_client_local, "client")
+
+
+def _with_freeipa_service_client_retry(get_client: Callable[[], ClientMeta], fn: Callable[[ClientMeta], _T]) -> _T:
+    """Run a service-account request, retrying once if the session expired.
+
+    python-freeipa raises Unauthorized on HTTP 401, which is what we see when
+    the FreeIPA session cookie expires or a connection is reset.
+    """
+
+    client = get_client()
+    try:
+        return fn(client)
+    except exceptions.Unauthorized:
+        clear_freeipa_service_client_cache()
+        client = get_client()
+        return fn(client)
 
 
 def _user_cache_key(username: str) -> str:
@@ -45,6 +100,7 @@ def _invalidate_group_cache(cn: str) -> None:
     cache.delete(_group_cache_key(cn))
 
 
+@lru_cache(maxsize=4096)
 def _session_user_id_for_username(username: str) -> int:
     """Return a stable integer id for storing in Django's session.
 
@@ -135,7 +191,7 @@ class FreeIPAUser:
 
         # Simple mapping for staff/superuser based on groups
         # Configure these group names in settings
-        admin_group = getattr(settings, 'FREEIPA_ADMIN_GROUP', 'admins')
+        admin_group = settings.FREEIPA_ADMIN_GROUP
         self.is_staff = admin_group in self.groups_list
         self.is_superuser = admin_group in self.groups_list
 
@@ -177,32 +233,31 @@ class FreeIPAUser:
         return salted_hmac('freeipa-user', self.username, secret=settings.SECRET_KEY).hexdigest()
 
     @classmethod
-    def get_client(cls):
-        """
-        Returns a FreeIPA client authenticated as the service account.
-        """
-        client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-        client.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
-        return client
+    def get_client(cls) -> ClientMeta:
+        """Return a FreeIPA client authenticated as the service account."""
+
+        return _get_freeipa_service_client_cached()
 
     @classmethod
     def all(cls):
         """
         Returns a list of all users from FreeIPA.
         """
-        cached = cache.get(_users_list_cache_key())
-        if cached:
-            return [cls(u['uid'][0], u) for u in cached]
-
-        client = cls.get_client()
-        try:
+        def _fetch_users() -> list[dict[str, object]]:
             # FreeIPA server/client may default to returning only 100 entries.
             # Request an unlimited result set where supported.
-            result = client.user_find(o_all=True, o_no_members=False, o_sizelimit=0, o_timelimit=0)
-            users = result.get('result', [])
-            cache.set(_users_list_cache_key(), users, timeout=_freeipa_cache_timeout())
+            result = _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: client.user_find(o_all=True, o_no_members=False, o_sizelimit=0, o_timelimit=0),
+            )
+            return result.get('result', [])
+
+        try:
+            users = cache.get_or_set(_users_list_cache_key(), _fetch_users) or []
+            # Cache may legitimately contain an empty list; treat that as a hit.
             return [cls(u['uid'][0], u) for u in users]
-        except Exception as e:
+        except Exception:
+            # On failure, avoid poisoning the cache with an empty list.
             logger.exception("Failed to list users")
             return []
 
@@ -216,6 +271,9 @@ class FreeIPAUser:
         def _try(label: str, fn):
             try:
                 return fn()
+            except exceptions.Unauthorized:
+                # Treat as an auth/session issue so callers can retry with a fresh login.
+                raise
             except TypeError as e:
                 # Signature mismatch across python-freeipa versions.
                 logger.debug("FreeIPA call failed (TypeError) label=%s username=%s error=%s", label, username, e)
@@ -252,14 +310,16 @@ class FreeIPAUser:
         cache_key = _user_cache_key(username)
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data is not None:
             return cls(username, cached_data)
 
-        client = cls.get_client()
         try:
-            user_data = cls._fetch_full_user(client, username)
-            if user_data:
-                cache.set(cache_key, user_data, timeout=_freeipa_cache_timeout())
+            user_data = _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: cls._fetch_full_user(client, username),
+            )
+            if user_data is not None:
+                cache.set(cache_key, user_data)
                 return cls(username, user_data)
         except Exception as e:
             logger.exception("Failed to get user username=%s", username)
@@ -271,7 +331,6 @@ class FreeIPAUser:
         Create a new user in FreeIPA.
         kwargs should match FreeIPA user_add arguments (e.g., givenname, sn, mail, password).
         """
-        client = cls.get_client()
         try:
             givenname = kwargs.pop('givenname', None) or kwargs.pop('first_name', None)
             sn = kwargs.pop('sn', None) or kwargs.pop('last_name', None)
@@ -298,7 +357,10 @@ class FreeIPAUser:
                 else:
                     ipa_kwargs[f"o_{key}"] = value
 
-            client.user_add(username, givenname, sn, cn, **ipa_kwargs)
+            _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: client.user_add(username, givenname, sn, cn, **ipa_kwargs),
+            )
             # New user should appear in lists; invalidate list cache and warm this user's cache.
             _invalidate_users_list_cache()
             return cls.get(username)
@@ -320,7 +382,6 @@ class FreeIPAUser:
             if update_fields_set == {'last_login'}:
                 return
 
-        client = self.get_client()
         updates = {}
         if self.first_name:
             updates['o_givenname'] = self.first_name
@@ -340,7 +401,10 @@ class FreeIPAUser:
 
         try:
             if updates:
-                client.user_mod(self.username, **updates)
+                _with_freeipa_service_client_retry(
+                    self.get_client,
+                    lambda client: client.user_mod(self.username, **updates),
+                )
             # Invalidate and refresh cache entries.
             _invalidate_user_cache(self.username)
             _invalidate_users_list_cache()
@@ -354,9 +418,11 @@ class FreeIPAUser:
         """
         Delete the user from FreeIPA.
         """
-        client = self.get_client()
         try:
-            client.user_del(self.username)
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.user_del(self.username),
+            )
             _invalidate_user_cache(self.username)
             _invalidate_users_list_cache()
         except Exception as e:
@@ -383,7 +449,7 @@ class FreeIPAUser:
             return set()
 
         perms = set()
-        group_permissions_map = getattr(settings, 'FREEIPA_GROUP_PERMISSIONS', {})
+        group_permissions_map = settings.FREEIPA_GROUP_PERMISSIONS
 
         for group in self.groups_list:
             if group in group_permissions_map:
@@ -402,9 +468,11 @@ class FreeIPAUser:
 
     # Additional methods for group management as requested
     def add_to_group(self, group_name):
-        client = self.get_client()
         try:
-            client.group_add_member(group_name, o_user=[self.username])
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.group_add_member(group_name, o_user=[self.username]),
+            )
             # Membership affects both user and group views.
             _invalidate_user_cache(self.username)
             _invalidate_group_cache(group_name)
@@ -417,9 +485,11 @@ class FreeIPAUser:
             raise
 
     def remove_from_group(self, group_name):
-        client = self.get_client()
         try:
-            client.group_remove_member(group_name, o_user=[self.username])
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.group_remove_member(group_name, o_user=[self.username]),
+            )
             _invalidate_user_cache(self.username)
             _invalidate_group_cache(group_name)
             _invalidate_groups_list_cache()
@@ -452,27 +522,29 @@ class FreeIPAGroup:
         return self.cn
 
     @classmethod
-    def get_client(cls):
-        client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-        client.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
-        return client
+    def get_client(cls) -> ClientMeta:
+        """Return a FreeIPA client authenticated as the service account."""
+
+        return _get_freeipa_service_client_cached()
 
     @classmethod
     def all(cls):
         """
         Returns a list of all groups from FreeIPA.
         """
-        cached = cache.get(_groups_list_cache_key())
-        if cached:
-            return [cls(g['cn'][0], g) for g in cached]
+        def _fetch_groups() -> list[dict[str, object]]:
+            result = _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: client.group_find(o_all=True, o_no_members=False, o_sizelimit=0, o_timelimit=0),
+            )
+            return result.get('result', [])
 
-        client = cls.get_client()
         try:
-            result = client.group_find(o_all=True, o_no_members=False, o_sizelimit=0, o_timelimit=0)
-            groups = result.get('result', [])
-            cache.set(_groups_list_cache_key(), groups, timeout=_freeipa_cache_timeout())
+            groups = cache.get_or_set(_groups_list_cache_key(), _fetch_groups) or []
+            # Cache may legitimately contain an empty list; treat that as a hit.
             return [cls(g['cn'][0], g) for g in groups]
-        except Exception as e:
+        except Exception:
+            # On failure, avoid poisoning the cache with an empty list.
             logger.exception("Failed to list groups")
             return []
 
@@ -484,15 +556,17 @@ class FreeIPAGroup:
         cache_key = _group_cache_key(cn)
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data is not None:
             return cls(cn, cached_data)
 
-        client = cls.get_client()
         try:
-            result = client.group_find(o_cn=cn, o_all=True, o_no_members=False)
+            result = _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: client.group_find(o_cn=cn, o_all=True, o_no_members=False),
+            )
             if result['count'] > 0:
                 group_data = result['result'][0]
-                cache.set(cache_key, group_data, timeout=_freeipa_cache_timeout())
+                cache.set(cache_key, group_data)
                 return cls(cn, group_data)
         except Exception as e:
             logger.exception("Failed to get group cn=%s", cn)
@@ -503,12 +577,14 @@ class FreeIPAGroup:
         """
         Create a new group in FreeIPA.
         """
-        client = cls.get_client()
         try:
             kwargs = {}
             if description:
                 kwargs['o_description'] = description
-            client.group_add(cn, **kwargs)
+            _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: client.group_add(cn, **kwargs),
+            )
             _invalidate_groups_list_cache()
             return cls.get(cn)
         except Exception as e:
@@ -519,13 +595,15 @@ class FreeIPAGroup:
         """
         Updates the group data in FreeIPA.
         """
-        client = self.get_client()
         updates = {}
         if self.description:
             updates['o_description'] = self.description
 
         try:
-            client.group_mod(self.cn, **updates)
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.group_mod(self.cn, **updates),
+            )
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
@@ -537,9 +615,11 @@ class FreeIPAGroup:
         """
         Delete the group from FreeIPA.
         """
-        client = self.get_client()
         try:
-            client.group_del(self.cn)
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.group_del(self.cn),
+            )
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
         except Exception as e:
@@ -547,9 +627,11 @@ class FreeIPAGroup:
             raise
 
     def add_member(self, username):
-        client = self.get_client()
         try:
-            client.group_add_member(self.cn, o_user=[username])
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.group_add_member(self.cn, o_user=[username]),
+            )
             _invalidate_group_cache(self.cn)
             _invalidate_user_cache(username)  # user's group list changes
             _invalidate_groups_list_cache()
@@ -561,9 +643,11 @@ class FreeIPAGroup:
             raise
 
     def remove_member(self, username):
-        client = self.get_client()
         try:
-            client.group_remove_member(self.cn, o_user=[username])
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: client.group_remove_member(self.cn, o_user=[username]),
+            )
             _invalidate_group_cache(self.cn)
             _invalidate_user_cache(username)  # user's group list changes
             _invalidate_groups_list_cache()
@@ -581,10 +665,9 @@ class FreeIPAAuthBackend(BaseBackend):
 
         logger.debug("authenticate: username=%s", username)
 
-        client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
         try:
             # Try to login with provided credentials
-            client.login(username, password)
+            client = _get_freeipa_client(username, password)
 
             # Fetch full user data (includes custom/FAS attributes)
             user_data = FreeIPAUser._fetch_full_user(client, username)

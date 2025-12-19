@@ -136,12 +136,9 @@ class EmailChangeValidationFlowTests(TestCase):
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_email_validate_get_and_post_applies_change(self):
         from core import views_selfservice
+        from core.tokens import make_signed_token
 
-        token = views_selfservice.make_email_validation_token(
-            username="alice",
-            attr="mail",
-            value="new@example.org",
-        )
+        token = make_signed_token({"u": "alice", "a": "mail", "v": "new@example.org"})
 
         request_get = self.factory.get(f"/settings/emails/validate/?token={token}")
         self._add_session_and_messages(request_get)
@@ -180,12 +177,9 @@ class EmailChangeValidationFlowTests(TestCase):
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_email_validate_rejects_wrong_user(self):
         from core import views_selfservice
+        from core.tokens import make_signed_token
 
-        token = views_selfservice.make_email_validation_token(
-            username="bob",
-            attr="mail",
-            value="bob-new@example.org",
-        )
+        token = make_signed_token({"u": "bob", "a": "mail", "v": "bob-new@example.org"})
 
         request = self.factory.get(f"/settings/emails/validate/?token={token}")
         self._add_session_and_messages(request)

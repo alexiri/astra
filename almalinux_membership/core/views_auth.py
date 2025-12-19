@@ -113,39 +113,35 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
         second_code = form.cleaned_data["second_code"]
         token = (form.cleaned_data.get("token") or "").strip() or None
 
-        host = getattr(settings, "FREEIPA_HOST", None)
-        if not host:
-            form.add_error(None, "FreeIPA host is not configured")
-        else:
-            url = f"https://{host}/ipa/session/sync_token"
-            data = {
-                "user": username,
-                "password": password,
-                "first_code": first_code,
-                "second_code": second_code,
-                "token": token or "",
-            }
+        url = f"https://{settings.FREEIPA_HOST}/ipa/session/sync_token"
+        data = {
+            "user": username,
+            "password": password,
+            "first_code": first_code,
+            "second_code": second_code,
+            "token": token or "",
+        }
 
-            try:
-                session = requests.Session()
-                response = session.post(
-                    url=url,
-                    data=data,
-                    verify=getattr(settings, "FREEIPA_VERIFY_SSL", True),
-                    timeout=10,
-                )
-                if response.ok and "Token sync rejected" not in (response.text or ""):
-                    messages.success(request, "Token successfully synchronized")
-                    return redirect("login")
+        try:
+            session = requests.Session()
+            response = session.post(
+                url=url,
+                data=data,
+                verify=settings.FREEIPA_VERIFY_SSL,
+                timeout=10,
+            )
+            if response.ok and "Token sync rejected" not in (response.text or ""):
+                messages.success(request, "Token successfully synchronized")
+                return redirect("login")
 
-                form.add_error(None, "The username, password or token codes are not correct.")
-            except requests.exceptions.RequestException:
-                form.add_error(None, "No IPA server available")
-            except Exception as e:
-                logger.exception("otp_sync: unexpected error username=%s", username)
-                if settings.DEBUG:
-                    form.add_error(None, f"Something went wrong (debug): {e}")
-                else:
-                    form.add_error(None, "Something went wrong")
+            form.add_error(None, "The username, password or token codes are not correct.")
+        except requests.exceptions.RequestException:
+            form.add_error(None, "No IPA server available")
+        except Exception as e:
+            logger.exception("otp_sync: unexpected error username=%s", username)
+            if settings.DEBUG:
+                form.add_error(None, f"Something went wrong (debug): {e}")
+            else:
+                form.add_error(None, "Something went wrong")
 
     return render(request, "core/sync_token.html", {"form": form})

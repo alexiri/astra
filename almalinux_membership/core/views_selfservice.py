@@ -37,18 +37,10 @@ from .forms_selfservice import (
     PasswordChangeFreeIPAForm,
     ProfileForm,
 )
+from .tokens import make_signed_token, read_signed_token
 
 
 logger = logging.getLogger(__name__)
-
-
-def make_email_validation_token(*, username: str, attr: str, value: str) -> str:
-    payload = {"u": username, "a": attr, "v": value}
-    return signing.dumps(payload, salt=settings.SECRET_KEY)
-
-
-def read_email_validation_token(token: str) -> dict:
-    return signing.loads(token, salt=settings.SECRET_KEY, max_age=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS)
 
 
 def _send_email_validation_email(
@@ -59,7 +51,7 @@ def _send_email_validation_email(
     attr: str,
     address: str,
 ) -> None:
-    token = make_email_validation_token(username=username, attr=attr, value=address)
+    token = make_signed_token({"u": username, "a": attr, "v": address})
     validate_url = request.build_absolute_uri(reverse("settings-email-validate")) + f"?token={quote(token)}"
     ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
@@ -463,8 +455,7 @@ def _detect_avatar_provider(user: object, *, size: int = 140) -> tuple[str | Non
     This follows django-avatar's provider ordering semantics.
     """
 
-    providers = getattr(settings, "AVATAR_PROVIDERS", ()) or ()
-    for provider_path in providers:
+    for provider_path in settings.AVATAR_PROVIDERS:
         try:
             provider_cls = import_string(provider_path)
         except Exception:
@@ -475,7 +466,7 @@ def _detect_avatar_provider(user: object, *, size: int = 140) -> tuple[str | Non
             continue
 
         try:
-            url = get_url(user, size, size)
+            url = str(get_url(user, size, size)).strip()
         except Exception:
             continue
 
@@ -828,7 +819,7 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         return redirect("settings-emails")
 
     try:
-        token = read_email_validation_token(token_string)
+        token = read_signed_token(token_string)
     except signing.SignatureExpired:
         messages.warning(request, "This token is no longer valid, please request a new validation email.")
         return redirect("settings-emails")
@@ -1103,7 +1094,7 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
     if secret:
         # Noggin uses issuer_name=user.krbname (username@REALM). We don't always
         # have the realm, so derive a reasonable default from FREEIPA_HOST.
-        host = getattr(settings, "FREEIPA_HOST", "") or ""
+        host = settings.FREEIPA_HOST
         parts = host.split(".")
         realm = ".".join(parts[1:]).upper() if len(parts) > 1 else host.upper()
         issuer = f"{username}@{realm}" if realm else username
@@ -1117,14 +1108,14 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
             description = (description or "").strip()
 
         token = pyotp.TOTP(secret)
-        otp_uri = token.provisioning_uri(name=description or "(no name)", issuer_name=issuer)
+        otp_uri = str(token.provisioning_uri(name=description or "(no name)", issuer_name=issuer))
 
         qr = qrcode.QRCode(box_size=6, border=2)
         qr.add_data(otp_uri)
         qr.make(fit=True)
         img = qr.make_image(fill_color="black", back_color="white")
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        img.save(buf, "PNG")
         otp_qr_png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
     context = {
@@ -1222,7 +1213,7 @@ def otp_rename(request: HttpRequest) -> HttpResponse:
         if form.errors:
             first_field_errors = next(iter(form.errors.values()))
             first_error = first_field_errors[0] if first_field_errors else "Invalid form"
-            messages.error(request, first_error)
+            messages.error(request, str(first_error))
         else:
             messages.error(request, "Token must not be empty")
     return redirect("settings-otp")

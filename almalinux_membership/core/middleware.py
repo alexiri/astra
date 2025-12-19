@@ -8,7 +8,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 
-from .backends import FreeIPAUser
+from core.backends import FreeIPAUser, clear_freeipa_service_client_cache
 
 
 def _first_ci(data: object, attr: str):
@@ -85,7 +85,7 @@ class FreeIPAAuthenticationMiddleware:
                 tz_name = _get_user_timezone_name(user)
 
             if not tz_name:
-                tz_name = getattr(settings, "TIME_ZONE", None) or "UTC"
+                tz_name = settings.TIME_ZONE
 
             try:
                 timezone.activate(ZoneInfo(tz_name))
@@ -97,3 +97,28 @@ class FreeIPAAuthenticationMiddleware:
         finally:
             if activated:
                 timezone.deactivate()
+
+
+class FreeIPAServiceClientReuseMiddleware:
+    """Request-scoped reuse of the FreeIPA service client.
+
+    Service-account operations can happen multiple times per request
+    (profile page + groups + permissions, etc.). Reusing the logged-in client
+    reduces repeated logins, but we must prevent reuse across requests.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # Default to reusing the service client across requests (per worker
+        # thread) to cut down on repeated admin logins. If you run an async
+        # server with concurrent requests in the same thread and see issues,
+        # set FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS=0.
+        if not settings.FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS:
+            clear_freeipa_service_client_cache()
+        try:
+            return self.get_response(request)
+        finally:
+            if not settings.FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS:
+                clear_freeipa_service_client_cache()

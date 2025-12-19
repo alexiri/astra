@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import datetime
 from smtplib import SMTPRecipientsRefused
-from typing import Any
 from urllib.parse import quote
 
 from django.conf import settings
@@ -20,24 +19,10 @@ from python_freeipa import ClientMeta, exceptions
 
 from .backends import FreeIPAUser
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
+from .tokens import make_signed_token, read_signed_token
 
 
 logger = logging.getLogger(__name__)
-
-
-def make_registration_token(*, username: str, email: str) -> str:
-    payload = {"u": username, "e": email}
-    return signing.dumps(payload, salt=settings.SECRET_KEY)
-
-
-def read_registration_token(token: str) -> dict[str, Any]:
-    return signing.loads(
-        token,
-        salt=settings.SECRET_KEY,
-        max_age=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS,
-    )
-
-
 def _stageuser_add(client, username: str, **kwargs):
     # python-freeipa call signatures vary by version. Try a couple.
     try:
@@ -61,7 +46,7 @@ def _stageuser_activate(client, username: str):
 
 
 def _send_registration_email(request: HttpRequest, *, username: str, email: str, first_name: str, last_name: str) -> None:
-    token = make_registration_token(username=username, email=email)
+    token = make_signed_token({"u": username, "e": email})
     activate_url = request.build_absolute_uri(reverse("register-activate")) + f"?token={quote(token)}"
     confirm_url = request.build_absolute_uri(reverse("register-confirm")) + f"?username={quote(username)}"
 
@@ -221,7 +206,7 @@ def activate(request: HttpRequest) -> HttpResponse:
         return redirect("register")
 
     try:
-        token = read_registration_token(token_string)
+        token = read_signed_token(token_string)
     except signing.SignatureExpired:
         messages.warning(request, "This token is no longer valid, please register again.")
         return redirect("register")

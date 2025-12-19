@@ -10,10 +10,98 @@
 - Add clean code with sensible comments. Consider what you're implementing and the context, as well
   as how you can generalize functions to reduce code duplication and sources of bugs.
 - If you can reuse something already implemented elsewhere, do it. Add the least amount of code possible (but make sure all error conditions are covered!)
+
+## Python Coding Guidelines
+
+- Write for Python 3.14. Do NOT write code to support earlier versions of Python. Always use modern Python practices appropriate for Python 3.14.
+- Always use full type annotations, generics, and other modern practices.
+- Always use full, absolute imports for paths.
+- ALWAYS use `@override` decorators to override methods from base classes.
+  This is a modern Python practice and helps avoid bugs.
+- Avoid writing trivial wrapper functions.
+
+### Types and Type Annotations
+
+- Always use full type annotations, generics, and other modern practices.
+- Use modern union syntax: `str | None` instead of `Optional[str]`, `dict[str]` instead
+  of `Dict[str]`, `list[str]` instead of `List[str]`, etc.
+- Never use/import `Optional` for new code.
+- Use modern enums like `StrEnum` if appropriate.
+- One exception to common practice on enums: If an enum has many values that are
+  strings, and they have a literal value as a string (like in a JSON protocol), it’s
+  fine to use lower_snake_case for enum values to match the actual value.
+  This is more readable than LONG_ALL_CAPS_VALUES, and you can simply set the value to
+  be the same as the name for each.
+  For example:
+  ```python
+  class MediaType(Enum):
+    """
+    Media types. For broad categories only, to determine what processing
+    is possible.
+    """
+  
+    text = "text"
+    image = "image"
+    audio = "audio"
+    video = "video"
+    webpage = "webpage"
+    binary = "binary"
+  ```
+
+### Guidelines for Comments
+
+- Comments should be EXPLANATORY: Explain *WHY* something is done a certain way and not
+  just *what* is done.
+
+- Comments should be CONCISE: Remove all extraneous words.
+
+- DO NOT use comments to state obvious things or repeat what is evident from the code.
+  Here is an example of a comment that SHOULD BE REMOVED because it simply repeats the
+  code, which is distracting and adds no value:
+  ```python
+  if self.failed == 0:
+      # All successful
+      return "All tasks finished successfully"
+  ```
+
+### Guidelines for Backward Compatibility
+
+- When changing code in a library or general function, if a change to an API or library
+  will break backward compatibility, MENTION THIS to the user.
+
+- DO NOT implement additional code for backward compatiblity (such as extra methods or
+  variable aliases or comments about backward compatibility) UNLESS the user has
+  confirmed that it is necessary.
+
+## DRY + Single Source of Truth (required)
+
+Before introducing new helpers/constants:
+- Search the repo for existing equivalents (setting names, helper functions, payload shapes) and reuse them.
+- If a value is already defined in `settings.py` (especially via `env.*`), do NOT add a second default via `getattr(settings, ...)` elsewhere. Use `settings.X` directly.
+- Do not add “wrapper” functions that merely forward arguments or return `settings.*` unless they add real semantics and are used in 2+ places.
+
+When you notice duplicated logic across files:
+- Refactor only if it reduces the number of implementations/branches. Moving code into a new module is not enough if the same logic still exists in multiple wrappers.
+- Prefer a small shared primitive API (e.g. `make_signed_token(payload)` / `read_signed_token(token)`) over per-feature wrappers.
+- Prefer removing indirection over adding it (don’t introduce `_ttl()` / `_salt()` helpers that just return settings).
+
+Guardrails:
+- Avoid “double defaults” (a default in settings + another default in code) because it silently diverges.
+- Prefer deleting code over adding code during refactors.
+
+Pre-change checklist (must answer mentally before finishing):
+- Did I add a fallback that’s already configured elsewhere?
+- Did I reduce the number of implementations, or just relocate code?
+- Can any new wrappers be deleted without changing call sites? If yes, delete them.
+
 - Do Test-Driven development: Add tests before you implement a new feature, make sure they cover all the
   failure scenarios and that they really *do* fail. Then implement the new feature and make sure your tests pass.
   - WHENEVER I REPORT A PROBLEM, I WANT YOU TO CREATE A TEST CASE FIRST, RUN IT TO SHOW THE FAILURE, THEN ASK 
   FOR CONFIRMATION BEFORE FIXING IT.
+- DO NOT write trivial or obvious tests that are evident directly from code, such as
+  assertions that confirm the value of a constant setting.
+- DO NOT write trivial tests that test something we know already works, like
+  instantiating a Pydantic object.
 
 ## Test tips
 - You don't need to restart the web container after code changes; it refreshes automatically.

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Optional
+from typing import Any
 
 
 class SkipHealthzFilter(logging.Filter):
@@ -18,7 +18,7 @@ class SkipHealthzFilter(logging.Filter):
         return not any(prefix in message for prefix in self.prefixes)
 
 
-def _extract_request_path(record: logging.LogRecord) -> Optional[str]:
+def _extract_request_path(record: logging.LogRecord) -> str | None:
     request = getattr(record, "request", None)
     path = _path_from_request_obj(request)
     if path:
@@ -34,7 +34,7 @@ def _extract_request_path(record: logging.LogRecord) -> Optional[str]:
     return None
 
 
-def _path_from_request_obj(obj: Any) -> Optional[str]:
+def _path_from_request_obj(obj: Any) -> str | None:
     if obj is None:
         return None
 

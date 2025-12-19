@@ -59,6 +59,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'core.middleware.FreeIPAServiceClientReuseMiddleware',
     'core.middleware.FreeIPAAuthenticationMiddleware',
     'core.middleware_admin_log.AdminShadowUserLogEntryMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -218,8 +219,6 @@ AVATAR_GRAVATAR_DEFAULT = env('AVATAR_GRAVATAR_DEFAULT', default='identicon')
 # Only used if Gravatar provider cannot produce a URL (e.g. missing email).
 AVATAR_DEFAULT_URL = env('AVATAR_DEFAULT_URL', default='')
 
-FREEIPA_CACHE_TIMEOUT = env.int("FREEIPA_CACHE_TIMEOUT", default=300)
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -237,6 +236,14 @@ FREEIPA_SERVICE_PASSWORD = env("FREEIPA_SERVICE_PASSWORD", default="")
 if not FREEIPA_SERVICE_PASSWORD:
     raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
 FREEIPA_ADMIN_GROUP = env("FREEIPA_ADMIN_GROUP", default="admins")
+
+# Reuse the FreeIPA service-account client across requests (per worker thread).
+# This avoids repeated logins for admin/selfservice pages that trigger multiple
+# FreeIPA reads, and retries automatically if the session expires.
+FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS = env.bool(
+    "FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS",
+    default=True,
+)
 
 # Registration
 # Inspired by Noggin's stage-user registration flow.
