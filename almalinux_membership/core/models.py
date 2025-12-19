@@ -39,6 +39,10 @@ class IPAGroup(models.Model):
     # NOTE: Keep this model unmanaged; it mirrors FreeIPA groups.
     cn = models.CharField(max_length=255, primary_key=True)
     description = models.TextField(blank=True, default="")
+    fas_url = models.URLField(blank=True, default="", verbose_name="FAS URL")
+    fas_mailing_list = models.EmailField(blank=True, default="", verbose_name="FAS Mailing List")
+    fas_discussion_url = models.URLField(blank=True, default="", verbose_name="FAS Discussion URL")
+    fas_group = models.BooleanField(default=False, verbose_name="FAS Group ObjectClass")
 
     class Meta:
         managed = False
@@ -55,4 +59,8 @@ class IPAGroup(models.Model):
         return cls(
             cn=group.cn,
             description=getattr(group, "description", "") or "",
+            fas_url=getattr(group, "fas_url", "") or "",
+            fas_mailing_list=getattr(group, "fas_mailing_list", "") or "",
+            fas_discussion_url=getattr(group, "fas_discussion_url", "") or "",
+            fas_group=getattr(group, "fas_group", False),
         )

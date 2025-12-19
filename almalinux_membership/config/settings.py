@@ -16,6 +16,18 @@ environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 
 DEBUG = env.bool("DEBUG", default=False)
 
+# Development convenience: silence urllib3's InsecureRequestWarning spam when
+# intentionally running with verify_ssl disabled (e.g. local FreeIPA with self-signed cert).
+if DEBUG:
+    try:
+        import urllib3
+        from urllib3.exceptions import InsecureRequestWarning
+
+        urllib3.disable_warnings(InsecureRequestWarning)
+    except Exception:
+        # Best-effort; if urllib3 isn't available/changes, don't break startup.
+        pass
+
 SECRET_KEY = env(
     "SECRET_KEY",
     default="django-insecure-dev-only-change-me",

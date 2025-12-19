@@ -518,6 +518,47 @@ class FreeIPAGroup:
             members = [members]
         self.members = members
 
+        # FAS extension attributes
+        fas_url = self._group_data.get('fasurl', None)
+        if isinstance(fas_url, list):
+            fas_url = fas_url[0] if fas_url else None
+        self.fas_url = fas_url
+
+        fas_mailing_list = self._group_data.get('fasmailinglist', None)
+        if isinstance(fas_mailing_list, list):
+            fas_mailing_list = fas_mailing_list[0] if fas_mailing_list else None
+        self.fas_mailing_list = fas_mailing_list
+
+        fas_irc_channels = self._group_data.get('fasircchannel', [])
+        if isinstance(fas_irc_channels, str):
+            fas_irc_channels = [fas_irc_channels]
+        self.fas_irc_channels = fas_irc_channels
+
+        fas_discussion_url = self._group_data.get('fasdiscussionurl', None)
+        if isinstance(fas_discussion_url, list):
+            fas_discussion_url = fas_discussion_url[0] if fas_discussion_url else None
+        self.fas_discussion_url = fas_discussion_url
+
+        # Check if group has fasGroup support.
+        # Prefer an explicit `fasgroup` attribute if present (some FreeIPA
+        # deployments expose this boolean), otherwise fall back to checking
+        # objectClass membership (case-insensitive).
+        fasgroup_field = self._group_data.get('fasgroup', None)
+        if isinstance(fasgroup_field, list):
+            fasgroup_field = fasgroup_field[0] if fasgroup_field else None
+        if fasgroup_field is not None:
+            # Normalize typical boolean-ish values.
+            if isinstance(fasgroup_field, bool):
+                self.fas_group = bool(fasgroup_field)
+            else:
+                s = str(fasgroup_field).strip().upper()
+                self.fas_group = s in {"TRUE", "T", "YES", "Y", "1", "ON"}
+        else:
+            object_classes = self._group_data.get('objectclass', [])
+            if isinstance(object_classes, str):
+                object_classes = [object_classes]
+            self.fas_group = 'fasgroup' in [oc.lower() for oc in object_classes]
+    
     def __str__(self):
         return self.cn
 
@@ -573,14 +614,19 @@ class FreeIPAGroup:
         return None
 
     @classmethod
-    def create(cls, cn, description=None):
+    def create(cls, cn, description=None, fas_group: bool = False):
         """
-        Create a new group in FreeIPA.
+        Create a new group in FreeIPA. If `fas_group` is True, attempt to
+        request the fasGroup objectClass at creation time.
         """
         try:
             kwargs = {}
             if description:
                 kwargs['o_description'] = description
+
+            if fas_group:
+                kwargs['fasgroup'] = True
+
             _with_freeipa_service_client_retry(
                 cls.get_client,
                 lambda client: client.group_add(cn, **kwargs),
@@ -598,12 +644,24 @@ class FreeIPAGroup:
         updates = {}
         if self.description:
             updates['o_description'] = self.description
+        if self.fas_url:
+            updates['o_fasurl'] = self.fas_url
+        if self.fas_mailing_list:
+            updates['o_fasmailinglist'] = self.fas_mailing_list
+        if self.fas_irc_channels:
+            updates['o_fasircchannel'] = self.fas_irc_channels
+        if self.fas_discussion_url:
+            updates['o_fasdiscussionurl'] = self.fas_discussion_url
 
         try:
-            _with_freeipa_service_client_retry(
-                self.get_client,
-                lambda client: client.group_mod(self.cn, **updates),
-            )
+            if updates:
+                _with_freeipa_service_client_retry(
+                    self.get_client,
+                    lambda client: client.group_mod(self.cn, **updates),
+                )
+            else:
+                # Avoid calling group_mod with no updates (causes BadRequest)
+                return
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
@@ -614,8 +672,20 @@ class FreeIPAGroup:
     def delete(self):
         """
         Delete the group from FreeIPA.
+        First remove all members, then delete the group.
         """
         try:
+            # Remove all members first (required for group deletion in FreeIPA)
+            if self.members:
+                _with_freeipa_service_client_retry(
+                    self.get_client,
+                    lambda client: client.group_remove_member(self.cn, o_user=self.members),
+                )
+                # Invalidate caches for affected users
+                for username in self.members:
+                    _invalidate_user_cache(username)
+            
+            # Now delete the group
             _with_freeipa_service_client_retry(
                 self.get_client,
                 lambda client: client.group_del(self.cn),

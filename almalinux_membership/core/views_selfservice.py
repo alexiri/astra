@@ -272,7 +272,12 @@ def _update_user_attrs(
                 and all(d.endswith("=") for d in working_delattrs)
             ):
                 internal_clear_fallback_used = True
-                logger.warning(
+                # Some FreeIPA deployments error on `o_delattr: ["attr="]` clears
+                # with a generic "internal error". We have a safe fallback that
+                # retries the change via `o_setattr`/`o_setattr` semantics; this
+                # is expected on some servers and not actionable, so log at INFO
+                # level to reduce noise while preserving visibility.
+                logger.info(
                     "FreeIPA clear via delattr hit internal error; retrying via setattr: username=%s attrs=%s",
                     username,
                     _attr_names_from_delattrs(working_delattrs),

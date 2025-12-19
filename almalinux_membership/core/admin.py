@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
@@ -9,9 +10,16 @@ from django.contrib.auth.models import User as DjangoUser
 from django.http import HttpResponseRedirect
 from django.urls import path, reverse
 
-from .backends import FreeIPAGroup, FreeIPAUser
+from .backends import (
+    FreeIPAGroup,
+    FreeIPAUser,
+    _with_freeipa_service_client_retry,
+    _invalidate_group_cache,
+    _invalidate_groups_list_cache,
+)
 from .models import IPAGroup, IPAUser
 
+logger = logging.getLogger(__name__)
 
 def _override_post_office_log_admin():
     """Disable manual creation of django-post-office Log rows in admin.
@@ -83,13 +91,27 @@ class _ListBackedQuerySet:
         # We ignore positional Q objects and apply only simple kwarg equality.
         def matches(item):
             for key, expected in kwargs.items():
-                field = key.split("__", 1)[0]
+                # Support lookups like 'pk__in' used by admin bulk-delete.
+                if "__" in key:
+                    field, lookup = key.split("__", 1)
+                else:
+                    field, lookup = key, None
+
                 if field in {"pk", "id"}:
                     actual = getattr(item, "pk", getattr(item, "id", None))
                 else:
                     actual = getattr(item, field, None)
-                if actual != expected:
-                    return False
+
+                if lookup == "in":
+                    # expected should be an iterable of values
+                    try:
+                        if actual not in expected:
+                            return False
+                    except Exception:
+                        return False
+                else:
+                    if actual != expected:
+                        return False
             return True
 
         if not kwargs:
@@ -138,6 +160,30 @@ class _ListBackedQuerySet:
         if len(matches) > 1:
             raise self.model.MultipleObjectsReturned()
         return matches[0]
+
+    def delete(self):
+        """Delete all items represented by this QuerySet-like object.
+
+        Django admin calls `queryset.delete()` on the queryset returned by
+        `ModelAdmin.get_queryset`. For our FreeIPA-backed, unmanaged objects
+        implement a delete operation that calls the backend delete for each
+        group (based on `cn`). Returns a tuple similar to Django ORM: (count, {}).
+        """
+        deleted = 0
+        for item in list(self._items):
+            cn = getattr(item, "cn", None) or getattr(item, "pk", None) or getattr(item, "id", None)
+            if not cn:
+                continue
+            try:
+                # `FreeIPAGroup` handles member removal and cache invalidation.
+                freeipa = FreeIPAGroup.get(cn)
+                if freeipa:
+                    freeipa.delete()
+                    deleted += 1
+            except Exception:
+                logger.exception("Failed to delete FreeIPA group cn=%s", cn)
+                continue
+        return deleted, {}
 
 
 def _split_lines(value: str) -> list[str]:
@@ -239,10 +285,37 @@ class IPAGroupForm(forms.ModelForm):
         widget=forms.Textarea(attrs={"rows": 8}),
         help_text="One username per line.",
     )
+    fas_url = forms.CharField(
+        required=False,
+        label="FAS URL",
+        help_text="Fedora Account System URL for this group",
+    )
+    fas_mailing_list = forms.CharField(
+        required=False,
+        label="FAS Mailing List",
+        help_text="Fedora Account System mailing list for this group",
+    )
+    fas_irc_channels = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="One IRC channel per line",
+        label="FAS IRC Channels",
+    )
+    fas_discussion_url = forms.CharField(
+        required=False,
+        label="FAS Discussion URL",
+        help_text="Fedora Account System discussion URL for this group",
+    )
+
+    fas_group = forms.BooleanField(
+        required=False,
+        label="FAS Group ObjectClass",
+        help_text="Enable or disable the fasGroup objectClass for this group (controls FAS attribute support)",
+    )
 
     class Meta:
         model = IPAGroup
-        fields = ("cn", "description")
+        fields = ("cn", "description", "fas_url", "fas_mailing_list", "fas_discussion_url", "fas_group")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -259,6 +332,13 @@ class IPAGroupForm(forms.ModelForm):
             if freeipa:
                 self.initial.setdefault("description", getattr(freeipa, "description", "") or "")
                 self.initial.setdefault("members", "\n".join(sorted(getattr(freeipa, "members", []) or [])))
+                self.initial.setdefault("fas_url", getattr(freeipa, "fas_url", "") or "")
+                self.initial.setdefault("fas_mailing_list", getattr(freeipa, "fas_mailing_list", "") or "")
+                self.initial.setdefault("fas_irc_channels", "\n".join(sorted(getattr(freeipa, "fas_irc_channels", []) or [])))
+                self.initial.setdefault("fas_discussion_url", getattr(freeipa, "fas_discussion_url", "") or "")
+                self.initial.setdefault("fas_group", getattr(freeipa, "fas_group", False))
+            # `fas_group` is a creation-time property; disallow toggling on edit.
+            self.fields["fas_group"].disabled = True
 
     def validate_unique(self):
         # No DB; uniqueness is enforced by FreeIPA.
@@ -350,7 +430,7 @@ class IPAUserAdmin(admin.ModelAdmin):
 @admin.register(IPAGroup)
 class IPAGroupAdmin(admin.ModelAdmin):
     form = IPAGroupForm
-    list_display = ("cn", "description")
+    list_display = ("cn", "description", "fas_group", "fas_url", "fas_mailing_list")
     ordering = ("cn",)
 
     def get_queryset(self, request):
@@ -385,15 +465,62 @@ class IPAGroupAdmin(admin.ModelAdmin):
 
         desired_members = set(_split_lines(form.cleaned_data.get("members", "")))
         description = form.cleaned_data.get("description") or ""
+        fas_url = form.cleaned_data.get("fas_url") or ""
+        fas_mailing_list = form.cleaned_data.get("fas_mailing_list") or ""
+        fas_irc_channels = set(_split_lines(form.cleaned_data.get("fas_irc_channels", "")))
+        fas_discussion_url = form.cleaned_data.get("fas_discussion_url") or ""
+        fas_group = form.cleaned_data.get("fas_group", False)
 
         if not change:
-            freeipa = FreeIPAGroup.create(cn, description=description or None)
+            freeipa = FreeIPAGroup.create(cn, description=description or None, fas_group=fas_group)
+            # Enforce creation-time setting: if caller asked for a FAS-enabled
+            # group but the FreeIPA server did not expose it immediately, fail
+            # because toggling via group_mod is unsupported on some deployments.
+            if fas_group:
+                # Re-fetch authoritative state and verify.
+                freeipa = FreeIPAGroup.get(cn)
+                current_fas = bool(getattr(freeipa, "fas_group", False))
+                if not current_fas:
+                    raise RuntimeError("FreeIPA server did not create a fasGroup at creation time; toggling is not supported")
         else:
             freeipa = FreeIPAGroup.get(cn)
             if not freeipa:
                 return
-            freeipa.description = description
-            freeipa.save()
+            changed = False
+            if freeipa.description != description:
+                freeipa.description = description
+                changed = True
+            if (freeipa.fas_url or "") != (fas_url or ""):
+                freeipa.fas_url = fas_url or None
+                changed = True
+            if (freeipa.fas_mailing_list or "") != (fas_mailing_list or ""):
+                freeipa.fas_mailing_list = fas_mailing_list or None
+                changed = True
+            if sorted(freeipa.fas_irc_channels or []) != sorted(list(fas_irc_channels) if fas_irc_channels else []):
+                freeipa.fas_irc_channels = list(fas_irc_channels) if fas_irc_channels else []
+                changed = True
+            if (freeipa.fas_discussion_url or "") != (fas_discussion_url or ""):
+                freeipa.fas_discussion_url = fas_discussion_url or None
+                changed = True
+            if changed:
+                freeipa.save()
+
+        # `fas_group` is a creation-time-only property. Do not attempt to
+        # toggle it for existing groups via `group_mod` as many FreeIPA
+        # deployments do not support that reliably. If an edit attempted to
+        # change this value, ignore it and log at INFO level for visibility.
+        if change:
+            try:
+                current_fas = bool(getattr(freeipa, "fas_group", False))
+                if fas_group != current_fas:
+                    logger.info(
+                        "Ignoring fas_group toggle for existing group %s: current=%s requested=%s",
+                        cn,
+                        current_fas,
+                        fas_group,
+                    )
+            except Exception:
+                pass
 
         current_members = set(getattr(freeipa, "members", []) or [])
         for u in sorted(desired_members - current_members):

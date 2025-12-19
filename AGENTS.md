@@ -3,7 +3,7 @@
 - If you're not entirely sure how to use a library or module, look it up. Find the source code,
   docs, whatever. It's ok to ask the user for a link to the documentation or code if needed.
   - Noggin source code: githubRepo `fedora-infra/noggin`
-  - FreeIPA FAS extensions (user attributes): githubRepo `fedora-infra/freeipa-fas`
+  - FreeIPA FAS extensions (user/group attributes): githubRepo `fedora-infra/freeipa-fas`
   - python-freeipa: githubRepo `waldur/python-freeipa`
   - django-post-office: githubRepo `ui/django-post_office`. Use this for all email needs (sending emails, email templates, etc.)
   - django-ses: githubRepo `django-ses/django-ses`
