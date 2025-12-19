@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import re
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.contrib.messages import get_messages
+from django.test import Client, TestCase, override_settings
+
+
+class RegistrationFlowTests(TestCase):
+    def test_registration_email_template_exists(self):
+        from post_office.models import EmailTemplate
+
+        self.assertTrue(EmailTemplate.objects.filter(name="registration-email-validation").exists())
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_get_renders(self):
+        client = Client()
+        resp = client.get("/register/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Create account")
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_post_creates_stage_user_and_sends_email(self):
+        client = Client()
+
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_add = lambda *args, **kwargs: {
+            "result": {"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"], "mail": ["alice@example.com"]}
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+                post_office_send_mock.return_value = None
+
+                resp = client.post(
+                    "/register/",
+                    data={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "email": "alice@example.com",
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp["Location"].startswith("/register/confirm"))
+        # Registration email must use django-post-office's EmailTemplate feature
+        self.assertEqual(post_office_send_mock.call_count, 1)
+        self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "registration-email-validation")
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_activate_flow_happy_path(self):
+        client = Client()
+
+        # Arrange: register to generate an email that contains the token.
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_add = lambda *args, **kwargs: {
+            "result": {"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"], "mail": ["alice@example.com"]}
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+                post_office_send_mock.return_value = None
+
+                resp = client.post(
+                    "/register/",
+                    data={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "email": "alice@example.com",
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        activate_url = post_office_send_mock.call_args.kwargs.get("context", {}).get("activate_url", "")
+        token_match = re.search(r"token=([^\s&]+)", activate_url)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        token = token_match.group(1)
+
+        # Activation GET renders a password form.
+        ipa_client2 = SimpleNamespace()
+        ipa_client2.stageuser_show = lambda *args, **kwargs: {
+            "result": {"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"], "mail": ["alice@example.com"]}
+        }
+        ipa_client2.stageuser_activate = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+        ipa_client2.user_mod = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
+            activation_get = client.get(f"/register/activate/?token={token}")
+        self.assertEqual(activation_get.status_code, 200)
+        self.assertContains(activation_get, "Choose a password")
+
+        # Activation POST activates stage user and sets password.
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
+            with patch("core.views_registration.ClientMeta", autospec=True) as client_meta_cls:
+                client_meta = client_meta_cls.return_value
+                client_meta.change_password.return_value = None
+
+                activation_post = client.post(
+                    f"/register/activate/?token={token}",
+                    data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                    follow=False,
+                )
+
+        self.assertEqual(activation_post.status_code, 302)
+        self.assertEqual(activation_post["Location"], "/login/")
+
+        # Success message is stored in the session.
+        follow = client.get(activation_post["Location"])
+        msgs = [m.message for m in get_messages(follow.wsgi_request)]
+        self.assertTrue(any("account" in m.lower() and "created" in m.lower() for m in msgs))

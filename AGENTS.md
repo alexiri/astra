@@ -5,10 +5,11 @@
   - Noggin source code: githubRepo `fedora-infra/noggin`
   - FreeIPA FAS extensions (user attributes): githubRepo `fedora-infra/freeipa-fas`
   - python-freeipa: githubRepo `waldur/python-freeipa`
-  - django-post-office: githubRepo `ui/django-post_office`
+  - django-post-office: githubRepo `ui/django-post_office`. Use this for all email needs (sending emails, email templates, etc.)
   - django-ses: githubRepo `django-ses/django-ses`
 - Add clean code with sensible comments. Consider what you're implementing and the context, as well
   as how you can generalize functions to reduce code duplication and sources of bugs.
+- If you can reuse something already implemented elsewhere, do it. Add the least amount of code possible (but make sure all error conditions are covered!)
 - Do Test-Driven development: Add tests before you implement a new feature, make sure they cover all the
   failure scenarios and that they really *do* fail. Then implement the new feature and make sure your tests pass.
   - WHENEVER I REPORT A PROBLEM, I WANT YOU TO CREATE A TEST CASE FIRST, RUN IT TO SHOW THE FAILURE, THEN ASK 

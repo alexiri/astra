@@ -238,6 +238,12 @@ if not FREEIPA_SERVICE_PASSWORD:
     raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
 FREEIPA_ADMIN_GROUP = env("FREEIPA_ADMIN_GROUP", default="admins")
 
+# Registration
+# Inspired by Noggin's stage-user registration flow.
+REGISTRATION_OPEN = env.bool("REGISTRATION_OPEN", default=True)
+# Email validation token TTL.
+REGISTRATION_TOKEN_TTL_SECONDS = env.int("REGISTRATION_TOKEN_TTL_SECONDS", default=60 * 60 * 24)
+
 # Map FreeIPA groups to Django permissions
 # Format: {'freeipa_group_name': {'app_label.permission_codename', ...}}
 FREEIPA_GROUP_PERMISSIONS = {

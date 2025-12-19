@@ -12,6 +12,7 @@ urlpatterns = [
     path('healthz/', healthz, name='healthz'),
     path('readyz/', readyz, name='readyz'),
     path('ses/event-webhook/', SESEventWebhookView.as_view(), name='event_webhook'),
+    path('register/', include('core.urls_registration')),
     path('login/', FreeIPALoginView.as_view(), name='login'),
     path('otp/sync/', otp_sync, name='otp-sync'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),

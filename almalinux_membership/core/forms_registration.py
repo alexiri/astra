@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from django import forms
+
+
+_USERNAME_RE = r"^[a-z0-9](?:[a-z0-9-]{3,30})[a-z0-9]$"  # length 5..32, no leading/trailing '-'
+
+
+class RegistrationForm(forms.Form):
+    username = forms.RegexField(
+        regex=_USERNAME_RE,
+        label="Username",
+        min_length=5,
+        max_length=32,
+        required=True,
+        help_text='Allowed: a-z, 0-9, and "-" (no leading/trailing dashes).',
+    )
+    first_name = forms.CharField(label="First name", required=True, max_length=64)
+    last_name = forms.CharField(label="Last name", required=True, max_length=64)
+    email = forms.EmailField(label="Email address", required=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean_username(self) -> str:
+        username = (self.cleaned_data.get("username") or "").strip()
+        if username != username.lower():
+            raise forms.ValidationError("Mixed case is not allowed; use lowercase.")
+        return username
+
+    def clean_email(self) -> str:
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        return email
+
+
+class ResendRegistrationEmailForm(forms.Form):
+    username = forms.CharField(widget=forms.HiddenInput, required=True)
+
+
+class PasswordSetForm(forms.Form):
+    password = forms.CharField(
+        label="Password",
+        widget=forms.PasswordInput,
+        required=True,
+        min_length=6,
+        max_length=122,
+        help_text="Choose a strong password.",
+    )
+    password_confirm = forms.CharField(
+        label="Confirm password",
+        widget=forms.PasswordInput,
+        required=True,
+        min_length=6,
+        max_length=122,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean(self):
+        cleaned = super().clean()
+        pw = cleaned.get("password")
+        pw2 = cleaned.get("password_confirm")
+        if pw and pw2 and pw != pw2:
+            raise forms.ValidationError("Passwords must match")
+        return cleaned
