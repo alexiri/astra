@@ -57,6 +57,20 @@ class _ListBackedQuerySet:
         # Admin inspects `qs.query.select_related`.
         self.query = type("_Q", (), {"select_related": False, "order_by": []})()
 
+    @property
+    def _meta(self):
+        # Django admin actions call model_ngettext(queryset) and expect queryset
+        # to expose model metadata (verbose_name, verbose_name_plural, etc.).
+        return self.model._meta
+
+    @property
+    def verbose_name(self) -> str:
+        return self.model._meta.verbose_name
+
+    @property
+    def verbose_name_plural(self) -> str:
+        return self.model._meta.verbose_name_plural
+
     def all(self):
         return self
 
