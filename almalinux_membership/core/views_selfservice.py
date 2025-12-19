@@ -2,19 +2,24 @@ from __future__ import annotations
 
 from base64 import b32encode
 import base64
+import datetime
 import io
 import logging
 import os
 import re
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core import signing
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.module_loading import import_string
+
+import post_office.mail
 
 from python_freeipa import ClientMeta, exceptions
 
@@ -35,6 +40,46 @@ from .forms_selfservice import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def make_email_validation_token(*, username: str, attr: str, value: str) -> str:
+    payload = {"u": username, "a": attr, "v": value}
+    return signing.dumps(payload, salt=settings.SECRET_KEY)
+
+
+def read_email_validation_token(token: str) -> dict:
+    return signing.loads(token, salt=settings.SECRET_KEY, max_age=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS)
+
+
+def _send_email_validation_email(
+    request: HttpRequest,
+    *,
+    username: str,
+    name: str,
+    attr: str,
+    address: str,
+) -> None:
+    token = make_email_validation_token(username=username, attr=attr, value=address)
+    validate_url = request.build_absolute_uri(reverse("settings-email-validate")) + f"?token={quote(token)}"
+    ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
+    ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
+    valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
+    valid_until_utc = valid_until.astimezone(datetime.timezone.utc).strftime("%H:%M")
+
+    post_office.mail.send(
+        recipients=[address],
+        sender=settings.DEFAULT_FROM_EMAIL,
+        template=settings.EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME,
+        context={
+            "username": username,
+            "name": name or username,
+            "attr": attr,
+            "address": address,
+            "validate_url": validate_url,
+            "ttl_minutes": ttl_minutes,
+            "valid_until_utc": valid_until_utc,
+        },
+    )
 
 
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
@@ -686,32 +731,82 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
         setattrs: list[str] = []
         delattrs: list[str] = []
 
-        _add_change(updates=direct_updates, delattrs=delattrs, attr="mail", current_value=initial.get("mail"), new_value=form.cleaned_data["mail"])
-        _add_change_setattr(
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasRHBZEmail",
-            current_value=initial.get("fasRHBZEmail"),
-            new_value=form.cleaned_data["fasRHBZEmail"],
-        )
+        pending_validations: list[tuple[str, str]] = []  # (attr, new_value)
+
+        # For email addresses, follow Noggin behavior: changes require email validation.
+        current_mail = _normalize_str(initial.get("mail"))
+        new_mail = _normalize_str(form.cleaned_data["mail"]).lower()
+        current_rhbz = _normalize_str(initial.get("fasRHBZEmail"))
+        new_rhbz = _normalize_str(form.cleaned_data["fasRHBZEmail"]).lower()
+
+        # Reuse verification across email uses: if an address is already present in one
+        # of the two email attributes, treat it as already verified and apply immediately
+        # when setting it for the other attribute.
+        if current_mail != new_mail and new_mail:
+            if _normalize_str(current_rhbz).lower() == new_mail and current_rhbz:
+                direct_updates["o_mail"] = new_mail
+            else:
+                pending_validations.append(("mail", new_mail))
+
+        if current_rhbz != new_rhbz:
+            if new_rhbz:
+                if _normalize_str(current_mail).lower() == new_rhbz and current_mail:
+                    _add_change_setattr(
+                        setattrs=setattrs,
+                        delattrs=delattrs,
+                        attr="fasRHBZEmail",
+                        current_value=current_rhbz,
+                        new_value=new_rhbz,
+                    )
+                else:
+                    pending_validations.append(("fasRHBZEmail", new_rhbz))
+            else:
+                # Clearing does not need validation.
+                _add_change_setattr(
+                    setattrs=setattrs,
+                    delattrs=delattrs,
+                    attr="fasRHBZEmail",
+                    current_value=current_rhbz,
+                    new_value=new_rhbz,
+                )
+
         try:
-            if not direct_updates and not setattrs and not delattrs:
+            if not pending_validations and not direct_updates and not setattrs and not delattrs:
                 messages.info(request, "No changes to save.")
                 return redirect("settings-emails")
 
-            skipped, applied = _update_user_attrs(username, direct_updates=direct_updates, setattrs=setattrs, delattrs=delattrs)
-            if skipped:
-                for attr in skipped:
-                    label = _form_label_for_attr(form, attr)
-                    messages.warning(
-                        request,
-                        f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
-                    )
+            # Apply immediate changes (e.g. clears).
+            if direct_updates or setattrs or delattrs:
+                skipped, applied = _update_user_attrs(
+                    username,
+                    direct_updates=direct_updates,
+                    setattrs=setattrs,
+                    delattrs=delattrs,
+                )
+                if skipped:
+                    for attr in skipped:
+                        label = _form_label_for_attr(form, attr)
+                        messages.warning(
+                            request,
+                            f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
+                        )
 
-            if applied:
-                messages.success(request, "Email settings updated in FreeIPA.")
-            else:
-                messages.info(request, "No changes were applied.")
+                if applied:
+                    messages.success(request, "Email settings updated in FreeIPA.")
+                else:
+                    messages.info(request, "No changes were applied.")
+
+            # Send validation emails for changed addresses.
+            if pending_validations:
+                name = getattr(fu, "get_full_name", "") or f"{getattr(fu, 'first_name', '')} {getattr(fu, 'last_name', '')}".strip()
+                for attr, address in pending_validations:
+                    _send_email_validation_email(request, username=username, name=name, attr=attr, address=address)
+
+                messages.success(
+                    request,
+                    "We sent you an email to validate your new email address. Please check your inbox.",
+                )
+
             return redirect("settings-emails")
         except Exception as e:
             logger.exception("Failed to update email settings username=%s", username)
@@ -722,6 +817,72 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
 
     context = {"form": form, **_settings_context("emails")}
     return render(request, "core/settings_emails.html", context)
+
+
+@login_required(login_url="/login/")
+def settings_email_validate(request: HttpRequest) -> HttpResponse:
+    username = request.user.get_username()
+    token_string = (request.GET.get("token") or "").strip()
+    if not token_string:
+        messages.warning(request, "No token provided, please check your email validation link.")
+        return redirect("settings-emails")
+
+    try:
+        token = read_email_validation_token(token_string)
+    except signing.SignatureExpired:
+        messages.warning(request, "This token is no longer valid, please request a new validation email.")
+        return redirect("settings-emails")
+    except signing.BadSignature:
+        messages.warning(request, "The token is invalid, please request a new validation email.")
+        return redirect("settings-emails")
+
+    token_user = (token.get("u") or "").strip()
+    attr = (token.get("a") or "").strip()
+    value = (token.get("v") or "").strip().lower()
+
+    if token_user != username:
+        messages.warning(request, "This token does not belong to you.")
+        return redirect("settings-emails")
+
+    if attr not in {"mail", "fasRHBZEmail"}:
+        messages.warning(request, "The token is invalid, please request a new validation email.")
+        return redirect("settings-emails")
+
+    fu = _get_full_user(username)
+    if not fu:
+        messages.error(request, "Unable to load your FreeIPA profile.")
+        return redirect("profile")
+
+    attr_label = "E-mail Address" if attr == "mail" else "Red Hat Bugzilla Email"
+
+    if request.method == "POST":
+        direct_updates: dict[str, object] = {}
+        setattrs: list[str] = []
+        delattrs: list[str] = []
+
+        if attr == "mail":
+            direct_updates["o_mail"] = value
+        else:
+            setattrs.append(f"fasRHBZEmail={value}")
+
+        try:
+            _update_user_attrs(username, direct_updates=direct_updates, setattrs=setattrs, delattrs=delattrs)
+        except Exception as e:
+            logger.exception("Email validation apply failed username=%s attr=%s", username, attr)
+            if settings.DEBUG:
+                messages.error(request, f"Failed to validate email (debug): {e}")
+            else:
+                messages.error(request, "Failed to validate email due to an internal error.")
+            return redirect("settings-emails")
+
+        messages.success(request, "Your email address has been validated.")
+        return redirect("settings-emails")
+
+    return render(
+        request,
+        "core/settings_email_validation.html",
+        {"attr": attr, "attr_label": attr_label, "value": value, **_settings_context("emails")},
+    )
 
 
 def _split_lines(value: str) -> list[str]:

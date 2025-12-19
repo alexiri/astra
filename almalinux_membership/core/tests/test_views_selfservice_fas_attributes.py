@@ -411,20 +411,16 @@ class FASAttributesTests(TestCase):
         with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp = settings_emails(req)
+                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                        resp = settings_emails(req)
 
         self.assertEqual(resp.status_code, 302)
-        self._assert_user_mod_called_with_sets(
-            client.user_mod,
-            "alice",
-            add=set(),
-            set_={"fasRHBZEmail=alice@bugzilla.example"},
-            del_=set(),
-            direct={"o_mail": "alice@example.com"},
-        )
+        # Email changes are deferred until validated; no direct FreeIPA updates here.
+        client.user_mod.assert_not_called()
+        self.assertEqual(send_mock.call_count, 2)
 
         after_set = self._load_profile(fu)
-        self.assertEqual(after_set["fu"].email, "alice@example.com")
+        self.assertEqual(after_set["fu"].email, "")
 
         # edit
         fu.email = "alice@example.com"
@@ -447,20 +443,16 @@ class FASAttributesTests(TestCase):
         with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp2 = settings_emails(req2)
+                    with patch("post_office.mail.send", autospec=True) as send_mock2:
+                        resp2 = settings_emails(req2)
 
         self.assertEqual(resp2.status_code, 302)
-        self._assert_user_mod_called_with_sets(
-            client.user_mod,
-            "alice",
-            add=set(),
-            set_={"fasRHBZEmail=alice2@bugzilla.example"},
-            del_=set(),
-            direct={"o_mail": "alice2@example.com"},
-        )
+        client.user_mod.assert_not_called()
+        self.assertEqual(send_mock2.call_count, 2)
 
         after_edit = self._load_profile(fu)
-        self.assertEqual(after_edit["fu"].email, "alice2@example.com")
+        # Still unchanged until validation.
+        self.assertEqual(after_edit["fu"].email, "alice@example.com")
 
         # clear
         fu.email = "alice2@example.com"

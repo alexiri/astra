@@ -25,17 +25,6 @@ from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistr
 logger = logging.getLogger(__name__)
 
 
-REGISTRATION_EMAIL_TEMPLATE_NAME = "registration-email-validation"
-
-
-def _registration_token_ttl_seconds() -> int:
-    return int(getattr(settings, "REGISTRATION_TOKEN_TTL_SECONDS", 60 * 60 * 24))
-
-
-def _registration_is_open() -> bool:
-    return bool(getattr(settings, "REGISTRATION_OPEN", True))
-
-
 def make_registration_token(*, username: str, email: str) -> str:
     payload = {"u": username, "e": email}
     return signing.dumps(payload, salt=settings.SECRET_KEY)
@@ -45,7 +34,7 @@ def read_registration_token(token: str) -> dict[str, Any]:
     return signing.loads(
         token,
         salt=settings.SECRET_KEY,
-        max_age=_registration_token_ttl_seconds(),
+        max_age=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS,
     )
 
 
@@ -76,7 +65,7 @@ def _send_registration_email(request: HttpRequest, *, username: str, email: str,
     activate_url = request.build_absolute_uri(reverse("register-activate")) + f"?token={quote(token)}"
     confirm_url = request.build_absolute_uri(reverse("register-confirm")) + f"?username={quote(username)}"
 
-    ttl_seconds = _registration_token_ttl_seconds()
+    ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
     # Use a stable UTC string for emails.
@@ -85,7 +74,7 @@ def _send_registration_email(request: HttpRequest, *, username: str, email: str,
     post_office.mail.send(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=REGISTRATION_EMAIL_TEMPLATE_NAME,
+        template=settings.REGISTRATION_EMAIL_TEMPLATE_NAME,
         context={
             "username": username,
             "email": email,
@@ -103,7 +92,7 @@ def register(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         return redirect("profile")
 
-    if request.method == "POST" and not _registration_is_open():
+    if request.method == "POST" and not settings.REGISTRATION_OPEN:
         messages.warning(request, "Registration is closed at the moment.")
         return redirect("login")
 
@@ -164,7 +153,7 @@ def register(request: HttpRequest) -> HttpResponse:
 
         return redirect(f"{reverse('register-confirm')}?username={username}")
 
-    return render(request, "core/register.html", {"form": form, "registration_open": _registration_is_open()})
+    return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
 
 
 def confirm(request: HttpRequest) -> HttpResponse:

@@ -10,6 +10,7 @@ urlpatterns = [
 
     path('settings/profile/', views.settings_profile, name='settings-profile'),
     path('settings/emails/', views.settings_emails, name='settings-emails'),
+    path('settings/emails/validate/', views.settings_email_validate, name='settings-email-validate'),
     path('settings/keys/', views.settings_keys, name='settings-keys'),
     path('settings/otp/', views.settings_otp, name='settings-otp'),
     path('settings/otp/enable/', views.otp_enable, name='otp-enable'),

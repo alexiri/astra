@@ -1,0 +1,31 @@
+{% extends "core/base.html" %}
+
+{% block title %}Settings - Emails{% endblock %}
+
+{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+
+{% block content %}
+{% include 'core/_settings_tabs.html' %}
+
+<div class="card mt-3">
+  <div class="card-header">
+    <h3 class="card-title mb-0">Validate your email address</h3>
+  </div>
+
+  <div class="card-body">
+    <p class="mb-0">
+      Do you want to set <strong>{{ attr_label }}</strong> to <strong>{{ value }}</strong>?
+    </p>
+  </div>
+
+  <div class="card-footer">
+    <form action="{{ request.get_full_path }}" method="post" class="m-0">
+      {% csrf_token %}
+      <div class="d-flex justify-content-between">
+        <a class="btn btn-secondary" href="{% url 'settings-emails' %}">Cancel</a>
+        <button class="btn btn-primary" type="submit">Confirm</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
