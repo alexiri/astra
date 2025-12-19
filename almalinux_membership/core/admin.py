@@ -17,6 +17,7 @@ from .backends import (
     _invalidate_group_cache,
     _invalidate_groups_list_cache,
 )
+from .listbacked_queryset import _ListBackedQuerySet
 from .models import IPAGroup, IPAUser
 
 logger = logging.getLogger(__name__)
@@ -51,139 +52,6 @@ def _override_post_office_log_admin():
 
 
 _override_post_office_log_admin()
-
-class _ListBackedQuerySet:
-    """Minimal QuerySet-like wrapper for Django admin changelist.
-
-    Django admin's changelist expects something sliceable with .count() and
-    basic iteration semantics. This avoids hitting the DB for unmanaged models.
-    """
-
-    def __init__(self, model, items):
-        self.model = model
-        self._items = list(items)
-        # Admin inspects `qs.query.select_related`.
-        self.query = type("_Q", (), {"select_related": False, "order_by": []})()
-
-    @property
-    def _meta(self):
-        # Django admin actions call model_ngettext(queryset) and expect queryset
-        # to expose model metadata (verbose_name, verbose_name_plural, etc.).
-        return self.model._meta
-
-    @property
-    def verbose_name(self) -> str:
-        return self.model._meta.verbose_name
-
-    @property
-    def verbose_name_plural(self) -> str:
-        return self.model._meta.verbose_name_plural
-
-    def all(self):
-        return self
-
-    def select_related(self, *fields):
-        self.query.select_related = True
-        return self
-
-    def filter(self, *args, **kwargs):
-        # Django admin may call .filter(Q(...)) even when our backend isn't ORM.
-        # We ignore positional Q objects and apply only simple kwarg equality.
-        def matches(item):
-            for key, expected in kwargs.items():
-                # Support lookups like 'pk__in' used by admin bulk-delete.
-                if "__" in key:
-                    field, lookup = key.split("__", 1)
-                else:
-                    field, lookup = key, None
-
-                if field in {"pk", "id"}:
-                    actual = getattr(item, "pk", getattr(item, "id", None))
-                else:
-                    actual = getattr(item, field, None)
-
-                if lookup == "in":
-                    # expected should be an iterable of values
-                    try:
-                        if actual not in expected:
-                            return False
-                    except Exception:
-                        return False
-                else:
-                    if actual != expected:
-                        return False
-            return True
-
-        if not kwargs:
-            return self
-
-        return _ListBackedQuerySet(self.model, [i for i in self._items if matches(i)])
-
-    def order_by(self, *fields):
-        items = list(self._items)
-        self.query.order_by = list(fields or [])
-        # Apply sorts from right to left to mimic multi-key ordering.
-        for field in reversed(fields or []):
-            reverse_sort = False
-            name = field
-            if isinstance(name, str) and name.startswith("-"):
-                reverse_sort = True
-                name = name[1:]
-            items.sort(key=lambda o: getattr(o, name, ""), reverse=reverse_sort)
-        return _ListBackedQuerySet(self.model, items)
-
-    def count(self):
-        return len(self._items)
-
-    def __len__(self):
-        return len(self._items)
-
-    def __iter__(self):
-        return iter(self._items)
-
-    def __getitem__(self, key):
-        return self._items[key]
-
-    def _clone(self):
-        clone = _ListBackedQuerySet(self.model, list(self._items))
-        clone.query.select_related = getattr(self.query, "select_related", False)
-        clone.query.order_by = list(getattr(self.query, "order_by", []))
-        return clone
-
-    def distinct(self, *args, **kwargs):
-        return self
-
-    def get(self, **kwargs):
-        matches = list(self.filter(**kwargs))
-        if not matches:
-            raise self.model.DoesNotExist()
-        if len(matches) > 1:
-            raise self.model.MultipleObjectsReturned()
-        return matches[0]
-
-    def delete(self):
-        """Delete all items represented by this QuerySet-like object.
-
-        Django admin calls `queryset.delete()` on the queryset returned by
-        `ModelAdmin.get_queryset`. For our FreeIPA-backed, unmanaged objects
-        implement a delete operation that calls the backend delete for each
-        group (based on `cn`). Returns a tuple similar to Django ORM: (count, {}).
-        """
-        deleted = 0
-        for item in list(self._items):
-            cn = getattr(item, "cn", None) or getattr(item, "pk", None) or getattr(item, "id", None)
-            if not cn:
-                continue
-            try:
-                # `FreeIPAGroup` handles member removal and cache invalidation.
-                freeipa = FreeIPAGroup.get(cn)
-                if freeipa:
-                    freeipa.delete()
-                    deleted += 1
-            except Exception:
-                logger.exception("Failed to delete FreeIPA group cn=%s", cn)
-                continue
-        return deleted, {}
 
 
 def _split_lines(value: str) -> list[str]:
