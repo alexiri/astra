@@ -63,6 +63,8 @@ body {
   font-weight: 650;
   border-top-color: var(--alx-navy);
   background: #fff;
+  border-left: 1px solid var(--alx-border);
+  border-right: 1px solid var(--alx-border);
 }
 
 .settings-page .card {
