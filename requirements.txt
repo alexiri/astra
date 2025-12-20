@@ -6,6 +6,7 @@ django-storages[boto3]
 django-environ
 django-ses[events]
 django-post-office
+django-logentry-admin
 gunicorn
 Pillow
 python-freeipa
