@@ -93,7 +93,7 @@ class FASAttributesTests(TestCase):
             data[attr] = [str(cur)]
             return data[attr]
 
-        # setattrs like ["fasLocale=en_US", "fasMatrix="]
+        # setattrs like ["fasLocale=en_US", "fasTimezone="]
         for item in (call_kwargs.get("o_setattr", []) or []):
             if "=" not in item:
                 continue
@@ -174,8 +174,7 @@ class FASAttributesTests(TestCase):
                 "fasTimezone": "UTC",
                 "fasWebsiteUrl": "https://example.com",
                 "fasRssUrl": "https://example.com/rss.xml",
-                "fasIRCNick": "alice",
-                "fasMatrix": "alice:matrix.example",
+                "fasIRCNick": "alice\nmatrix://matrix.example/alice",
                 "fasGitHubUsername": "alice-1",
                 "fasGitLabUsername": "alice_1",
                 "fasIsPrivate": "on",
@@ -197,12 +196,12 @@ class FASAttributesTests(TestCase):
                 "fasPronoun=she/her",
                 "fasWebsiteUrl=https://example.com",
                 "fasRssUrl=https://example.com/rss.xml",
-                "fasIRCNick=alice",
+                "fasIRCNick=irc:/alice",
+                "fasIRCNick=matrix://matrix.example/alice",
             },
             set_={
                 "fasLocale=en_US",
                 "fasTimezone=UTC",
-                "fasMatrix=alice:matrix.example",
                 "fasGitHubUsername=alice-1",
                 "fasGitLabUsername=alice_1",
                 "fasIsPrivate=TRUE",
@@ -235,8 +234,7 @@ class FASAttributesTests(TestCase):
                 "fasTimezone": ["UTC"],
                 "fasWebsiteUrl": ["https://old.example.com"],
                 "fasRssUrl": ["https://old.example.com/rss.xml"],
-                "fasIRCNick": ["alice"],
-                "fasMatrix": ["alice:matrix.old"],
+                "fasIRCNick": ["irc:/alice", "matrix://matrix.old/alice"],
                 "fasGitHubUsername": ["alice-old"],
                 "fasGitLabUsername": ["alice_old"],
                 "fasIsPrivate": ["TRUE"],
@@ -259,8 +257,7 @@ class FASAttributesTests(TestCase):
                 "fasTimezone": "Europe/Paris",
                 "fasWebsiteUrl": "https://new.example.com",
                 "fasRssUrl": "https://old.example.com/rss.xml\nhttps://new.example.com/rss.xml",
-                "fasIRCNick": "alice:new.irc.example",
-                "fasMatrix": "alice:matrix.example",
+                "fasIRCNick": "alice:new.irc.example\n@alice:matrix.example",
                 "fasGitHubUsername": "alice-1",
                 "fasGitLabUsername": "alice_1",
                 # unchecked -> False
@@ -282,12 +279,12 @@ class FASAttributesTests(TestCase):
                 "fasPronoun=they/them",
                 "fasWebsiteUrl=https://new.example.com",
                 "fasRssUrl=https://new.example.com/rss.xml",
-                "fasIRCNick=alice:new.irc.example",
+                "fasIRCNick=irc://new.irc.example/alice",
+                "fasIRCNick=matrix://matrix.example/alice",
             },
             set_={
                 "fasLocale=fr_FR",
                 "fasTimezone=Europe/Paris",
-                "fasMatrix=alice:matrix.example",
                 "fasGitHubUsername=alice-1",
                 "fasGitLabUsername=alice_1",
                 "fasIsPrivate=FALSE",
@@ -295,7 +292,8 @@ class FASAttributesTests(TestCase):
             del_={
                 "fasPronoun=she/her",
                 "fasWebsiteUrl=https://old.example.com",
-                "fasIRCNick=alice",
+                "fasIRCNick=irc:/alice",
+                "fasIRCNick=matrix://matrix.old/alice",
             },
             direct={
                 "o_givenname": "Alicia",
@@ -323,8 +321,7 @@ class FASAttributesTests(TestCase):
                 "fasTimezone": ["UTC"],
                 "fasWebsiteUrl": ["https://example.com"],
                 "fasRssUrl": ["https://example.com/rss.xml"],
-                "fasIRCNick": ["alice"],
-                "fasMatrix": ["alice:matrix.example"],
+                "fasIRCNick": ["irc:/alice", "matrix://matrix.example/alice"],
                 "fasGitHubUsername": ["alice-1"],
                 "fasGitLabUsername": ["alice_1"],
                 "fasIsPrivate": ["TRUE"],
@@ -348,7 +345,6 @@ class FASAttributesTests(TestCase):
                 "fasWebsiteUrl": "",
                 "fasRssUrl": "",
                 "fasIRCNick": "",
-                "fasMatrix": "",
                 "fasGitHubUsername": "",
                 "fasGitLabUsername": "",
                 # unchecked -> False
@@ -375,8 +371,8 @@ class FASAttributesTests(TestCase):
                 "fasTimezone=",
                 "fasWebsiteUrl=https://example.com",
                 "fasRssUrl=https://example.com/rss.xml",
-                "fasIRCNick=alice",
-                "fasMatrix=",
+                "fasIRCNick=irc:/alice",
+                "fasIRCNick=matrix://matrix.example/alice",
                 "fasGitHubUsername=",
                 "fasGitLabUsername=",
             },

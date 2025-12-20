@@ -1,55 +1,194 @@
 {% extends 'core/base.html' %}
 
 {% load avatar_tags %}
+{% load core_chat %}
 
 {% block title %}Profile{% endblock %}
 
 {% block content %}
-<div class="row">
-  <div class="col-lg-4">
-    <div class="card">
-      <div class="card-body text-center">
-        {% avatar request.user 140 class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" %}
+<div class="profile-page">
+  <div class="row">
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body text-center">
+          <div class="d-none d-md-block">
+            {% avatar request.user 220 class="img-fluid img-circle mb-3" style="width:220px;height:220px;object-fit:cover;" alt="Avatar" %}
+          </div>
+          <div class="d-md-none">
+            {% avatar request.user 140 class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" %}
+          </div>
 
-        <h3 class="profile-username text-center">{{ fu.get_full_name }}</h3>
-        <p class="text-muted text-center">{{ fu.username }}</p>
-        <p class="text-center">{{ fu.email }}</p>
+          <h3 class="profile-username mb-1">{{ fu.get_full_name }}</h3>
+          <div class="text-muted" id="user_username">{{ fu.username }}</div>
+          {% if fu.email %}
+            <div class="mt-1" id="user_mail"><a href="mailto:{{ fu.email }}">{{ fu.email }}</a></div>
+          {% endif %}
 
-        <a class="btn btn-primary btn-block" href="{% url 'settings-profile' %}">Edit Profile</a>
+          <div class="mt-3">
+            <a class="btn btn-primary btn-block" href="{% url 'settings-profile' %}">Edit Profile</a>
+          </div>
+        </div>
+
+        <ul class="list-group list-group-flush" id="user_attributes">
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <strong class="profile-attr-label" title="Pronouns"><i class="fas fa-user-tag"></i> Pronouns</strong>
+            <div class="profile-attr-value text-end">{{ pronouns|default:"" }}</div>
+          </li>
+
+          {% if locale %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Locale"><i class="fas fa-language"></i> Locale</strong>
+              <div class="profile-attr-value text-end">{{ locale }}</div>
+            </li>
+          {% endif %}
+
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <strong class="profile-attr-label" title="Timezone"><i class="fas fa-globe"></i> Timezone</strong>
+            <div class="profile-attr-value text-end">{{ timezone }}</div>
+          </li>
+          <li class="list-group-item" id="user-timezone" data-timezone="{{ timezone_name|default:'' }}">
+            <div class="d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Current Time"><i class="far fa-clock"></i> Current Time</strong>
+              <div class="profile-attr-value text-end" id="user-time">{{ current_time|date:"l H:i:s" }}</div>
+            </div>
+          </li>
+
+          {% if irc_nicks %}
+            <li class="list-group-item d-flex justify-content-between">
+              <strong class="profile-attr-label" title="Chat"><i class="fas fa-comments"></i> Chat</strong>
+              <div class="profile-attr-value text-end">
+                {% for nick in irc_nicks %}
+                  <div class="mb-0 text-monospace profile-chat-item">{{ nick|nickname }}</div>
+                {% endfor %}
+              </div>
+            </li>
+          {% endif %}
+
+          {% if website_urls %}
+            <li class="list-group-item d-flex justify-content-between">
+              <strong class="profile-attr-label" title="Blog URL"><i class="fas fa-link"></i> Blog</strong>
+              <div class="profile-attr-value text-end">
+                {% for url in website_urls %}
+                  <div class="mb-0 text-monospace"><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></div>
+                {% endfor %}
+              </div>
+            </li>
+          {% endif %}
+
+          {% if rss_urls %}
+            <li class="list-group-item d-flex justify-content-between">
+              <strong class="profile-attr-label" title="RSS URL"><i class="fas fa-rss"></i> RSS</strong>
+              <div class="profile-attr-value text-end">
+                {% for url in rss_urls %}
+                  <div class="mb-0 text-monospace"><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></div>
+                {% endfor %}
+              </div>
+            </li>
+          {% endif %}
+
+          {% if rhbz_email %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="RHBZ"><i class="fas fa-bug"></i> RHBZ</strong>
+              <div class="profile-attr-value text-end">{{ rhbz_email }}</div>
+            </li>
+          {% endif %}
+
+          {% if github_username %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="GitHub"><i class="fab fa-github"></i> GitHub</strong>
+              <div class="profile-attr-value text-end">
+                <a href="https://github.com/{{ github_username }}" target="_blank" rel="noopener noreferrer">@{{ github_username }}</a>
+              </div>
+            </li>
+          {% endif %}
+
+          {% if gitlab_username %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="GitLab"><i class="fab fa-gitlab"></i> GitLab</strong>
+              <div class="profile-attr-value text-end">
+                <a href="https://gitlab.com/{{ gitlab_username }}" target="_blank" rel="noopener noreferrer">@{{ gitlab_username }}</a>
+              </div>
+            </li>
+          {% endif %}
+
+          {% if gpg_keys %}
+            <li class="list-group-item">
+              <strong class="profile-attr-label" title="GPG Keys"><i class="fas fa-key"></i> GPG Keys</strong>
+              <div class="mt-2 profile-pre-list">
+                {% for keyid in gpg_keys %}
+                  <pre class="mb-1">{{ keyid }}</pre>
+                {% endfor %}
+              </div>
+            </li>
+          {% endif %}
+
+          {% if ssh_keys %}
+            <li class="list-group-item">
+              <strong class="profile-attr-label" title="SSH Keys"><i class="fas fa-key"></i> SSH Keys</strong>
+              <div class="mt-2 profile-pre-list">
+                {% for key in ssh_keys %}
+                  <pre class="mb-1">{{ key }}</pre>
+                {% endfor %}
+              </div>
+            </li>
+          {% endif %}
+        </ul>
       </div>
+    </div>
 
-      <ul class="list-group list-group-flush">
-        <li class="list-group-item">
-          <b>Pronouns</b> <span class="float-right">{{ pronouns|default:"" }}</span>
+    <div class="col-md-8">
+      <ul class="list-group h-100 profile-memberships">
+        <li class="list-group-item profile-memberships-header text-right">
+          <strong>{{ groups_count }} Group(s), {{ agreements_count }} Agreement(s)</strong>
         </li>
-        <li class="list-group-item">
-          <b>Timezone</b> <span class="float-right">{{ timezone }}</span>
-        </li>
-        <li class="list-group-item">
-          <b>Current Time</b>
-          <span class="float-right">{{ current_time|date:"DATETIME_FORMAT" }}</span>
-        </li>
+
+        {% if groups %}
+          {% for g in groups %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-users profile-group-icon"></i>
+                <div class="profile-group-name">{{ g }}</div>
+              </div>
+            </li>
+          {% endfor %}
+        {% else %}
+          <li class="list-group-item text-muted text-center py-5">
+            {{ fu.username }} has no group memberships
+          </li>
+        {% endif %}
       </ul>
     </div>
   </div>
-
-  <div class="col-lg-8">
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">{{ groups_count }} Group(s), {{ agreements_count }} Agreement(s)</h3>
-      </div>
-      <div class="card-body">
-        {% if groups %}
-          <ul class="list-unstyled">
-            {% for g in groups %}
-              <li><i class="fas fa-users mr-2"></i>{{ g }}</li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="text-muted">{{ fu.username }} has no group memberships</p>
-        {% endif %}
-      </div>
-    </div>
-  </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var tzNode = document.getElementById('user-timezone');
+  var timeNode = document.getElementById('user-time');
+  if (!tzNode || !timeNode) return;
+
+  var tz = tzNode.getAttribute('data-timezone') || '';
+  if (!tz) return;
+
+  function updateTime() {
+    try {
+      var now = new Date();
+      timeNode.textContent = now.toLocaleString(undefined, {
+        timeZone: tz,
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    } catch (e) {
+      // If the browser doesn't support the timezone, keep the server-rendered time.
+    }
+  }
+
+  updateTime();
+  window.setInterval(updateTime, 1000);
+})();
+</script>
 {% endblock %}

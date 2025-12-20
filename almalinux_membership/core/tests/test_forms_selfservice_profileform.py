@@ -39,27 +39,21 @@ class ProfileFormValidationTests(SimpleTestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["fasGitLabUsername"], "good.name")
 
-    def test_matrix_normalizes_at_to_server_separator(self):
+    def test_chat_nick_accepts_matrix_url_forms_and_keeps_scheme(self):
         form = ProfileForm(
             data={
                 "givenname": "Alice",
                 "sn": "User",
-                "fasMatrix": "@alice@example.org",
+                "fasIRCNick": "matrix://matrix.example/alice\nmatrix:/bob",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.cleaned_data["fasMatrix"], "alice:example.org")
 
-    def test_matrix_rejects_invalid_localpart(self):
-        form = ProfileForm(
-            data={
-                "givenname": "Alice",
-                "sn": "User",
-                "fasMatrix": "alice!bad:example.org",
-            }
-        )
-        self.assertFalse(form.is_valid())
-        self.assertIn("fasMatrix", form.errors)
+        # Noggin stores chat nicks as URLs that include the scheme (irc/matrix).
+        # This ensures we can render correct links later.
+        cleaned = form.cleaned_data["fasIRCNick"].splitlines()
+        self.assertIn("matrix://matrix.example/alice", cleaned)
+        self.assertIn("matrix:/bob", cleaned)
 
     def test_timezone_accepts_valid_iana_timezone(self):
         form = ProfileForm(
@@ -123,4 +117,4 @@ class ProfileFormValidationTests(SimpleTestCase):
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.cleaned_data["fasIRCNick"].strip(), "nick:irc.example.org")
+        self.assertEqual(form.cleaned_data["fasIRCNick"].strip(), "irc://irc.example.org/nick")

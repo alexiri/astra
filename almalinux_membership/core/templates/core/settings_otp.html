@@ -2,11 +2,12 @@
 
 {% block title %}Settings - OTP{% endblock %}
 
-{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+{% block header %}
+  <h1 class="m-0">Settings for <a href="{% url 'profile' %}">{{ request.user.get_username }}</a></h1>
+{% endblock %}
 
 {% block content %}
-{% include 'core/_settings_tabs.html' %}
-
+<div class="settings-page">
 {% if otp_uri %}
 <div class="modal fade" id="otp-modal" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog" role="document">
@@ -108,7 +109,10 @@
   </div>
 </div>
 
-<div class="card mt-3">
+<div class="card settings-card mt-3">
+  <div class="card-header p-0 alx-card-tabs-header">
+    {% include 'core/_settings_tabs.html' %}
+  </div>
   <div class="card-body">
     <div class="d-flex">
       <h5 class="mb-3">OTP Tokens</h5>
@@ -164,6 +168,7 @@
       </div>
     {% endfor %}
   </div>
+</div>
 </div>
 {% endblock %}
 

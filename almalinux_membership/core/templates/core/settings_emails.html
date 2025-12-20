@@ -2,12 +2,17 @@
 
 {% block title %}Settings - Emails{% endblock %}
 
-{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+{% block header %}
+  <h1 class="m-0">Settings for <a href="{% url 'profile' %}">{{ request.user.get_username }}</a></h1>
+{% endblock %}
 
 {% block content %}
-{% include 'core/_settings_tabs.html' %}
-<div class="card mt-3">
-  <div class="card-body">
+<div class="settings-page">
+  <div class="card settings-card mt-3">
+    <div class="card-header p-0 alx-card-tabs-header">
+      {% include 'core/_settings_tabs.html' %}
+    </div>
+    <div class="card-body">
     <form method="post" novalidate>
       {% csrf_token %}
 
@@ -29,6 +34,7 @@
 
       <button type="submit" class="btn btn-primary">Save</button>
     </form>
+    </div>
   </div>
 </div>
 {% endblock %}

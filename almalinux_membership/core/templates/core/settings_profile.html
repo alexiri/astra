@@ -1,142 +1,413 @@
 {% extends 'core/base.html' %}
 
+{% load avatar_tags %}
+
 {% block title %}Settings{% endblock %}
 
-{% block header %}<h1 class="m-0">Settings</h1>{% endblock %}
+{% block header %}
+  <h1 class="m-0">Settings for <a href="{% url 'profile' %}">{{ request.user.get_username }}</a></h1>
+{% endblock %}
 
 {% block content %}
-{% include 'core/_settings_tabs.html' %}
-<div class="card mt-3">
-  <form method="post" novalidate>
-    {% csrf_token %}
+<div class="settings-page">
+  <div class="card settings-card mt-3">
+    <div class="card-header p-0 alx-card-tabs-header">
+      {% include 'core/_settings_tabs.html' %}
+    </div>
 
-    <div class="card-body">
-      {% if form.non_field_errors %}
-        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
-      {% endif %}
+    <form method="post" novalidate class="m-0">
+      {% csrf_token %}
 
-      <div class="mb-3">
-        <a class="btn btn-outline-secondary" href="{% url 'avatar-manage' %}" target="_blank" rel="noopener">Change avatar</a>
-        <small class="form-text text-muted">
-          We don’t host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).
-        </small>
-      </div>
+      <div class="card-body">
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+        {% endif %}
 
-      <div class="form-row">
-        <div class="form-group col-md-6">
-          {{ form.givenname.label_tag }}
-          {{ form.givenname }}
-          {% if form.givenname.errors %}<div class="invalid-feedback d-block">{{ form.givenname.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group col-md-6">
-          {{ form.sn.label_tag }}
-          {{ form.sn }}
-          {% if form.sn.errors %}<div class="invalid-feedback d-block">{{ form.sn.errors }}</div>{% endif %}
-        </div>
-      </div>
-
-      <div class="form-group">
-        {{ form.fasPronoun.label_tag }}
-        {{ form.fasPronoun }}
-        {% if form.fasPronoun.errors %}<div class="invalid-feedback d-block">{{ form.fasPronoun.errors }}</div>{% endif %}
-        {% if form.fasPronoun.help_text %}<small class="form-text text-muted">{{ form.fasPronoun.help_text }}</small>{% endif %}
-        <datalist id="pronoun-options">
-          <option value="she / her / hers"></option>
-          <option value="he / him / his"></option>
-          <option value="they / them / theirs"></option>
-        </datalist>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group col-md-6">
-          {{ form.fasLocale.label_tag }}
-          {{ form.fasLocale }}
-          {% if form.fasLocale.errors %}<div class="invalid-feedback d-block">{{ form.fasLocale.errors }}</div>{% endif %}
-          {% if form.fasLocale.help_text %}<small class="form-text text-muted">{{ form.fasLocale.help_text }}</small>{% endif %}
-        </div>
-        <div class="form-group col-md-6">
-          {{ form.fasTimezone.label_tag }}
-          {{ form.fasTimezone }}
-          {% if form.fasTimezone.errors %}<div class="invalid-feedback d-block">{{ form.fasTimezone.errors }}</div>{% endif %}
-          {% if form.fasTimezone.help_text %}<small class="form-text text-muted">{{ form.fasTimezone.help_text }}</small>{% endif %}
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group col-md-6">
-          {{ form.fasWebsiteUrl.label_tag }}
-          {{ form.fasWebsiteUrl }}
-          {% if form.fasWebsiteUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasWebsiteUrl.errors }}</div>{% endif %}
-          {% if form.fasWebsiteUrl.help_text %}<small class="form-text text-muted">{{ form.fasWebsiteUrl.help_text }}</small>{% endif %}
-        </div>
-        <div class="form-group col-md-6">
-          {{ form.fasRssUrl.label_tag }}
-          {{ form.fasRssUrl }}
-          {% if form.fasRssUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasRssUrl.errors }}</div>{% endif %}
-          {% if form.fasRssUrl.help_text %}<small class="form-text text-muted">{{ form.fasRssUrl.help_text }}</small>{% endif %}
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label>Chat Nicknames</label>
-        <div class="form-row">
-          <div class="form-group col-md-6">
-            {{ form.fasIRCNick.label_tag }}
-            {{ form.fasIRCNick }}
-            {% if form.fasIRCNick.errors %}<div class="invalid-feedback d-block">{{ form.fasIRCNick.errors }}</div>{% endif %}
-            {% if form.fasIRCNick.help_text %}<small class="form-text text-muted">{{ form.fasIRCNick.help_text }}</small>{% endif %}
+        <div class="settings-form">
+          <div class="settings-profile-hero mb-4">
+            <div class="d-flex align-items-center">
+              <div class="settings-profile-avatar">
+                {% avatar request.user 96 class="img-fluid img-circle" style="width:96px;height:96px;object-fit:cover;" alt="Avatar" %}
+              </div>
+              <div class="ml-3">
+                <a class="btn btn-outline-secondary" href="{% url 'avatar-manage' %}" target="_blank" rel="noopener">Change avatar</a>
+                <div class="mt-1">
+                  <small class="text-muted">We don’t host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).</small>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="form-group col-md-6">
-            {{ form.fasMatrix.label_tag }}
+
+          <div class="form-row">
+            <div class="form-group col-md-6">
+              {{ form.givenname.label_tag }}
+              {{ form.givenname }}
+              {% if form.givenname.errors %}<div class="invalid-feedback d-block">{{ form.givenname.errors }}</div>{% endif %}
+            </div>
+            <div class="form-group col-md-6">
+              {{ form.sn.label_tag }}
+              {{ form.sn }}
+              {% if form.sn.errors %}<div class="invalid-feedback d-block">{{ form.sn.errors }}</div>{% endif %}
+            </div>
+          </div>
+
+          <div class="form-group">
+            {{ form.fasPronoun.label_tag }}
+            {{ form.fasPronoun }}
+            {% if form.fasPronoun.errors %}<div class="invalid-feedback d-block">{{ form.fasPronoun.errors }}</div>{% endif %}
+            {% if form.fasPronoun.help_text %}<small class="form-text text-muted">{{ form.fasPronoun.help_text }}</small>{% endif %}
+            <datalist id="pronoun-options">
+              <option value="she / her / hers"></option>
+              <option value="he / him / his"></option>
+              <option value="they / them / theirs"></option>
+            </datalist>
+          </div>
+
+          <div class="form-group">
+            {{ form.fasLocale.label_tag }}
+            {{ form.fasLocale }}
+            {% if form.fasLocale.errors %}<div class="invalid-feedback d-block">{{ form.fasLocale.errors }}</div>{% endif %}
+            {% if form.fasLocale.help_text %}<small class="form-text text-muted">{{ form.fasLocale.help_text }}</small>{% endif %}
+          </div>
+
+          <div class="form-group">
+            {{ form.fasTimezone.label_tag }}
+            {{ form.fasTimezone }}
+            {% if form.fasTimezone.errors %}<div class="invalid-feedback d-block">{{ form.fasTimezone.errors }}</div>{% endif %}
+            {% if form.fasTimezone.help_text %}<small class="form-text text-muted">{{ form.fasTimezone.help_text }}</small>{% endif %}
+          </div>
+
+          <div class="form-group">
+            {{ form.fasWebsiteUrl.label_tag }}
+            {{ form.fasWebsiteUrl }}
+            {% if form.fasWebsiteUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasWebsiteUrl.errors }}</div>{% endif %}
+            {% if form.fasWebsiteUrl.help_text %}<small class="form-text text-muted">{{ form.fasWebsiteUrl.help_text }}</small>{% endif %}
+          </div>
+
+          <div class="form-group">
+            {{ form.fasRssUrl.label_tag }}
+            {{ form.fasRssUrl }}
+            {% if form.fasRssUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasRssUrl.errors }}</div>{% endif %}
+            {% if form.fasRssUrl.help_text %}<small class="form-text text-muted">{{ form.fasRssUrl.help_text }}</small>{% endif %}
+          </div>
+
+          <div class="form-group">
+            <label>Chat Nicknames</label>
+
+            <small class="form-text text-muted">
+              The format is either <strong>username</strong> or <strong>username:server.name</strong> if you're not using the default servers:
+              <ul class="mb-0">
+                <li>For IRC: <strong>{{ chat_networks.irc.default_server }}</strong></li>
+                <li>For Matrix: <strong>{{ chat_networks.matrix.default_server }}</strong></li>
+              </ul>
+            </small>
+
+            <div id="chat-nicks-widget" class="d-none" data-irc-default-server="{{ chat_networks.irc.default_server }}" data-matrix-default-server="{{ chat_networks.matrix.default_server }}">
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle mb-2" id="chat-nicks-table">
+                  <tbody></tbody>
+                </table>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-nicks-add">Add nickname</button>
+            </div>
+
+            <div id="chat-nicks-fallback">
+              {{ form.fasIRCNick.label_tag }}
+              {{ form.fasIRCNick }}
+              {% if form.fasIRCNick.errors %}<div class="invalid-feedback d-block">{{ form.fasIRCNick.errors }}</div>{% endif %}
+              {% if form.fasIRCNick.help_text %}<small class="form-text text-muted">{{ form.fasIRCNick.help_text }}</small>{% endif %}
+            </div>
+          </div>
+
+          <div class="form-group">
+            {{ form.fasGitHubUsername.label_tag }}
             <div class="input-group">
               <div class="input-group-prepend">
                 <span class="input-group-text">@</span>
               </div>
-              {{ form.fasMatrix }}
+              {{ form.fasGitHubUsername }}
             </div>
-            {% if form.fasMatrix.errors %}<div class="invalid-feedback d-block">{{ form.fasMatrix.errors }}</div>{% endif %}
-            <small class="form-text text-muted">For Matrix: <code>username</code> or <code>username:server.name</code>.</small>
+            {% if form.fasGitHubUsername.errors %}<div class="invalid-feedback d-block">{{ form.fasGitHubUsername.errors }}</div>{% endif %}
+          </div>
+
+          <div class="form-group">
+            {{ form.fasGitLabUsername.label_tag }}
+            <div class="input-group">
+              <div class="input-group-prepend">
+                <span class="input-group-text">@</span>
+              </div>
+              {{ form.fasGitLabUsername }}
+            </div>
+            {% if form.fasGitLabUsername.errors %}<div class="invalid-feedback d-block">{{ form.fasGitLabUsername.errors }}</div>{% endif %}
+          </div>
+
+          <div class="form-group form-check">
+            {{ form.fasIsPrivate }}
+            <label class="form-check-label" for="{{ form.fasIsPrivate.id_for_label }}">{{ form.fasIsPrivate.label }} <small class="text-muted">Hide information from other users.</small></label>
+            {% if form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ form.fasIsPrivate.errors }}</div>{% endif %}
           </div>
         </div>
       </div>
 
-      <div class="form-row">
-        <div class="form-group col-md-6">
-          {{ form.fasGitHubUsername.label_tag }}
-          <div class="input-group">
-            <div class="input-group-prepend">
-              <span class="input-group-text">@</span>
-            </div>
-            {{ form.fasGitHubUsername }}
-          </div>
-          {% if form.fasGitHubUsername.errors %}<div class="invalid-feedback d-block">{{ form.fasGitHubUsername.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group col-md-6">
-          {{ form.fasGitLabUsername.label_tag }}
-          <div class="input-group">
-            <div class="input-group-prepend">
-              <span class="input-group-text">@</span>
-            </div>
-            {{ form.fasGitLabUsername }}
-          </div>
-          {% if form.fasGitLabUsername.errors %}<div class="invalid-feedback d-block">{{ form.fasGitLabUsername.errors }}</div>{% endif %}
-        </div>
+      <div class="card-footer d-flex justify-content-end">
+        <button type="submit" class="btn btn-primary">Save</button>
       </div>
-
-      <div class="form-group form-check">
-        {{ form.fasIsPrivate }}
-        <label class="form-check-label" for="{{ form.fasIsPrivate.id_for_label }}">{{ form.fasIsPrivate.label }} <small class="text-muted">Hide information from other users.</small></label>
-        {% if form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ form.fasIsPrivate.errors }}</div>{% endif %}
-      </div>
-    </div>
-
-    <div class="card-footer d-flex justify-content-end">
-      <button type="submit" class="btn btn-primary">Save</button>
-    </div>
-  </form>
+    </form>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ block.super }}
+
+  <script>
+    (function () {
+      function onReady(fn) {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', fn);
+        } else {
+          fn();
+        }
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function parseStoredLine(line, defaults) {
+        const raw = String(line || '').trim();
+        if (!raw) return null;
+
+        const lower = raw.toLowerCase();
+        const startsWithScheme = lower.startsWith('irc:') || lower.startsWith('matrix:');
+
+        let scheme = 'irc';
+        let nick = raw;
+        let server = '';
+
+        if (startsWithScheme) {
+          const parts = raw.split(':', 2);
+          scheme = (parts[0] || 'irc').toLowerCase();
+
+          // Handle url-ish: scheme://server/nick OR scheme:/nick
+          const rest = raw.slice((scheme + ':').length);
+          if (rest.startsWith('//')) {
+            const withoutSlashes = rest.slice(2);
+            const firstSlash = withoutSlashes.indexOf('/');
+            if (firstSlash >= 0) {
+              server = withoutSlashes.slice(0, firstSlash);
+              nick = withoutSlashes.slice(firstSlash + 1);
+            } else {
+              server = withoutSlashes;
+              nick = '';
+            }
+          } else if (rest.startsWith('/')) {
+            nick = rest.slice(1);
+          } else {
+            nick = rest;
+          }
+        } else if (raw.startsWith('@') && raw.includes(':')) {
+          scheme = 'matrix';
+          const withoutAt = raw.slice(1);
+          const idx = withoutAt.lastIndexOf(':');
+          nick = withoutAt.slice(0, idx);
+          server = withoutAt.slice(idx + 1);
+        } else if (raw.includes(':')) {
+          // Heuristic: nick:server (IRC) unless it looks like @user:server
+          scheme = 'irc';
+          const idx = raw.lastIndexOf(':');
+          nick = raw.slice(0, idx);
+          server = raw.slice(idx + 1);
+        } else if (raw.includes('@')) {
+          scheme = 'irc';
+          const idx = raw.lastIndexOf('@');
+          nick = raw.slice(0, idx);
+          server = raw.slice(idx + 1);
+        }
+
+        nick = String(nick || '').trim();
+        server = String(server || '').trim();
+        if (!nick && !server) return null;
+
+        const defaultServer = (scheme === 'matrix') ? defaults.matrix : defaults.irc;
+
+        if (scheme === 'matrix') {
+          const base = `@${nick}`;
+          const value = (server && defaultServer && server !== defaultServer) ? `${base}:${server}` : base;
+          return { scheme, value };
+        }
+
+        const value = (server && defaultServer && server !== defaultServer) ? (nick ? `${nick}:${server}` : server) : nick;
+        return { scheme, value };
+      }
+
+      function toStoredLine(scheme, value, defaults) {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+
+        const normalizedScheme = (scheme === 'matrix') ? 'matrix' : 'irc';
+        const defaultServer = (normalizedScheme === 'matrix') ? defaults.matrix : defaults.irc;
+
+        // Allow users to paste full stored/URL-ish values into the input.
+        const lower = raw.toLowerCase();
+        if (lower.startsWith('irc:') || lower.startsWith('matrix:')) return raw;
+
+        if (normalizedScheme === 'matrix') {
+          if (raw.startsWith('@') && raw.includes(':')) {
+            const withoutAt = raw.slice(1);
+            const idx = withoutAt.lastIndexOf(':');
+            const nick = withoutAt.slice(0, idx).trim();
+            const server = withoutAt.slice(idx + 1).trim();
+            if (nick && server) return `matrix://${server}/${nick}`;
+          }
+
+          if (raw.includes(':')) {
+            const idx = raw.lastIndexOf(':');
+            const nick = raw.slice(0, idx).trim().replace(/^@/, '');
+            const server = raw.slice(idx + 1).trim();
+            if (nick && server) {
+              if (server === defaultServer) return `matrix:/${nick}`;
+              return `matrix://${server}/${nick}`;
+            }
+          }
+
+          return `matrix:/${raw.replace(/^@/, '')}`;
+        }
+
+        // IRC
+        if (raw.includes(':')) {
+          const idx = raw.lastIndexOf(':');
+          const nick = raw.slice(0, idx).trim();
+          const server = raw.slice(idx + 1).trim();
+          if (nick && server) {
+            if (server === defaultServer) return `irc:/${nick}`;
+            return `irc://${server}/${nick}`;
+          }
+        }
+        if (raw.includes('@')) {
+          const idx = raw.lastIndexOf('@');
+          const nick = raw.slice(0, idx).trim();
+          const server = raw.slice(idx + 1).trim();
+          if (nick && server) {
+            if (server === defaultServer) return `irc:/${nick}`;
+            return `irc://${server}/${nick}`;
+          }
+        }
+        return `irc:/${raw}`;
+      }
+
+      function buildRow(rowData) {
+        const tr = document.createElement('tr');
+        tr.className = 'chat-nicks-row';
+
+        tr.innerHTML = `
+          <td style="width: 140px;">
+            <select class="custom-select custom-select-sm chat-nicks-scheme" aria-label="Chat protocol">
+              <option value="irc">IRC</option>
+              <option value="matrix">Matrix</option>
+            </select>
+          </td>
+          <td>
+            <input type="text" class="form-control form-control-sm chat-nicks-value" placeholder="username" />
+          </td>
+          <td style="width: 44px;" class="text-center">
+            <button type="button" class="btn btn-sm btn-outline-secondary chat-nicks-remove" aria-label="Remove">×</button>
+          </td>
+        `;
+
+        const schemeEl = tr.querySelector('.chat-nicks-scheme');
+        const valueEl = tr.querySelector('.chat-nicks-value');
+
+        function setPlaceholder() {
+          valueEl.placeholder = (schemeEl.value === 'matrix') ? '@username' : 'username';
+        }
+
+        schemeEl.value = rowData.scheme;
+        valueEl.value = rowData.value;
+        setPlaceholder();
+
+        schemeEl.addEventListener('change', setPlaceholder);
+        return tr;
+      }
+
+      onReady(function () {
+        const textarea = document.getElementById('id_fasIRCNick');
+        const widget = document.getElementById('chat-nicks-widget');
+        const fallback = document.getElementById('chat-nicks-fallback');
+        const tableBody = document.querySelector('#chat-nicks-table tbody');
+        const addBtn = document.getElementById('chat-nicks-add');
+        const form = textarea && textarea.form;
+
+        if (!textarea || !widget || !fallback || !tableBody || !addBtn || !form) return;
+
+        const defaults = {
+          irc: widget.getAttribute('data-irc-default-server') || 'irc.libera.chat',
+          matrix: widget.getAttribute('data-matrix-default-server') || 'matrix.org'
+        };
+
+        function syncToTextarea() {
+          const rows = Array.from(tableBody.querySelectorAll('tr.chat-nicks-row'));
+          const lines = [];
+          for (const row of rows) {
+            const scheme = (row.querySelector('.chat-nicks-scheme') || {}).value || 'irc';
+            const value = (row.querySelector('.chat-nicks-value') || {}).value || '';
+            const stored = toStoredLine(scheme, value, defaults);
+            if (stored) lines.push(stored);
+          }
+          textarea.value = lines.join('\n');
+        }
+
+        function addRow(rowData) {
+          const tr = buildRow(rowData);
+
+          const schemeEl = tr.querySelector('.chat-nicks-scheme');
+          const valueEl = tr.querySelector('.chat-nicks-value');
+          const removeBtn = tr.querySelector('.chat-nicks-remove');
+
+          schemeEl.addEventListener('change', syncToTextarea);
+          valueEl.addEventListener('input', syncToTextarea);
+          removeBtn.addEventListener('click', function () {
+            tr.remove();
+            syncToTextarea();
+          });
+
+          tableBody.appendChild(tr);
+          syncToTextarea();
+        }
+
+        const existing = String(textarea.value || '')
+          .replaceAll('\r', '')
+          .split('\n')
+          .map(function (l) { return parseStoredLine(l, defaults); })
+          .filter(Boolean);
+
+        if (existing.length === 0) {
+          existing.push({ scheme: 'irc', value: '' });
+        }
+
+        for (const rowData of existing) {
+          addRow(rowData);
+        }
+
+        addBtn.addEventListener('click', function () {
+          addRow({ scheme: 'irc', value: '' });
+          const lastInput = tableBody.querySelector('tr.chat-nicks-row:last-child .chat-nicks-value');
+          if (lastInput) lastInput.focus();
+        });
+
+        form.addEventListener('submit', function () {
+          syncToTextarea();
+        });
+
+        // Progressive enhancement: hide textarea UI once JS is active.
+        fallback.classList.add('d-none');
+        widget.classList.remove('d-none');
+      });
+    })();
+  </script>
 {% endblock %}

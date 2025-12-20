@@ -210,11 +210,19 @@ if not DEBUG:
     CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.0/howto/static-files/
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 
 # Production collectstatic target.
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Profile chat link formatting (Noggin-style).
+CHAT_NETWORKS = {
+    "irc": {"default_server": env("CHAT_IRC_DEFAULT_SERVER", default="irc.libera.chat")},
+    "matrix": {"default_server": env("CHAT_MATRIX_DEFAULT_SERVER", default="matrix.org")},
+}
+
+# Optional query string appended to matrix.to links (Element web instance).
+CHAT_MATRIX_TO_ARGS = env("CHAT_MATRIX_TO_ARGS", default="web-instance[element.io]=app.element.io")
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'

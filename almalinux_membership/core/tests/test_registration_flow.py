@@ -41,6 +41,7 @@ class RegistrationFlowTests(TestCase):
                         "first_name": "Alice",
                         "last_name": "User",
                         "email": "alice@example.com",
+                        "over_16": "on",
                     },
                     follow=False,
                 )
@@ -50,6 +51,29 @@ class RegistrationFlowTests(TestCase):
         # Registration email must use django-post-office's EmailTemplate feature
         self.assertEqual(post_office_send_mock.call_count, 1)
         self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "registration-email-validation")
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_post_requires_over_16_checkbox(self):
+        client = Client()
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True) as get_client_mock:
+            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+                resp = client.post(
+                    "/register/",
+                    data={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "email": "alice@example.com",
+                        # Missing: over_16
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "You must be over 16 years old to create an account")
+        get_client_mock.assert_not_called()
+        post_office_send_mock.assert_not_called()
 
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_activate_flow_happy_path(self):
@@ -72,6 +96,7 @@ class RegistrationFlowTests(TestCase):
                         "first_name": "Alice",
                         "last_name": "User",
                         "email": "alice@example.com",
+                        "over_16": "on",
                     },
                     follow=False,
                 )

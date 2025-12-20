@@ -19,10 +19,19 @@ class RegistrationForm(forms.Form):
     last_name = forms.CharField(label="Last name", required=True, max_length=64)
     email = forms.EmailField(label="Email address", required=True)
 
+    over_16 = forms.BooleanField(
+        label="I am over 16 years old",
+        required=True,
+        error_messages={"required": "You must be over 16 years old to create an account"},
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "form-check-input")
+            else:
+                field.widget.attrs.setdefault("class", "form-control")
 
     def clean_username(self) -> str:
         username = (self.cleaned_data.get("username") or "").strip()

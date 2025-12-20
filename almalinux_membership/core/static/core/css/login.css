@@ -1,0 +1,50 @@
+/* Styling for login/register (unauthenticated) pages.
+
+   All rules are scoped under .public-auth to avoid impacting authenticated pages.
+*/
+
+.public-auth .content-wrapper {
+  background: transparent;
+}
+
+.public-auth .content {
+  padding-top: 3rem;
+  padding-bottom: 3rem;
+}
+
+.public-auth .public-auth-layout {
+  padding-top: 1.25rem;
+}
+
+.public-auth .content-header {
+  display: none;
+}
+
+.public-auth .public-auth-title {
+  font-size: clamp(2.25rem, 4vw, 3.25rem);
+  line-height: 1.1;
+  font-weight: 650;
+  margin-top: 1.5rem;
+}
+
+.public-auth .public-auth-lead {
+  font-size: 1.15rem;
+  color: #2e3344;
+  margin-top: 1rem;
+  max-width: 44rem;
+}
+
+.public-auth .public-auth-card {
+  border: 1px solid var(--alx-border);
+  border-radius: 0.25rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.public-auth .form-control {
+  border-color: #cfd6e3;
+}
+
+.public-auth .form-control:focus {
+  border-color: var(--alx-blue);
+  box-shadow: 0 0 0 0.15rem rgba(0, 75, 188, 0.15);
+}

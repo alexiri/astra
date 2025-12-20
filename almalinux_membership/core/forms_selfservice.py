@@ -157,17 +157,16 @@ class ProfileForm(_StyledForm):
     )
 
     fasIRCNick = forms.CharField(
-        label="IRC",
+        label="Chat Nicknames",
         required=False,
-        widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="One per line (or comma-separated).",
-    )
-
-    # Not part of freeipa-fas schema; keep as best-effort custom attribute.
-    fasMatrix = forms.CharField(
-        label="Matrix",
-        required=False,
-        widget=forms.TextInput(attrs={"placeholder": "username:server.name"}),
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text=(
+            "One per line (or comma-separated). "
+            "Use URL-style values to specify protocol: "
+            "irc:/nick or irc://server/nick; "
+            "matrix:/nick or matrix://server/nick. "
+            "(Tip: Matrix handles like @nick:server are accepted too.)"
+        ),
     )
 
     fasGitHubUsername = forms.CharField(
@@ -278,28 +277,65 @@ class ProfileForm(_StyledForm):
 
     def clean_fasIRCNick(self):
         # baseruserfas: Str("fasircnick*", maxlength=64)
-        # Noggin-inspired: validate nick and optional server part (nick:server)
+        # Noggin-style: store chat identities as URL-ish strings (irc/matrix).
         raw = self._validate_multivalued_maxlen(self.cleaned_data.get("fasIRCNick", ""), field_label="IRC nick", maxlen=64)
         items = [i.strip() for i in self._split_list_field(raw)]
         normalized: list[str] = []
         for item in items:
             if not item:
                 continue
-            # Accept stored URL form like irc:///nick or irc://server/nick
-            if "://" in item:
-                u = urlparse(item)
-                nick = (u.path or "").lstrip("/")
-                server = (u.netloc or "").strip()
-                value = f"{nick}:{server}" if server else nick
-            else:
-                value = item
+            compact = item.replace(" ", "")
+            parsed = urlparse(compact)
+            scheme = (parsed.scheme or "").lower()
 
-            nick, sep, server = value.partition(":")
-            if not _IRC_NICK_RE.match(nick):
-                raise forms.ValidationError("This does not look like a valid IRC nickname.")
-            if server and not _SERVER_RE.match(server):
-                raise forms.ValidationError("This does not look like a valid IRC server name.")
-            normalized.append(value)
+            nick = ""
+            server = ""
+
+            if scheme in {"irc", "matrix"}:
+                nick = (parsed.path or "").lstrip("/")
+                if not nick and parsed.fragment:
+                    nick = parsed.fragment.lstrip("#@")
+                nick = nick.lstrip("@").strip()
+                server = (parsed.netloc or "").strip()
+            else:
+                # Heuristics for common inputs:
+                # - Matrix: @nick:server
+                # - IRC legacy: nick or nick:server or nick@server
+                if compact.startswith("@") and ":" in compact:
+                    scheme = "matrix"
+                    value = compact.lstrip("@").strip()
+                    nick, _, server = value.partition(":")
+                else:
+                    scheme = "irc"
+                    value = compact.lstrip("@").strip()
+                    if ":" in value:
+                        nick, _, server = value.partition(":")
+                    elif "@" in value:
+                        nick, _, server = value.partition("@")
+                    else:
+                        nick, server = value, ""
+
+            if scheme == "irc":
+                if not _IRC_NICK_RE.match(nick):
+                    raise forms.ValidationError("This does not look like a valid IRC nickname.")
+                if server and not _SERVER_RE.match(server):
+                    raise forms.ValidationError("This does not look like a valid IRC server name.")
+            elif scheme == "matrix":
+                if not _MATRIX_LOCALPART_RE.match(nick):
+                    raise forms.ValidationError("This does not look like a valid Matrix username.")
+                if server and not _SERVER_RE.match(server):
+                    raise forms.ValidationError("This does not look like a valid Matrix server name.")
+            else:
+                raise forms.ValidationError(f"Unsupported chat protocol: '{scheme}'")
+
+            # Normalize to Noggin's stored form:
+            # - matrix:/nick (no server) or matrix://server/nick
+            # - irc:/nick (no server) or irc://server/nick
+            if server:
+                normalized.append(f"{scheme}://{server}/{nick}")
+            else:
+                normalized.append(f"{scheme}:/{nick}")
+
         return self._rejoin_lines(normalized)
 
     def clean_fasPronoun(self):
@@ -341,21 +377,6 @@ class ProfileForm(_StyledForm):
         if value and not _GITLAB_USERNAME_RE.match(value):
             raise forms.ValidationError("GitLab username is not valid")
         return value
-
-    def clean_fasMatrix(self):
-        # Not part of freeipa-fas schema; validate similarly to Noggin's matrix nickname.
-        value = (self.cleaned_data.get("fasMatrix") or "").strip()
-        if not value:
-            return value
-        value = value.lstrip("@").strip()
-        value = value.replace("@", ":")
-        localpart, sep, server = value.partition(":")
-        if localpart and not _MATRIX_LOCALPART_RE.match(localpart):
-            raise forms.ValidationError("This does not look like a valid Matrix username.")
-        if server and not _SERVER_RE.match(server):
-            raise forms.ValidationError("This does not look like a valid Matrix server name.")
-        return value
-
 
 class EmailsForm(_StyledForm):
     mail = forms.EmailField(label="E-mail Address", required=True)

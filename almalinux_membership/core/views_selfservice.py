@@ -17,6 +17,8 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+
+from zoneinfo import ZoneInfo
 from django.utils.module_loading import import_string
 
 import post_office.mail
@@ -506,9 +508,36 @@ def profile(request: HttpRequest) -> HttpResponse:
     data = getattr(fu, "_user_data", {})
 
     tz_name = timezone.get_current_timezone_name()
-    now_local = timezone.localtime(timezone.now())
+    # Prefer the timezone stored in the user's FreeIPA profile. This keeps the
+    # profile page correct even when middleware isn't active (e.g. in view tests).
+    fas_tz_name = _first(data, "fasTimezone", "")
+    tzinfo = timezone.get_current_timezone()
+    if fas_tz_name:
+        try:
+            tzinfo = ZoneInfo(fas_tz_name)
+            tz_name = fas_tz_name
+        except Exception:
+            # Invalid timezone values are handled elsewhere (forms + middleware).
+            # Here we just fall back to the currently active timezone.
+            pass
+
+    now_local = timezone.localtime(timezone.now(), timezone=tzinfo)
 
     groups = getattr(fu, "groups_list", []) or []
+
+    def _as_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if _normalize_str(v)]
+        if isinstance(value, str):
+            s = value.strip()
+            return [s] if s else []
+        return []
+
+    irc_nicks = _as_list(_data_get(data, "fasIRCNick", []))
+    website_urls = _as_list(_data_get(data, "fasWebsiteUrl", []))
+    rss_urls = _as_list(_data_get(data, "fasRssUrl", []))
+    gpg_keys = _as_list(_data_get(data, "fasGPGKeyId", []))
+    ssh_keys = _as_list(_data_get(data, "ipasshpubkey", []))
 
     context = {
         "fu": fu,
@@ -516,8 +545,18 @@ def profile(request: HttpRequest) -> HttpResponse:
         "groups_count": len(groups),
         "agreements_count": 0,
         "timezone": tz_name,
+        "timezone_name": tz_name,
         "current_time": now_local,
         "pronouns": _value_to_text(_data_get(data, "fasPronoun", "")),
+        "locale": _first(data, "fasLocale", "") or "",
+        "irc_nicks": irc_nicks,
+        "website_urls": website_urls,
+        "rss_urls": rss_urls,
+        "rhbz_email": _first(data, "fasRHBZEmail", "") or "",
+        "github_username": _first(data, "fasGitHubUsername", "") or "",
+        "gitlab_username": _first(data, "fasGitLabUsername", "") or "",
+        "gpg_keys": gpg_keys,
+        "ssh_keys": ssh_keys,
     }
     return render(request, "core/profile.html", context)
 
@@ -585,7 +624,6 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
         "fasWebsiteUrl": _value_to_text(_data_get(data, "fasWebsiteUrl", "")),
         "fasRssUrl": _value_to_text(_data_get(data, "fasRssUrl", "")),
         "fasIRCNick": _value_to_text(_data_get(data, "fasIRCNick", "")),
-        "fasMatrix": _first(data, "fasMatrix", "") or "",
         "fasGitHubUsername": _first(data, "fasGitHubUsername", "") or "",
         "fasGitLabUsername": _first(data, "fasGitLabUsername", "") or "",
         "fasIsPrivate": _bool_from_ipa(_data_get(data, "fasIsPrivate", "FALSE"), default=False),
@@ -660,7 +698,6 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
             current_values=_data_get(data, "fasIRCNick", []),
             new_values=_split_list_field(form.cleaned_data["fasIRCNick"]),
         )
-        _add_change_setattr(setattrs=setattrs, delattrs=delattrs, attr="fasMatrix", current_value=initial.get("fasMatrix"), new_value=form.cleaned_data["fasMatrix"])
         _add_change_setattr(setattrs=setattrs, delattrs=delattrs, attr="fasGitHubUsername", current_value=initial.get("fasGitHubUsername"), new_value=form.cleaned_data["fasGitHubUsername"])
         _add_change_setattr(setattrs=setattrs, delattrs=delattrs, attr="fasGitLabUsername", current_value=initial.get("fasGitLabUsername"), new_value=form.cleaned_data["fasGitLabUsername"])
 
@@ -702,7 +739,11 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
             else:
                 messages.error(request, "Failed to update profile due to an internal error.")
 
-    context = {"form": form, **_settings_context("profile")}
+    context = {
+        "form": form,
+        "chat_networks": settings.CHAT_NETWORKS,
+        **_settings_context("profile"),
+    }
     return render(request, "core/settings_profile.html", context)
 
 

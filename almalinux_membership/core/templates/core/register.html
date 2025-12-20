@@ -2,20 +2,34 @@
 
 {% block title %}Create account{% endblock %}
 
-{% block header %}<h1 class="m-0">Create account</h1>{% endblock %}
+{% block header %}{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8 col-lg-7">
-    <div class="card card-primary">
-      <div class="card-header">
-        <h3 class="card-title">Register</h3>
+<div class="row align-items-start public-auth-layout">
+  <div class="col-lg-7 d-none d-lg-block">
+    <h1 class="public-auth-title">AlmaLinux Accounts</h1>
+    <p class="public-auth-lead">
+      AlmaLinux Accounts provides the ability to create and manage your account across AlmaLinux's entire infrastructure.
+    </p>
+  </div>
+
+  <div class="col-12 col-lg-5">
+    <div class="card public-auth-card">
+      <div class="card-header p-0 alx-card-tabs-header">
+        <ul class="nav nav-tabs alx-card-tabs" role="tablist">
+          <li class="nav-item">
+            <a class="nav-link" href="{% url 'login' %}">Login</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link active" href="{% url 'register' %}">Register</a>
+          </li>
+        </ul>
       </div>
 
       {% if not registration_open %}
         <div class="card-body">
           <div class="alert alert-info">Registration is closed at the moment.</div>
-          <a class="btn btn-secondary" href="{% url 'login' %}">Back to login</a>
+          <a class="btn btn-outline-primary" href="{% url 'login' %}">Back to login</a>
         </div>
       {% else %}
         <form method="post" novalidate>
@@ -34,28 +48,32 @@
 
             <div class="form-row">
               <div class="form-group col-md-6">
-                <label for="id_first_name">First name</label>
+                <label for="id_first_name">First Name</label>
                 {{ form.first_name }}
                 {% if form.first_name.errors %}<div class="text-danger">{{ form.first_name.errors }}</div>{% endif %}
               </div>
               <div class="form-group col-md-6">
-                <label for="id_last_name">Last name</label>
+                <label for="id_last_name">Last Name</label>
                 {{ form.last_name }}
                 {% if form.last_name.errors %}<div class="text-danger">{{ form.last_name.errors }}</div>{% endif %}
               </div>
             </div>
 
             <div class="form-group">
-              <label for="id_email">Email address</label>
+              <label for="id_email">E-mail Address</label>
               {{ form.email }}
               {% if form.email.errors %}<div class="text-danger">{{ form.email.errors }}</div>{% endif %}
             </div>
+
+            <div class="form-group form-check">
+              {{ form.over_16 }}
+              <label class="form-check-label" for="{{ form.over_16.id_for_label }}">{{ form.over_16.label }}</label>
+              {% if form.over_16.errors %}<div class="text-danger">{{ form.over_16.errors }}</div>{% endif %}
+            </div>
           </div>
-          <div class="card-footer d-flex justify-content-between align-items-center">
-            <button type="submit" class="btn btn-primary">Create account</button>
-            <small class="text-muted">
-              Already have an account? <a href="{% url 'login' %}">Sign in</a>
-            </small>
+
+          <div class="card-footer d-flex justify-content-end">
+            <button type="submit" class="btn btn-primary">Register</button>
           </div>
         </form>
       {% endif %}

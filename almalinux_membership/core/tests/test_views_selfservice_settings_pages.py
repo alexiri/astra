@@ -98,7 +98,6 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "fasWebsiteUrl": "",
                 "fasRssUrl": "",
                 "fasIRCNick": "",
-                "fasMatrix": "",
                 "fasGitHubUsername": "",
                 "fasGitLabUsername": "",
                 "fasIsPrivate": "",  # unchecked
