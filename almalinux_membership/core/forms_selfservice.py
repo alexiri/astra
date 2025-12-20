@@ -147,13 +147,11 @@ class ProfileForm(_StyledForm):
         label="Website or Blog URL",
         required=False,
         widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="One per line (or comma-separated).",
     )
     fasRssUrl = forms.CharField(
         label="RSS URL",
         required=False,
         widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="One per line (or comma-separated).",
     )
 
     fasIRCNick = forms.CharField(

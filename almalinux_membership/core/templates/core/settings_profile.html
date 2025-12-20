@@ -78,16 +78,40 @@
           </div>
 
           <div class="form-group">
-            {{ form.fasWebsiteUrl.label_tag }}
-            {{ form.fasWebsiteUrl }}
-            {% if form.fasWebsiteUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasWebsiteUrl.errors }}</div>{% endif %}
+            <label>{{ form.fasWebsiteUrl.label }}</label>
+
+            <div id="website-urls-widget" class="d-none">
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle mb-2" id="website-urls-table">
+                  <tbody></tbody>
+                </table>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="website-urls-add">Add website URL</button>
+            </div>
+
+            <div id="website-urls-fallback">
+              {{ form.fasWebsiteUrl }}
+              {% if form.fasWebsiteUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasWebsiteUrl.errors }}</div>{% endif %}
+            </div>
             {% if form.fasWebsiteUrl.help_text %}<small class="form-text text-muted">{{ form.fasWebsiteUrl.help_text }}</small>{% endif %}
           </div>
 
           <div class="form-group">
-            {{ form.fasRssUrl.label_tag }}
-            {{ form.fasRssUrl }}
-            {% if form.fasRssUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasRssUrl.errors }}</div>{% endif %}
+            <label>{{ form.fasRssUrl.label }}</label>
+
+            <div id="rss-urls-widget" class="d-none">
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle mb-2" id="rss-urls-table">
+                  <tbody></tbody>
+                </table>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="rss-urls-add">Add RSS URL</button>
+            </div>
+
+            <div id="rss-urls-fallback">
+              {{ form.fasRssUrl }}
+              {% if form.fasRssUrl.errors %}<div class="invalid-feedback d-block">{{ form.fasRssUrl.errors }}</div>{% endif %}
+            </div>
             {% if form.fasRssUrl.help_text %}<small class="form-text text-muted">{{ form.fasRssUrl.help_text }}</small>{% endif %}
           </div>
 
@@ -168,6 +192,97 @@
         } else {
           fn();
         }
+      }
+
+      function setupUrlListEditor(opts) {
+        const textarea = document.getElementById(opts.textareaId);
+        const widget = document.getElementById(opts.widgetId);
+        const fallback = document.getElementById(opts.fallbackId);
+        const tableBody = document.querySelector(opts.tableBodySelector);
+        const addBtn = document.getElementById(opts.addBtnId);
+
+        if (!textarea || !widget || !fallback || !tableBody || !addBtn || !textarea.form) return;
+
+        function parseExisting(value) {
+          return String(value || '')
+            .replaceAll('\r', '')
+            .split('\n')
+            .flatMap(function (line) {
+              return String(line || '')
+                .split(',')
+                .map(function (p) { return String(p || '').trim(); })
+                .filter(Boolean);
+            });
+        }
+
+        function buildRow(initialValue) {
+          const tr = document.createElement('tr');
+          tr.className = opts.rowClass;
+
+          tr.innerHTML = `
+            <td>
+              <input type="url" class="form-control form-control-sm text-monospace ${opts.inputClass}" placeholder="${opts.placeholder}" />
+            </td>
+            <td style="width: 44px;" class="text-center">
+              <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove">×</button>
+            </td>
+          `;
+
+          const valueEl = tr.querySelector('input');
+          const removeBtn = tr.querySelector('button');
+
+          valueEl.value = initialValue || '';
+          valueEl.addEventListener('input', syncToTextarea);
+          removeBtn.addEventListener('click', function () {
+            tr.remove();
+            syncToTextarea();
+          });
+
+          return tr;
+        }
+
+        function syncToTextarea() {
+          const rows = Array.from(tableBody.querySelectorAll('tr.' + opts.rowClass));
+          const lines = [];
+          for (const row of rows) {
+            const valueEl = row.querySelector('input');
+            const raw = (valueEl && valueEl.value) ? String(valueEl.value) : '';
+            const v = raw.replaceAll('\r', '').trim();
+            if (v) lines.push(v);
+          }
+          textarea.value = lines.join('\n');
+        }
+
+        function addRow(value) {
+          const tr = buildRow(value);
+          tableBody.appendChild(tr);
+          syncToTextarea();
+          return tr;
+        }
+
+        const existing = parseExisting(textarea.value);
+        if (existing.length === 0) {
+          addRow('');
+        } else {
+          for (const v of existing) addRow(v);
+        }
+
+        addBtn.addEventListener('click', function () {
+          const tr = addRow('');
+          const input = tr.querySelector('input');
+          if (input) input.focus();
+        });
+
+        textarea.form.addEventListener('submit', function () {
+          syncToTextarea();
+        });
+
+        // Do not hide fallback if validation errors are present.
+        const hasErrors = !!fallback.querySelector('.errorlist');
+        if (!hasErrors) {
+          fallback.classList.add('d-none');
+        }
+        widget.classList.remove('d-none');
       }
 
       function escapeHtml(s) {
@@ -336,6 +451,28 @@
       }
 
       onReady(function () {
+        setupUrlListEditor({
+          textareaId: 'id_fasWebsiteUrl',
+          widgetId: 'website-urls-widget',
+          fallbackId: 'website-urls-fallback',
+          tableBodySelector: '#website-urls-table tbody',
+          addBtnId: 'website-urls-add',
+          rowClass: 'website-urls-row',
+          inputClass: 'website-urls-value',
+          placeholder: 'https://example.com'
+        });
+
+        setupUrlListEditor({
+          textareaId: 'id_fasRssUrl',
+          widgetId: 'rss-urls-widget',
+          fallbackId: 'rss-urls-fallback',
+          tableBodySelector: '#rss-urls-table tbody',
+          addBtnId: 'rss-urls-add',
+          rowClass: 'rss-urls-row',
+          inputClass: 'rss-urls-value',
+          placeholder: 'https://example.com/rss.xml'
+        });
+
         const textarea = document.getElementById('id_fasIRCNick');
         const widget = document.getElementById('chat-nicks-widget');
         const fallback = document.getElementById('chat-nicks-fallback');
