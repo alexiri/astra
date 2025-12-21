@@ -1,0 +1,108 @@
+{% extends 'core/base.html' %}
+
+{% load core_user_grid %}
+
+{% block title %}Group {{ group.cn }}{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">
+    Group: {{ group.cn }}
+    <small class="text-muted">({{ group.members|length }} members)</small>
+  </h1>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Group info</h3>
+    </div>
+    <div class="card-body p-0">
+      <table class="table">
+        <tbody>
+          <tr>
+            <th style="width: 180px;">Description</th>
+            <td>{% if group.description %}{{ group.description }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          </tr>
+          <tr>
+            <th>URL</th>
+            <td>
+              {% if group.fas_url %}
+                <a href="{{ group.fas_url }}" rel="noopener" target="_blank">{{ group.fas_url }}</a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Mailing list</th>
+            <td>
+              {% if group.fas_mailing_list %}
+                <a href="mailto:{{ group.fas_mailing_list }}">{{ group.fas_mailing_list }}</a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>IRC channels</th>
+            <td>
+              {% if group.fas_irc_channels %}
+                {% for ch in group.fas_irc_channels %}
+                  <span class="badge badge-secondary">{{ ch }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Discussion URL</th>
+            <td>
+              {% if group.fas_discussion_url %}
+                <a href="{{ group.fas_discussion_url }}" rel="noopener" target="_blank">{{ group.fas_discussion_url }}</a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Members</h3>
+      <div class="card-tools">
+        <form method="get" class="input-group input-group-sm" style="width: 220px;">
+          <input
+            type="text"
+            name="q"
+            class="form-control float-right"
+            placeholder="Search"
+            value="{{ q }}"
+            aria-label="Search members"
+          >
+          <div class="input-group-append">
+            <button
+              type="button"
+              class="btn btn-default"
+              aria-label="Clear search"
+              {% if not q %}disabled{% endif %}
+              onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
+            >
+              <i class="fas fa-times"></i>
+            </button>
+            <button type="submit" class="btn btn-default" aria-label="Search">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card-body">
+      {% user_grid group=group %}
+    </div>
+  </div>
+{% endblock %}

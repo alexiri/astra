@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
-from django.core.paginator import Paginator
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
@@ -120,72 +119,14 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 @login_required(login_url="/login/")
 def users(request: HttpRequest) -> HttpResponse:
     users_list = FreeIPAUser.all()
-
     q = (request.GET.get("q") or "").strip()
-    page_number = (request.GET.get("page") or "").strip() or None
-
-    def _sort_key(user: object) -> str:
-        u = getattr(user, "username", None)
-        if isinstance(u, str) and u:
-            return u.lower()
-        get_username = getattr(user, "get_username", None)
-        if callable(get_username):
-            try:
-                val = str(get_username()).strip()
-                return val.lower()
-            except Exception:
-                return ""
-        return ""
-
-    def _full_name(user: object) -> str:
-        get_full_name = getattr(user, "get_full_name", None)
-        if callable(get_full_name):
-            try:
-                return str(get_full_name()).strip()
-            except Exception:
-                return ""
-        return ""
-
-    def _matches_query(user: object, query: str) -> bool:
-        if not query:
-            return True
-        query_lower = query.lower()
-        username = _sort_key(user)
-        if query_lower in username:
-            return True
-        full_name = _full_name(user).lower()
-        return bool(full_name) and query_lower in full_name
-
-    users_list_sorted = sorted((u for u in users_list if _matches_query(u, q)), key=_sort_key)
-
-    paginator = Paginator(users_list_sorted, 30)
-    page_obj = paginator.get_page(page_number)
-
-    # Keep pagination rendering predictable without doing heavy logic in templates.
-    total_pages = paginator.num_pages
-    current_page = page_obj.number
-    if total_pages <= 10:
-        page_numbers = list(range(1, total_pages + 1))
-        show_first = False
-        show_last = False
-    else:
-        start = max(1, current_page - 2)
-        end = min(total_pages, current_page + 2)
-        page_numbers = list(range(start, end + 1))
-        show_first = 1 not in page_numbers
-        show_last = total_pages not in page_numbers
 
     return render(
         request,
         "core/users.html",
         {
             "q": q,
-            "paginator": paginator,
-            "page_obj": page_obj,
-            "is_paginated": paginator.num_pages > 1,
-            "page_numbers": page_numbers,
-            "show_first": show_first,
-            "show_last": show_last,
-            "users": page_obj.object_list,
+            # Pass the full list; `core_user_grid.user_grid` handles filtering + pagination.
+            "users": users_list,
         },
     )

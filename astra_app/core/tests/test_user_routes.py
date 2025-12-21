@@ -58,11 +58,11 @@ class UserRoutesTests(TestCase):
 
         self.assertEqual(resp_page_1.status_code, 200)
         self.assertContains(resp_page_1, 'href="/user/user000/"')
-        self.assertContains(resp_page_1, 'href="/user/user029/"')
-        self.assertNotContains(resp_page_1, 'href="/user/user030/"')
+        self.assertContains(resp_page_1, 'href="/user/user027/"')
+        self.assertNotContains(resp_page_1, 'href="/user/user028/"')
 
         self.assertEqual(resp_page_2.status_code, 200)
-        self.assertContains(resp_page_2, 'href="/user/user030/"')
+        self.assertContains(resp_page_2, 'href="/user/user028/"')
 
     def test_users_list_search_filters_results(self) -> None:
         self._login_as_freeipa("admin")

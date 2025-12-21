@@ -7,6 +7,7 @@ urlpatterns = [
     path("users/", views_users.users, name="users"),
     path("user/<str:username>/", views_users.user_profile, name="user-profile"),
     path("groups/", views_groups.groups, name="groups"),
+    path("group/<str:name>/", views_groups.group_detail, name="group-detail"),
 
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),
 

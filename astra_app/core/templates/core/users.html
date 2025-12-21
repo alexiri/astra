@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load core_user_grid %}
+
 {% block title %}Users{% endblock %}
 
 {% block header %}
@@ -20,6 +22,15 @@
             aria-label="Search users"
           >
           <div class="input-group-append">
+            <button
+              type="button"
+              class="btn btn-default"
+              aria-label="Clear search"
+              {% if not q %}disabled{% endif %}
+              onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
+            >
+              <i class="fas fa-times"></i>
+            </button>
             <button type="submit" class="btn btn-default" aria-label="Search">
               <i class="fas fa-search"></i>
             </button>
@@ -28,83 +39,8 @@
       </div>
     </div>
 
-    <div class="card-body p-0">
-      {% if users %}
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Full name</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for u in users %}
-              <tr>
-                <td>
-                  <a href="{% url 'user-profile' u.username %}">{{ u.username }}</a>
-                </td>
-                <td class="text-muted">
-                  {% if u.get_full_name %}{{ u.get_full_name }}{% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <div class="p-3 text-muted">No users found.</div>
-      {% endif %}
-    </div>
-
-    <div class="card-footer clearfix">
-      <div class="float-left text-muted small">
-        {% if paginator.count %}
-          Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ paginator.count }}
-        {% endif %}
-      </div>
-
-      {% if is_paginated %}
-        <ul class="pagination pagination-sm m-0 float-right">
-          <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
-            <a
-              class="page-link"
-              href="{% if page_obj.has_previous %}?page={{ page_obj.previous_page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% else %}#{% endif %}"
-              aria-label="Previous"
-            >
-              &laquo;
-            </a>
-          </li>
-
-          {% if show_first %}
-            <li class="page-item">
-              <a class="page-link" href="?page=1{% if q %}&amp;q={{ q|urlencode }}{% endif %}">1</a>
-            </li>
-            <li class="page-item disabled"><span class="page-link">…</span></li>
-          {% endif %}
-
-          {% for page_number in page_numbers %}
-            <li class="page-item {% if page_number == page_obj.number %}active{% endif %}">
-              <a class="page-link" href="?page={{ page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}">{{ page_number }}</a>
-            </li>
-          {% endfor %}
-
-          {% if show_last %}
-            <li class="page-item disabled"><span class="page-link">…</span></li>
-            <li class="page-item">
-              <a class="page-link" href="?page={{ paginator.num_pages }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}">{{ paginator.num_pages }}</a>
-            </li>
-          {% endif %}
-
-          <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
-            <a
-              class="page-link"
-              href="{% if page_obj.has_next %}?page={{ page_obj.next_page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% else %}#{% endif %}"
-              aria-label="Next"
-            >
-              &raquo;
-            </a>
-          </li>
-        </ul>
-      {% endif %}
+    <div class="card-body">
+      {% user_grid users=users %}
     </div>
   </div>
 {% endblock %}

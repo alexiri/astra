@@ -1,0 +1,24 @@
+{% load avatar_tags %}
+
+<div class="card card-body mb-4 px-2 py-3 card-widget widget-user">
+  <div class="d-flex align-items-center {{ extra_class }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
+    <div class="flex-shrink-0 ml-1 mr-3">
+      {% if avatar_user %}
+        {% avatar avatar_user 50 class="img-circle elevation-2" style="object-fit:cover;" alt="User Avatar" %}
+      {% else %}
+        <span class="img-circle elevation-2 d-inline-flex align-items-center justify-content-center bg-secondary" style="width:50px;height:50px;">
+          <i class="far fa-user"></i>
+        </span>
+      {% endif %}
+    </div>
+
+    <div class="flex-grow-1 ms-2">
+      <div class="my-0 font-weight-bold">
+        <a href="{% url 'user-profile' username %}">{{ username }}</a>
+      </div>
+      {% if full_name %}
+        <div class="text-truncate">{{ full_name }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
