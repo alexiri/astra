@@ -42,7 +42,7 @@ class IPAGroup(models.Model):
     fas_url = models.URLField(blank=True, default="", verbose_name="FAS URL")
     fas_mailing_list = models.EmailField(blank=True, default="", verbose_name="FAS Mailing List")
     fas_discussion_url = models.URLField(blank=True, default="", verbose_name="FAS Discussion URL")
-    fas_group = models.BooleanField(default=False, verbose_name="FAS Group ObjectClass")
+    fas_group = models.BooleanField(default=False, verbose_name="FAS Group")
 
     class Meta:
         managed = False

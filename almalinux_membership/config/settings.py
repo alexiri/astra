@@ -110,6 +110,11 @@ DATABASES = {
     }
 }
 
+JAZZMIN_SETTINGS = {
+    "site_title": "AlmaLinux Astra",
+    "custom_css": "core/css/admin.css",
+}
+
 # Email
 # In DEBUG, docker-compose provides EMAIL_URL pointing to Mailhog.
 EMAIL_CONFIG = env.email_url('EMAIL_URL', default=None)

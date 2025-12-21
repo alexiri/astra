@@ -24,8 +24,14 @@ class AdminIPAGroupCRUDTests(TestCase):
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
+        all_users = [
+            admin_user,
+            FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
+        ]
+
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.create") as mock_create,
             patch("core.backends.FreeIPAGroup.add_member") as mock_add_member,
         ):
@@ -36,7 +42,7 @@ class AdminIPAGroupCRUDTests(TestCase):
                 data={
                     "cn": "testgroup",
                     "description": "A test group",
-                    "members": "alice\nbob",
+                    "members": ["alice", "bob"],
                     "fas_url": "https://example.com/group",
                     "fas_mailing_list": "testgroup@example.com",
                     "fas_irc_channels": "#testgroup\n#testgroup-dev",
@@ -78,8 +84,14 @@ class AdminIPAGroupCRUDTests(TestCase):
                 return existing_group
             return None
 
+        all_users = [
+            admin_user,
+            FreeIPAUser("charlie", {"uid": ["charlie"], "memberof_group": []}),
+        ]
+
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(existing_group, "save") as mock_save,
             patch.object(existing_group, "add_member") as mock_add,
@@ -96,7 +108,7 @@ class AdminIPAGroupCRUDTests(TestCase):
                 data={
                     "cn": "testgroup",  # Immutable, but included
                     "description": "Updated description",
-                    "members": "alice\ncharlie",  # Added charlie, removed bob if any
+                    "members": ["alice", "charlie"],
                     "fas_url": "https://updated.example.com/group",
                     "fas_mailing_list": "updated@example.com",
                     "fas_irc_channels": "#updated\n#updated-dev",
@@ -216,8 +228,14 @@ class AdminIPAGroupCRUDTests(TestCase):
         def _fake_retry(_get_client, fn):
             return fn(fake_client)
 
+        all_users = [
+            admin_user,
+            FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
+        ]
+
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends._with_freeipa_service_client_retry", side_effect=_fake_retry),
             patch("core.backends.FreeIPAGroup.add_member"),
             patch("core.backends.FreeIPAGroup.remove_member"),
@@ -231,7 +249,7 @@ class AdminIPAGroupCRUDTests(TestCase):
                 data={
                     "cn": "testgroup",
                     "description": "A test group",
-                    "members": "alice\nbob",
+                    "members": ["alice", "bob"],
                     "fas_url": "https://example.com/group",
                     "fas_mailing_list": "testgroup@example.com",
                     "fas_irc_channels": "#testgroup\n#testgroup-dev",
@@ -273,8 +291,11 @@ class AdminIPAGroupCRUDTests(TestCase):
             if cn == "testgroup":
                 return existing_group
             return None
+
+        all_users = [admin_user]
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(existing_group, "save") as mock_save,
             patch("core.admin._with_freeipa_service_client_retry", side_effect=_fake_retry),
@@ -288,7 +309,7 @@ class AdminIPAGroupCRUDTests(TestCase):
                 data={
                     "cn": "testgroup",
                     "description": "desc",
-                    "members": "alice",
+                    "members": ["alice"],
                     "fas_url": "",
                     "fas_mailing_list": "",
                     "fas_irc_channels": "",
@@ -308,7 +329,7 @@ class AdminIPAGroupCRUDTests(TestCase):
                 data={
                     "cn": "testgroup",
                     "description": "desc",
-                    "members": "alice",
+                    "members": ["alice"],
                     "fas_url": "",
                     "fas_mailing_list": "",
                     "fas_irc_channels": "",

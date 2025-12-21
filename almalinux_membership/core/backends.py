@@ -17,6 +17,78 @@ _service_client_local = threading.local()
 _T = TypeVar("_T")
 
 
+class FreeIPAOperationFailed(RuntimeError):
+    """Raised when FreeIPA returns a structured failure without raising."""
+
+
+def _compact_repr(value: object, *, limit: int = 400) -> str:
+    rendered = repr(value)
+    if len(rendered) > limit:
+        return f"{rendered[:limit]}…"
+    return rendered
+
+
+def _has_truthy_failure(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, dict):
+        # A non-empty dict usually indicates at least one member entry failed.
+        return len(value) > 0
+    return bool(value)
+
+
+def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> None:
+    if not isinstance(result, dict):
+        return
+
+    failed = result.get("failed")
+    if not failed:
+        return
+
+    # FreeIPA's group_{add,remove}_member often returns a `failed` skeleton even
+    # on success, e.g. {'member': {'user': [], 'group': [], ...}}. Only treat it
+    # as an error when any member bucket is non-empty.
+    if action in {"group_add_member", "group_remove_member"} and isinstance(failed, dict):
+        member = failed.get("member")
+        if isinstance(member, dict):
+            buckets = (
+                member.get("user"),
+                member.get("group"),
+                member.get("service"),
+                member.get("idoverrideuser"),
+            )
+            if not any(_has_truthy_failure(b) for b in buckets):
+                return
+
+    items: list[str] = []
+
+    def walk(prefix: list[str], value: object) -> None:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                walk([*prefix, str(k)], v)
+            return
+        if isinstance(value, list):
+            for v in value:
+                walk(prefix, v)
+            return
+        if value is None:
+            return
+        key = "/".join(prefix) if prefix else "failed"
+        items.append(f"{key}: {value}")
+
+    walk([], failed)
+    details = "; ".join(items[:6])
+    if len(items) > 6:
+        details = f"{details}; …"
+    if not details:
+        details = f"failed={_compact_repr(failed)}"
+    raise FreeIPAOperationFailed(f"FreeIPA {action} failed ({subject}): {details}")
+
+
 def _get_freeipa_client(username: str, password: str) -> ClientMeta:
     """Create and login a FreeIPA client.
 
@@ -401,17 +473,25 @@ class FreeIPAUser:
 
         try:
             if updates:
-                _with_freeipa_service_client_retry(
-                    self.get_client,
-                    lambda client: client.user_mod(self.username, **updates),
-                )
+                try:
+                    _with_freeipa_service_client_retry(
+                        self.get_client,
+                        lambda client: client.user_mod(self.username, **updates),
+                    )
+                except exceptions.BadRequest as e:
+                    # FreeIPA returns BadRequest("no modifications to be performed") when
+                    # user_mod is called with values identical to the current state.
+                    if "no modifications to be performed" not in str(e).lower():
+                        raise
+                    logger.info("FreeIPA user_mod was a no-op username=%s", self.username)
+
             # Invalidate and refresh cache entries.
             _invalidate_user_cache(self.username)
             _invalidate_users_list_cache()
             # Warm fresh data for subsequent reads.
             FreeIPAUser.get(self.username)
         except Exception as e:
-            logger.exception("Failed to update user username=%s", self.username)
+            logger.exception("Failed to update user username=%s: %s", self.username, e)
             raise
 
     def delete(self):
@@ -469,33 +549,54 @@ class FreeIPAUser:
     # Additional methods for group management as requested
     def add_to_group(self, group_name):
         try:
-            _with_freeipa_service_client_retry(
+            res = _with_freeipa_service_client_retry(
                 self.get_client,
                 lambda client: client.group_add_member(group_name, o_user=[self.username]),
             )
+            _raise_if_freeipa_failed(res, action="group_add_member", subject=f"user={self.username} group={group_name}")
             # Membership affects both user and group views.
             _invalidate_user_cache(self.username)
             _invalidate_group_cache(group_name)
             _invalidate_groups_list_cache()
             # Warm both caches.
-            FreeIPAUser.get(self.username)
+            fresh_user = FreeIPAUser.get(self.username)
             FreeIPAGroup.get(group_name)
-        except Exception as e:
+            if not fresh_user:
+                raise FreeIPAOperationFailed(
+                    f"FreeIPA group_add_member reported success but user could not be re-fetched (user={self.username} group={group_name})"
+                )
+            if group_name not in (getattr(fresh_user, "groups_list", []) or []):
+                raise FreeIPAOperationFailed(
+                    "FreeIPA group_add_member reported success but membership not present after refresh "
+                    f"(user={self.username} group={group_name} response={_compact_repr(res)})"
+                )
+        except Exception:
             logger.exception("Failed to add user to group username=%s group=%s", self.username, group_name)
             raise
 
     def remove_from_group(self, group_name):
         try:
-            _with_freeipa_service_client_retry(
+            res = _with_freeipa_service_client_retry(
                 self.get_client,
                 lambda client: client.group_remove_member(group_name, o_user=[self.username]),
             )
+            _raise_if_freeipa_failed(res, action="group_remove_member", subject=f"user={self.username} group={group_name}")
+            # Membership affects both user and group views.
             _invalidate_user_cache(self.username)
             _invalidate_group_cache(group_name)
             _invalidate_groups_list_cache()
-            FreeIPAUser.get(self.username)
+            fresh_user = FreeIPAUser.get(self.username)
             FreeIPAGroup.get(group_name)
-        except Exception as e:
+            if not fresh_user:
+                raise FreeIPAOperationFailed(
+                    f"FreeIPA group_remove_member reported success but user could not be re-fetched (user={self.username} group={group_name})"
+                )
+            if group_name in (getattr(fresh_user, "groups_list", []) or []):
+                raise FreeIPAOperationFailed(
+                    "FreeIPA group_remove_member reported success but membership still present after refresh "
+                    f"(user={self.username} group={group_name} response={_compact_repr(res)})"
+                )
+        except Exception:
             logger.exception("Failed to remove user from group username=%s group=%s", self.username, group_name)
             raise
 
@@ -655,18 +756,26 @@ class FreeIPAGroup:
 
         try:
             if updates:
-                _with_freeipa_service_client_retry(
-                    self.get_client,
-                    lambda client: client.group_mod(self.cn, **updates),
-                )
+                try:
+                    _with_freeipa_service_client_retry(
+                        self.get_client,
+                        lambda client: client.group_mod(self.cn, **updates),
+                    )
+                except exceptions.BadRequest as e:
+                    # FreeIPA can return BadRequest("no modifications to be performed") when
+                    # group_mod is called with values identical to the current state.
+                    if "no modifications to be performed" not in str(e).lower():
+                        raise
+                    logger.info("FreeIPA group_mod was a no-op cn=%s", self.cn)
             else:
                 # Avoid calling group_mod with no updates (causes BadRequest)
                 return
+
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception as e:
-            logger.exception("Failed to update group cn=%s", self.cn)
+            logger.exception("Failed to update group cn=%s: %s", self.cn, e)
             raise
 
     def delete(self):
@@ -677,10 +786,11 @@ class FreeIPAGroup:
         try:
             # Remove all members first (required for group deletion in FreeIPA)
             if self.members:
-                _with_freeipa_service_client_retry(
+                res = _with_freeipa_service_client_retry(
                     self.get_client,
                     lambda client: client.group_remove_member(self.cn, o_user=self.members),
                 )
+                _raise_if_freeipa_failed(res, action="group_remove_member", subject=f"group={self.cn}")
                 # Invalidate caches for affected users
                 for username in self.members:
                     _invalidate_user_cache(username)
@@ -698,31 +808,53 @@ class FreeIPAGroup:
 
     def add_member(self, username):
         try:
-            _with_freeipa_service_client_retry(
+            res = _with_freeipa_service_client_retry(
                 self.get_client,
                 lambda client: client.group_add_member(self.cn, o_user=[username]),
             )
+            _raise_if_freeipa_failed(res, action="group_add_member", subject=f"group={self.cn} user={username}")
             _invalidate_group_cache(self.cn)
             _invalidate_user_cache(username)  # user's group list changes
             _invalidate_groups_list_cache()
             # Warm both caches.
-            FreeIPAGroup.get(self.cn)
-            FreeIPAUser.get(username)
+            fresh_group = FreeIPAGroup.get(self.cn)
+            fresh_user = FreeIPAUser.get(username)
+            if fresh_group and username not in (getattr(fresh_group, "members", []) or []):
+                raise FreeIPAOperationFailed(
+                    "FreeIPA group_add_member reported success but membership not present after refresh "
+                    f"(group={self.cn} user={username} response={_compact_repr(res)})"
+                )
+            if fresh_user and self.cn not in (getattr(fresh_user, "groups_list", []) or []):
+                raise FreeIPAOperationFailed(
+                    "FreeIPA group_add_member reported success but user does not show membership after refresh "
+                    f"(group={self.cn} user={username} response={_compact_repr(res)})"
+                )
         except Exception as e:
             logger.exception("Failed to add member username=%s group=%s", username, self.cn)
             raise
 
     def remove_member(self, username):
         try:
-            _with_freeipa_service_client_retry(
+            res = _with_freeipa_service_client_retry(
                 self.get_client,
                 lambda client: client.group_remove_member(self.cn, o_user=[username]),
             )
+            _raise_if_freeipa_failed(res, action="group_remove_member", subject=f"group={self.cn} user={username}")
             _invalidate_group_cache(self.cn)
             _invalidate_user_cache(username)  # user's group list changes
             _invalidate_groups_list_cache()
-            FreeIPAGroup.get(self.cn)
-            FreeIPAUser.get(username)
+            fresh_group = FreeIPAGroup.get(self.cn)
+            fresh_user = FreeIPAUser.get(username)
+            if fresh_group and username in (getattr(fresh_group, "members", []) or []):
+                raise FreeIPAOperationFailed(
+                    "FreeIPA group_remove_member reported success but membership still present after refresh "
+                    f"(group={self.cn} user={username} response={_compact_repr(res)})"
+                )
+            if fresh_user and self.cn in (getattr(fresh_user, "groups_list", []) or []):
+                raise FreeIPAOperationFailed(
+                    "FreeIPA group_remove_member reported success but user still shows membership after refresh "
+                    f"(group={self.cn} user={username} response={_compact_repr(res)})"
+                )
         except Exception as e:
             logger.exception("Failed to remove member username=%s group=%s", username, self.cn)
             raise

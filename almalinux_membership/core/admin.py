@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
+from typing import override
 from django import forms
 from django.contrib import admin
-from django.utils.html import format_html
-import json
+from django.contrib import messages
 from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.http import HttpResponseRedirect
@@ -12,6 +12,7 @@ from django.urls import path, reverse
 
 from .backends import (
     FreeIPAGroup,
+    FreeIPAOperationFailed,
     FreeIPAUser,
     _with_freeipa_service_client_retry,
     _invalidate_group_cache,
@@ -113,20 +114,25 @@ class IPAUserForm(forms.ModelForm):
         widget=forms.PasswordInput(render_value=False),
         help_text="Set only when creating a user.",
     )
-    groups = forms.CharField(
+    groups = forms.MultipleChoiceField(
         required=False,
-        widget=forms.Textarea(attrs={"rows": 6}),
-        help_text="One FreeIPA group per line.",
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 12}),
+        help_text="Select the FreeIPA groups this user should be a member of.",
     )
 
     class Meta:
         model = IPAUser
         fields = ("username", "first_name", "last_name", "email", "is_active")
 
+    @override
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # These models are unmanaged and have no DB tables; skip DB-backed uniqueness checks.
         self._validate_unique = False
+
+        groups = FreeIPAGroup.all()
+        group_names = sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
+        self.fields["groups"].choices = [(name, name) for name in group_names]
 
         # Username is immutable in FreeIPA.
         if self.instance and getattr(self.instance, "username", None):
@@ -140,18 +146,25 @@ class IPAUserForm(forms.ModelForm):
                 self.initial.setdefault("last_name", freeipa.last_name or "")
                 self.initial.setdefault("email", freeipa.email or "")
                 self.initial.setdefault("is_active", bool(getattr(freeipa, "is_active", True)))
-                self.initial.setdefault("groups", "\n".join(sorted(getattr(freeipa, "groups_list", []) or [])))
+                current = sorted(getattr(freeipa, "groups_list", []) or [])
+                # If the server returns groups outside our enumerated list,
+                # keep them selectable so we don't drop memberships on save.
+                missing = [g for g in current if g not in dict(self.fields["groups"].choices)]
+                if missing:
+                    self.fields["groups"].choices = [(g, g) for g in (group_names + missing)]
+                self.initial.setdefault("groups", current)
 
+    @override
     def validate_unique(self):
         # No DB; uniqueness is enforced by FreeIPA.
         return
 
 
 class IPAGroupForm(forms.ModelForm):
-    members = forms.CharField(
+    members = forms.MultipleChoiceField(
         required=False,
-        widget=forms.Textarea(attrs={"rows": 8}),
-        help_text="One username per line.",
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        help_text="Select the users that should be members of this group.",
     )
     fas_url = forms.CharField(
         required=False,
@@ -177,7 +190,7 @@ class IPAGroupForm(forms.ModelForm):
 
     fas_group = forms.BooleanField(
         required=False,
-        label="FAS Group ObjectClass",
+        label="FAS Group",
         help_text="Enable or disable the fasGroup objectClass for this group (controls FAS attribute support)",
     )
 
@@ -185,10 +198,15 @@ class IPAGroupForm(forms.ModelForm):
         model = IPAGroup
         fields = ("cn", "description", "fas_url", "fas_mailing_list", "fas_discussion_url", "fas_group")
 
+    @override
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # These models are unmanaged and have no DB tables; skip DB-backed uniqueness checks.
         self._validate_unique = False
+
+        users = FreeIPAUser.all()
+        usernames = sorted({getattr(u, "username", "") for u in users if getattr(u, "username", "")})
+        self.fields["members"].choices = [(u, u) for u in usernames]
 
         # Group name is immutable in FreeIPA.
         if self.instance and getattr(self.instance, "cn", None):
@@ -199,7 +217,12 @@ class IPAGroupForm(forms.ModelForm):
             freeipa = FreeIPAGroup.get(cn)
             if freeipa:
                 self.initial.setdefault("description", getattr(freeipa, "description", "") or "")
-                self.initial.setdefault("members", "\n".join(sorted(getattr(freeipa, "members", []) or [])))
+                current = sorted(getattr(freeipa, "members", []) or [])
+                # Groups can contain entries that aren't part of the standard user listing.
+                missing = [u for u in current if u not in dict(self.fields["members"].choices)]
+                if missing:
+                    self.fields["members"].choices = [(u, u) for u in (usernames + missing)]
+                self.initial.setdefault("members", current)
                 self.initial.setdefault("fas_url", getattr(freeipa, "fas_url", "") or "")
                 self.initial.setdefault("fas_mailing_list", getattr(freeipa, "fas_mailing_list", "") or "")
                 self.initial.setdefault("fas_irc_channels", "\n".join(sorted(getattr(freeipa, "fas_irc_channels", []) or [])))
@@ -208,6 +231,7 @@ class IPAGroupForm(forms.ModelForm):
             # `fas_group` is a creation-time property; disallow toggling on edit.
             self.fields["fas_group"].disabled = True
 
+    @override
     def validate_unique(self):
         # No DB; uniqueness is enforced by FreeIPA.
         return
@@ -218,19 +242,37 @@ class IPAUserAdmin(admin.ModelAdmin):
     form = IPAUserForm
     list_display = ("username", "first_name", "last_name", "email", "is_active", "is_staff")
     ordering = ("username",)
-    readonly_fields = ("attributes",)
+    readonly_fields = ()
 
+    class Media:
+        js = (
+            "core/js/admin_duallistbox_init.js",
+        )
+
+    @override
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except FreeIPAOperationFailed as e:
+            # FreeIPA can return structured partial failures without raising.
+            # Surface the error and keep the admin on the change form.
+            self.message_user(request, str(e), level=messages.ERROR)
+            return HttpResponseRedirect(request.path)
+
+    @override
     def get_queryset(self, request):
         users = FreeIPAUser.all()
         items = [IPAUser.from_freeipa(u) for u in users]
         return _ListBackedQuerySet(IPAUser, items)
 
+    @override
     def get_object(self, request, object_id, from_field=None):
         freeipa = FreeIPAUser.get(object_id)
         if not freeipa:
             return None
         return IPAUser.from_freeipa(freeipa)
 
+    @override
     def get_search_results(self, request, queryset, search_term):
         if not search_term:
             return queryset, False
@@ -245,24 +287,13 @@ class IPAUserAdmin(admin.ModelAdmin):
 
         return _ListBackedQuerySet(IPAUser, [u for u in queryset if hit(u)]), False
 
-    def attributes(self, obj):
-        if not obj:
-            return ""
-        fu = FreeIPAUser.get(obj.username)
-        data = getattr(fu, "_user_data", {}) if fu else {}
-        try:
-            dumped = json.dumps(data, indent=2, sort_keys=True, default=str)
-        except Exception:
-            dumped = str(data)
-        return format_html('<pre style="white-space:pre-wrap;max-height:40em;overflow:auto;">{}</pre>', dumped)
-    attributes.short_description = "All FreeIPA attributes"
-
+    @override
     def save_model(self, request, obj, form, change):
         username = form.cleaned_data.get("username") or getattr(obj, "username", None)
         if not username:
             return
 
-        desired_groups = set(_split_lines(form.cleaned_data.get("groups", "")))
+        desired_groups = set(form.cleaned_data.get("groups") or [])
         password = form.cleaned_data.get("password")
 
         if not change:
@@ -289,6 +320,7 @@ class IPAUserAdmin(admin.ModelAdmin):
         for g in sorted(current_groups - desired_groups):
             freeipa.remove_from_group(g)
 
+    @override
     def delete_model(self, request, obj):
         freeipa = FreeIPAUser.get(obj.username)
         if freeipa:
@@ -301,17 +333,33 @@ class IPAGroupAdmin(admin.ModelAdmin):
     list_display = ("cn", "description", "fas_group", "fas_url", "fas_mailing_list")
     ordering = ("cn",)
 
+    class Media:
+        js = (
+            "core/js/admin_duallistbox_init.js",
+        )
+
+    @override
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except FreeIPAOperationFailed as e:
+            self.message_user(request, str(e), level=messages.ERROR)
+            return HttpResponseRedirect(request.path)
+
+    @override
     def get_queryset(self, request):
         groups = FreeIPAGroup.all()
         items = [IPAGroup.from_freeipa(g) for g in groups]
         return _ListBackedQuerySet(IPAGroup, items)
 
+    @override
     def get_object(self, request, object_id, from_field=None):
         freeipa = FreeIPAGroup.get(object_id)
         if not freeipa:
             return None
         return IPAGroup.from_freeipa(freeipa)
 
+    @override
     def get_search_results(self, request, queryset, search_term):
         if not search_term:
             return queryset, False
@@ -326,12 +374,13 @@ class IPAGroupAdmin(admin.ModelAdmin):
 
         return _ListBackedQuerySet(IPAGroup, [g for g in queryset if hit(g)]), False
 
+    @override
     def save_model(self, request, obj, form, change):
         cn = form.cleaned_data.get("cn") or getattr(obj, "cn", None)
         if not cn:
             return
 
-        desired_members = set(_split_lines(form.cleaned_data.get("members", "")))
+        desired_members = set(form.cleaned_data.get("members") or [])
         description = form.cleaned_data.get("description") or ""
         fas_url = form.cleaned_data.get("fas_url") or ""
         fas_mailing_list = form.cleaned_data.get("fas_mailing_list") or ""
@@ -396,6 +445,7 @@ class IPAGroupAdmin(admin.ModelAdmin):
         for u in sorted(current_members - desired_members):
             freeipa.remove_member(u)
 
+    @override
     def delete_model(self, request, obj):
         freeipa = FreeIPAGroup.get(obj.cn)
         if freeipa:

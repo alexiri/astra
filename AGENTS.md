@@ -19,6 +19,7 @@
 - ALWAYS use `@override` decorators to override methods from base classes.
   This is a modern Python practice and helps avoid bugs.
 - Avoid writing trivial wrapper functions.
+- Prefer f-strings over %-formatting.
 
 ### Types and Type Annotations
 
@@ -96,8 +97,7 @@ Pre-change checklist (must answer mentally before finishing):
 
 - Do Test-Driven development: Add tests before you implement a new feature, make sure they cover all the
   failure scenarios and that they really *do* fail. Then implement the new feature and make sure your tests pass.
-  - WHENEVER I REPORT A PROBLEM, I WANT YOU TO CREATE A TEST CASE FIRST, RUN IT TO SHOW THE FAILURE, THEN ASK 
-  FOR CONFIRMATION BEFORE FIXING IT.
+  - Whenever I report a problem or request a new feature, I WANT YOU TO CREATE A TEST CASE FIRST, RUN THE TESTS TO SHOW THE FAILURE, AND ONLY THEN DO YOU FIX IT (and then run the tests again)
 - DO NOT write trivial or obvious tests that are evident directly from code, such as
   assertions that confirm the value of a constant setting.
 - DO NOT write trivial tests that test something we know already works, like
