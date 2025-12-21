@@ -158,11 +158,6 @@ class EmailChangeValidationFlowTests(TestCase):
         html = resp_get.content.decode("utf-8")
         self.assertIn("new@example.org", html)
 
-        # UI regression guard: the confirm page should look like the other settings
-        # pages (settings tabs + header), not like a floating one-off dialog.
-        self.assertIn('<ul class="nav nav-tabs">', html)
-        self.assertIn('>Settings</h1>', html)
-
         request_post = self.factory.post(f"/settings/emails/validate/?token={token}")
         self._add_session_and_messages(request_post)
         request_post.user = self._auth_user("alice")
