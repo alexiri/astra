@@ -157,7 +157,9 @@
             <li class="list-group-item d-flex justify-content-between align-items-center">
               <div class="d-flex align-items-center">
                 <i class="fas fa-users profile-group-icon"></i>
-                <div class="profile-group-name">{{ g }}</div>
+                <div class="profile-group-name">
+                  <a href="{% url 'group-detail' g %}">{{ g }}</a>
+                </div>
               </div>
             </li>
           {% endfor %}

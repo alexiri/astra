@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from zoneinfo import ZoneInfo
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
 
 
@@ -38,7 +38,19 @@ def _profile_context_for_user(
 
     now_local = timezone.localtime(timezone.now(), timezone=tzinfo)
 
-    groups = getattr(fu, "groups_list", []) or []
+    groups_raw = getattr(fu, "groups_list", []) or []
+    if isinstance(groups_raw, str):
+        groups_raw = [groups_raw]
+    groups_list = [str(g).strip() for g in groups_raw if str(g).strip()]
+
+    # Only show FAS groups on the public profile page.
+    # Using `FreeIPAGroup.all()` keeps this one cached call vs. per-group lookups.
+    fas_cns = {
+        str(getattr(g, "cn", "")).strip().lower()
+        for g in (FreeIPAGroup.all() or [])
+        if getattr(g, "fas_group", False)
+    }
+    groups = [g for g in groups_list if g.lower() in fas_cns]
 
     def _as_list(value: object) -> list[str]:
         if isinstance(value, list):
