@@ -18,15 +18,16 @@
           aria-label="Search groups"
         >
         <div class="input-group-append">
-          <button
-            type="button"
-            class="btn btn-default"
-            aria-label="Clear search"
-            {% if not q %}disabled{% endif %}
-            onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
-          >
-            <i class="fas fa-times"></i>
-          </button>
+          {% if q %}
+            <button
+              type="button"
+              class="btn btn-default"
+              aria-label="Clear search"
+              onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
+            >
+              <i class="fas fa-times"></i>
+            </button>
+          {% endif %}
           <button type="submit" class="btn btn-default" aria-label="Search">
             <i class="fas fa-search"></i>
           </button>
