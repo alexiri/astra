@@ -1,4 +1,5 @@
 {% load static %}
+{% load avatar_tags %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -46,7 +47,9 @@
 
             <li class="nav-item dropdown">
               <a class="nav-link" data-toggle="dropdown" href="#" aria-haspopup="true" aria-expanded="false">
-                <i class="far fa-user mr-1"></i>
+                <span class="navbar-user-avatar mr-2">
+                  {% avatar request.user 30 class="img-circle" style="width:30px;height:30px;object-fit:cover;" alt="Avatar" %}
+                </span>
                 <span class="d-none d-md-inline">{{ request.user.get_username }}</span>
               </a>
               <div class="dropdown-menu dropdown-menu-right">
