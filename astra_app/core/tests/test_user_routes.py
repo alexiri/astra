@@ -44,6 +44,41 @@ class UserRoutesTests(TestCase):
         self.assertIn("alice", content)
         self.assertIn("bob", content)
 
+    def test_users_list_paginates_30_per_page(self) -> None:
+        self._login_as_freeipa("admin")
+
+        users = [
+            SimpleNamespace(username=f"user{i:03d}", get_full_name=lambda: "")
+            for i in range(65)
+        ]
+
+        with patch("core.backends.FreeIPAUser.all", return_value=users):
+            resp_page_1 = self.client.get("/users/")
+            resp_page_2 = self.client.get("/users/?page=2")
+
+        self.assertEqual(resp_page_1.status_code, 200)
+        self.assertContains(resp_page_1, 'href="/user/user000/"')
+        self.assertContains(resp_page_1, 'href="/user/user029/"')
+        self.assertNotContains(resp_page_1, 'href="/user/user030/"')
+
+        self.assertEqual(resp_page_2.status_code, 200)
+        self.assertContains(resp_page_2, 'href="/user/user030/"')
+
+    def test_users_list_search_filters_results(self) -> None:
+        self._login_as_freeipa("admin")
+
+        users = [
+            SimpleNamespace(username="alice", get_full_name=lambda: "Alice User"),
+            SimpleNamespace(username="bob", get_full_name=lambda: "Bob User"),
+        ]
+
+        with patch("core.backends.FreeIPAUser.all", return_value=users):
+            resp = self.client.get("/users/?q=ali")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'href="/user/alice/"')
+        self.assertNotContains(resp, 'href="/user/bob/"')
+
 
 class LoginRedirectTests(TestCase):
     def test_freeipa_login_view_redirects_to_canonical_user_profile_url(self) -> None:
