@@ -19,7 +19,7 @@
 <div class="wrapper">
   <nav class="main-header navbar navbar-expand-md navbar-dark">
     <div class="container">
-      <a href="{% if request.user.is_authenticated %}{% url 'profile' %}{% else %}{% url 'login' %}{% endif %}" class="navbar-brand d-flex align-items-center">
+      <a href="{% if request.user.is_authenticated %}{% url 'user-profile' request.user.get_username %}{% else %}{% url 'login' %}{% endif %}" class="navbar-brand d-flex align-items-center">
         <img class="mr-2" src="{% static 'core/images/almalinux-account-services.svg' %}" alt="AlmaLinux Account Services" height="40" />
       </a>
 
@@ -42,18 +42,25 @@
 
           <ul class="navbar-nav ml-auto navbar-no-expand align-items-md-center">
             <li class="nav-item">
+              <a href="{% url 'users' %}" class="nav-link">Users</a>
+            </li>
+            <li class="nav-item">
               <a href="{% url 'groups' %}" class="nav-link">Groups</a>
             </li>
 
             <li class="nav-item dropdown">
               <a class="nav-link" data-toggle="dropdown" href="#" aria-haspopup="true" aria-expanded="false">
                 <span class="navbar-user-avatar mr-2">
-                  {% avatar request.user 30 class="img-circle" style="width:30px;height:30px;object-fit:cover;" alt="Avatar" %}
+                  {% if request.user.email %}
+                    {% avatar request.user 30 class="img-circle" style="width:30px;height:30px;object-fit:cover;" alt="Avatar" %}
+                  {% else %}
+                    <i class="far fa-user"></i>
+                  {% endif %}
                 </span>
                 <span class="d-none d-md-inline">{{ request.user.get_username }}</span>
               </a>
               <div class="dropdown-menu dropdown-menu-right">
-                <a href="{% url 'profile' %}" class="dropdown-item">
+                <a href="{% url 'user-profile' request.user.get_username %}" class="dropdown-item">
                   <i class="far fa-id-card mr-2"></i> Profile
                 </a>
                 <a href="{% url 'settings-profile' %}" class="dropdown-item">

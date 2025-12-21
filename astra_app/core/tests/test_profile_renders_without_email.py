@@ -25,7 +25,7 @@ class ProfileRenderingWithoutEmailTests(TestCase):
         self.assertEqual(fu.email, "")
 
         with patch("core.backends.FreeIPAUser.get", return_value=fu):
-            resp = self.client.get("/")
+            resp = self.client.get(f"/user/{username}/")
 
         # Desired behavior: profile page should render even without an email.
         self.assertEqual(resp.status_code, 200)

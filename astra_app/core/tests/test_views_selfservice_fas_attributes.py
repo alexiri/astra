@@ -9,7 +9,7 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
-from core.views_selfservice import profile, settings_emails, settings_keys, settings_profile
+from core.views_selfservice import settings_emails, settings_keys, settings_profile, user_profile
 
 
 @dataclass
@@ -40,7 +40,7 @@ class FASAttributesTests(TestCase):
         return SimpleNamespace(is_authenticated=True, get_username=lambda: username)
 
     def _load_profile(self, fu: _DummyFreeIPAUser):
-        req = self.factory.get("/")
+        req = self.factory.get(f"/user/{fu.username}/")
         self._add_session_and_messages(req)
         req.user = self._auth_user(fu.username)
 
@@ -53,7 +53,7 @@ class FASAttributesTests(TestCase):
 
         with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_selfservice.render", autospec=True, side_effect=fake_render):
-                resp = profile(req)
+                resp = user_profile(req, fu.username)
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("context", captured)

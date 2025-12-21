@@ -54,7 +54,7 @@ class ProfileTimezoneDisplayTests(TestCase):
         )
 
         with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            response = views_selfservice.profile(request)
+            response = views_selfservice.user_profile(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")

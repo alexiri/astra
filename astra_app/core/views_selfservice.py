@@ -7,13 +7,14 @@ import io
 import logging
 import os
 import re
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -456,6 +457,82 @@ def _get_full_user(username: str) -> FreeIPAUser | None:
     return FreeIPAUser.get(username)
 
 
+def _profile_context_for_user(
+    request: HttpRequest,
+    *,
+    fu: FreeIPAUser,
+    is_self: bool,
+) -> dict[str, object]:
+    data = getattr(fu, "_user_data", {})
+
+    tz_name = timezone.get_current_timezone_name()
+    # Prefer the timezone stored in the user's FreeIPA profile. This keeps the
+    # profile page correct even when middleware isn't active (e.g. in view tests).
+    fas_tz_name = _first(data, "fasTimezone", "")
+    tzinfo = timezone.get_current_timezone()
+    if fas_tz_name:
+        try:
+            tzinfo = ZoneInfo(fas_tz_name)
+            tz_name = fas_tz_name
+        except Exception:
+            # Invalid timezone values are handled elsewhere (forms + middleware).
+            # Here we just fall back to the currently active timezone.
+            pass
+
+    now_local = timezone.localtime(timezone.now(), timezone=tzinfo)
+
+    groups = getattr(fu, "groups_list", []) or []
+
+    def _as_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if _normalize_str(v)]
+        if isinstance(value, str):
+            s = value.strip()
+            return [s] if s else []
+        return []
+
+    irc_nicks = _as_list(_data_get(data, "fasIRCNick", []))
+    website_urls = _as_list(_data_get(data, "fasWebsiteUrl", []))
+    rss_urls = _as_list(_data_get(data, "fasRssUrl", []))
+    gpg_keys = _as_list(_data_get(data, "fasGPGKeyId", []))
+    ssh_keys = _as_list(_data_get(data, "ipasshpubkey", []))
+
+    # django-avatar expects either a Django user model or an authenticated object
+    # with get_username(). Some tests (and some call sites) use lightweight
+    # user stubs for `fu` that don't implement that method.
+    profile_avatar_user: object = fu
+    if not getattr(fu, "is_authenticated", False) or not hasattr(fu, "get_username"):
+        safe_username = getattr(fu, "username", "") or ""
+        profile_avatar_user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: safe_username,
+            username=safe_username,
+            email=getattr(fu, "email", "") or "",
+        )
+
+    return {
+        "fu": fu,
+        "profile_avatar_user": profile_avatar_user,
+        "is_self": is_self,
+        "groups": sorted(groups),
+        "groups_count": len(groups),
+        "agreements_count": 0,
+        "timezone": tz_name,
+        "timezone_name": tz_name,
+        "current_time": now_local,
+        "pronouns": _value_to_text(_data_get(data, "fasPronoun", "")),
+        "locale": _first(data, "fasLocale", "") or "",
+        "irc_nicks": irc_nicks,
+        "website_urls": website_urls,
+        "rss_urls": rss_urls,
+        "rhbz_email": _first(data, "fasRHBZEmail", "") or "",
+        "github_username": _first(data, "fasGitHubUsername", "") or "",
+        "gitlab_username": _first(data, "fasGitLabUsername", "") or "",
+        "gpg_keys": gpg_keys,
+        "ssh_keys": ssh_keys,
+    }
+
+
 def _detect_avatar_provider(user: object, *, size: int = 140) -> tuple[str | None, str | None]:
     """Return (provider_path, avatar_url) for the first provider that yields a URL.
 
@@ -497,68 +574,50 @@ def _avatar_manage_url_for_provider(provider_path: str | None) -> str | None:
 
 
 @login_required(login_url="/login/")
-def profile(request: HttpRequest) -> HttpResponse:
-    username = request.user.get_username()
-    logger.debug("Self-service profile view: username=%s", username)
+def home(request: HttpRequest) -> HttpResponse:
+    username = (request.user.get_username() or "").strip()
+    if not username:
+        messages.error(request, "Unable to determine your username.")
+        return redirect("login")
+    return redirect("user-profile", username=username)
+
+
+@login_required(login_url="/login/")
+def user_profile(request: HttpRequest, username: str) -> HttpResponse:
+    username = (username or "").strip()
+    if not username:
+        raise Http404("User not found")
+
+    viewer_username = (request.user.get_username() or "").strip()
+    logger.debug("User profile view: username=%s viewer=%s", username, viewer_username)
+
     fu = _get_full_user(username)
     if not fu:
-        messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("login")
+        raise Http404("User not found")
 
-    data = getattr(fu, "_user_data", {})
-
-    tz_name = timezone.get_current_timezone_name()
-    # Prefer the timezone stored in the user's FreeIPA profile. This keeps the
-    # profile page correct even when middleware isn't active (e.g. in view tests).
-    fas_tz_name = _first(data, "fasTimezone", "")
-    tzinfo = timezone.get_current_timezone()
-    if fas_tz_name:
-        try:
-            tzinfo = ZoneInfo(fas_tz_name)
-            tz_name = fas_tz_name
-        except Exception:
-            # Invalid timezone values are handled elsewhere (forms + middleware).
-            # Here we just fall back to the currently active timezone.
-            pass
-
-    now_local = timezone.localtime(timezone.now(), timezone=tzinfo)
-
-    groups = getattr(fu, "groups_list", []) or []
-
-    def _as_list(value: object) -> list[str]:
-        if isinstance(value, list):
-            return [str(v).strip() for v in value if _normalize_str(v)]
-        if isinstance(value, str):
-            s = value.strip()
-            return [s] if s else []
-        return []
-
-    irc_nicks = _as_list(_data_get(data, "fasIRCNick", []))
-    website_urls = _as_list(_data_get(data, "fasWebsiteUrl", []))
-    rss_urls = _as_list(_data_get(data, "fasRssUrl", []))
-    gpg_keys = _as_list(_data_get(data, "fasGPGKeyId", []))
-    ssh_keys = _as_list(_data_get(data, "ipasshpubkey", []))
-
-    context = {
-        "fu": fu,
-        "groups": sorted(groups),
-        "groups_count": len(groups),
-        "agreements_count": 0,
-        "timezone": tz_name,
-        "timezone_name": tz_name,
-        "current_time": now_local,
-        "pronouns": _value_to_text(_data_get(data, "fasPronoun", "")),
-        "locale": _first(data, "fasLocale", "") or "",
-        "irc_nicks": irc_nicks,
-        "website_urls": website_urls,
-        "rss_urls": rss_urls,
-        "rhbz_email": _first(data, "fasRHBZEmail", "") or "",
-        "github_username": _first(data, "fasGitHubUsername", "") or "",
-        "gitlab_username": _first(data, "fasGitLabUsername", "") or "",
-        "gpg_keys": gpg_keys,
-        "ssh_keys": ssh_keys,
-    }
+    context = _profile_context_for_user(request, fu=fu, is_self=(username == viewer_username))
     return render(request, "core/profile.html", context)
+
+
+@login_required(login_url="/login/")
+def users(request: HttpRequest) -> HttpResponse:
+    users_list = FreeIPAUser.all()
+
+    def _sort_key(user: object) -> str:
+        u = getattr(user, "username", None)
+        if isinstance(u, str) and u:
+            return u.lower()
+        get_username = getattr(user, "get_username", None)
+        if callable(get_username):
+            try:
+                val = str(get_username()).strip()
+                return val.lower()
+            except Exception:
+                return ""
+        return ""
+
+    users_list_sorted = sorted(users_list, key=_sort_key)
+    return render(request, "core/users.html", {"users": users_list_sorted})
 
 
 @login_required(login_url="/login/")
@@ -611,7 +670,7 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
     fu = _get_full_user(username)
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("profile")
+        return redirect("home")
 
     data = getattr(fu, "_user_data", {})
 
@@ -753,7 +812,7 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
     fu = _get_full_user(username)
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("profile")
+        return redirect("home")
 
     data = getattr(fu, "_user_data", {})
 
@@ -888,7 +947,7 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
     fu = _get_full_user(username)
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("profile")
+        return redirect("home")
 
     attr_label = "E-mail Address" if attr == "mail" else "Red Hat Bugzilla Email"
 
@@ -955,7 +1014,7 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
     fu = _get_full_user(username)
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("profile")
+        return redirect("home")
 
     data = getattr(fu, "_user_data", {})
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from typing import override
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 
 import requests
 
@@ -23,6 +25,20 @@ class FreeIPALoginView(auth_views.LoginView):
 
     template_name = "core/login.html"
     authentication_form = FreeIPAAuthenticationForm
+
+    @override
+    def get_success_url(self) -> str:
+        user = getattr(self.request, "user", None)
+        get_username = getattr(user, "get_username", None)
+        if callable(get_username):
+            try:
+                username = str(get_username()).strip()
+            except Exception:
+                username = ""
+            if username:
+                return reverse("user-profile", kwargs={"username": username})
+
+        return super().get_success_url()
 
     def form_invalid(self, form) -> HttpResponse:
         request: HttpRequest = self.request

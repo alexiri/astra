@@ -3,7 +3,7 @@
 {% block title %}Settings - OTP{% endblock %}
 
 {% block header %}
-  <h1 class="m-0">Settings for <a href="{% url 'profile' %}">{{ request.user.get_username }}</a></h1>
+  <h1 class="m-0">Settings for <a href="{% url 'user-profile' request.user.get_username %}">{{ request.user.get_username }}</a></h1>
 {% endblock %}
 
 {% block content %}

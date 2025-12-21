@@ -3,7 +3,9 @@ from django.urls import path
 from . import views_selfservice as views
 
 urlpatterns = [
-    path('', views.profile, name='profile'),
+    path('', views.home, name='home'),
+    path('users/', views.users, name='users'),
+    path('user/<str:username>/', views.user_profile, name='user-profile'),
     path('groups/', views.groups, name='groups'),
 
     path('settings/avatar/', views.avatar_manage, name='avatar-manage'),

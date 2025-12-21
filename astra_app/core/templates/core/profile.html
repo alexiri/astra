@@ -12,10 +12,18 @@
       <div class="card">
         <div class="card-body text-center">
           <div class="d-none d-md-block">
-            {% avatar request.user 220 class="img-fluid img-circle mb-3" style="width:220px;height:220px;object-fit:cover;" alt="Avatar" %}
+            {% if profile_avatar_user.email %}
+              {% avatar profile_avatar_user 220 class="img-fluid img-circle mb-3" style="width:220px;height:220px;object-fit:cover;" alt="Avatar" %}
+            {% else %}
+              <i class="far fa-user" style="font-size:140px;"></i>
+            {% endif %}
           </div>
           <div class="d-md-none">
-            {% avatar request.user 140 class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" %}
+            {% if profile_avatar_user.email %}
+              {% avatar profile_avatar_user 140 class="img-fluid img-circle mb-3" style="width:140px;height:140px;object-fit:cover;" alt="Avatar" %}
+            {% else %}
+              <i class="far fa-user" style="font-size:90px;"></i>
+            {% endif %}
           </div>
 
           <h3 class="profile-username mb-1">{{ fu.get_full_name }}</h3>
@@ -24,9 +32,11 @@
             <div class="mt-1" id="user_mail"><a href="mailto:{{ fu.email }}">{{ fu.email }}</a></div>
           {% endif %}
 
-          <div class="mt-3">
-            <a class="btn btn-primary btn-block" href="{% url 'settings-profile' %}">Edit Profile</a>
-          </div>
+          {% if is_self %}
+            <div class="mt-3">
+              <a class="btn btn-primary btn-block" href="{% url 'settings-profile' %}">Edit Profile</a>
+            </div>
+          {% endif %}
         </div>
 
         <ul class="list-group list-group-flush" id="user_attributes">

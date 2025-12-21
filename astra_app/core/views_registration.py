@@ -75,7 +75,7 @@ def _send_registration_email(request: HttpRequest, *, username: str, email: str,
 
 def register(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
-        return redirect("profile")
+        return redirect("home")
 
     if request.method == "POST" and not settings.REGISTRATION_OPEN:
         messages.warning(request, "Registration is closed at the moment.")
@@ -143,7 +143,7 @@ def register(request: HttpRequest) -> HttpResponse:
 
 def confirm(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
-        return redirect("profile")
+        return redirect("home")
 
     username = (request.GET.get("username") or "").strip()
     if not username:
@@ -198,7 +198,7 @@ def confirm(request: HttpRequest) -> HttpResponse:
 
 def activate(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
-        return redirect("profile")
+        return redirect("home")
 
     token_string = (request.GET.get("token") or "").strip()
     if not token_string:
