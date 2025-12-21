@@ -237,13 +237,11 @@ LOGOUT_REDIRECT_URL = '/login/'
 # Avoid the PrimaryAvatarProvider (DB-backed Avatar records) to prevent ORM
 # lookups against AUTH_USER_MODEL for request.user objects.
 AVATAR_PROVIDERS = (
-    'avatar.providers.LibRAvatarProvider',
     'avatar.providers.GravatarAvatarProvider',
+    'avatar.providers.LibRAvatarProvider',
     'avatar.providers.DefaultAvatarProvider',
 )
 AVATAR_GRAVATAR_DEFAULT = env('AVATAR_GRAVATAR_DEFAULT', default='identicon')
-# Only used if Gravatar provider cannot produce a URL (e.g. missing email).
-AVATAR_DEFAULT_URL = env('AVATAR_DEFAULT_URL', default='')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
