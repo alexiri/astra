@@ -30,43 +30,6 @@ body {
   max-width: 100%;
 }
 
-/* Shared card tabs (used by Settings + Login/Register). */
-.alx-card-tabs-header {
-  border-bottom: 1px solid var(--alx-border);
-  background-color: rgba(0,0,0,.03);
-  padding: 0;
-}
-
-.alx-card-tabs {
-  border-bottom: 0;
-  margin: 0;
-  /* padding: 0 0.5rem; */
-  padding-left: 1rem;
-  padding-right: 1rem;
-  padding-top: 1rem;
-}
-
-.alx-card-tabs .nav-link {
-  border: 0;
-  border-top: 3px solid transparent;
-  padding: 0.85rem 1rem;
-  color: var(--alx-link);
-  font-weight: 600;
-}
-
-.alx-card-tabs .nav-link:hover {
-  color: var(--alx-ink);
-}
-
-.alx-card-tabs .nav-link.active {
-  color: var(--alx-ink);
-  font-weight: 650;
-  border-top-color: var(--alx-navy);
-  background: #fff;
-  border-left: 1px solid var(--alx-border);
-  border-right: 1px solid var(--alx-border);
-}
-
 .settings-page .card {
   border: 1px solid var(--alx-border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
@@ -103,6 +66,14 @@ body {
   background: var(--alx-navy) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
+
+.card .nav.nav-tabs {
+  padding-left: 10px;
+}
+
+/* .card-primary:not(.card-outline) > .card-header {
+  background-color: var(--alx-navy);
+} */
 
 a {
   color: var(--alx-link);
