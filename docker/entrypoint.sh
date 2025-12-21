@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /app/almalinux_membership/
+cd /app/astra_app/
 
 if [[ "${DJANGO_AUTO_MIGRATE:-1}" == "1" ]]; then
   echo "[entrypoint] Running migrations (with retry)..."

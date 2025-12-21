@@ -10,14 +10,14 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/almalinux_membership
+WORKDIR /app/astra_app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Keep entrypoint outside the bind-mounted /app volume (devcontainers/compose)
-COPY docker/entrypoint.sh /usr/local/bin/almalinux-entrypoint
-RUN chmod +x /usr/local/bin/almalinux-entrypoint
+COPY docker/entrypoint.sh /usr/local/bin/astra-entrypoint
+RUN chmod +x /usr/local/bin/astra-entrypoint
 
 COPY . .
 
@@ -26,5 +26,5 @@ COPY . .
 
 EXPOSE 8000
 
-ENTRYPOINT ["/usr/local/bin/almalinux-entrypoint"]
-CMD ["gunicorn", "almalinux_membership.wsgi:application", "--bind", "0.0.0.0:8000"]
+ENTRYPOINT ["/usr/local/bin/astra-entrypoint"]
+CMD ["gunicorn", "astra_app.wsgi:application", "--bind", "0.0.0.0:8000"]
