@@ -9,7 +9,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
-from core import views_selfservice
+from core import views_users
 
 
 class ProfileExtraAttributesRenderTests(TestCase):
@@ -62,8 +62,8 @@ class ProfileExtraAttributesRenderTests(TestCase):
             },
         )
 
-        with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            response = views_selfservice.user_profile(request, "alice")
+        with patch("core.views_users._get_full_user", autospec=True, return_value=fake_user):
+            response = views_users.user_profile(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")

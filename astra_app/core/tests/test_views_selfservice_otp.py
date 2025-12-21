@@ -11,7 +11,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
-from core.views_selfservice import OTP_KEY_LENGTH, settings_otp
+from core.views_settings_otp import OTP_KEY_LENGTH, settings_otp
 
 
 class SettingsOTPViewTests(TestCase):
@@ -42,8 +42,8 @@ class SettingsOTPViewTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
+        with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
+            with patch("core.views_settings_otp.ClientMeta", autospec=True) as mocked_client_cls:
                 mocked_client = mocked_client_cls.return_value
                 mocked_client.login.return_value = None
                 mocked_client.otptoken_find.return_value = {
@@ -93,9 +93,9 @@ class SettingsOTPViewTests(TestCase):
         )
         user_client = SimpleNamespace(login=lambda *a, **k: None)
 
-        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_selfservice.ClientMeta", autospec=True, side_effect=[svc_client, user_client]):
-                with patch("core.views_selfservice.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
+        with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
+            with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, user_client]):
+                with patch("core.views_settings_otp.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
                     response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
@@ -131,7 +131,7 @@ class SettingsOTPViewTests(TestCase):
         )
 
         # Only service client is required for confirm.
-        with patch("core.views_selfservice.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
+        with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
             response = settings_otp(request)
 
         self.assertEqual(response.status_code, 302)
@@ -177,8 +177,8 @@ class SettingsOTPViewTests(TestCase):
             otptoken_find=lambda **k: {"result": []},
         )
 
-        with patch("core.views_selfservice.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_selfservice.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
+        with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
+            with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
                 response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)

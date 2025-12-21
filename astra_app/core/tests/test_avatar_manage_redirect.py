@@ -7,7 +7,7 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, TestCase, override_settings
 
-from core import views_selfservice
+from core import views_settings
 
 
 class AvatarManageRedirectTests(TestCase):
@@ -37,7 +37,7 @@ class AvatarManageRedirectTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
-        response = views_selfservice.avatar_manage(request)
+        response = views_settings.avatar_manage(request)
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response["Location"].startswith("https://www.libravatar.org/"))
 
@@ -52,7 +52,7 @@ class AvatarManageRedirectTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
-        response = views_selfservice.avatar_manage(request)
+        response = views_settings.avatar_manage(request)
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response["Location"].startswith("https://gravatar.com/"))
 
@@ -65,7 +65,7 @@ class AvatarManageRedirectTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user(email="")
 
-        response = views_selfservice.avatar_manage(request)
+        response = views_settings.avatar_manage(request)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/settings/profile/")
         msgs = [m.message for m in get_messages(request)]

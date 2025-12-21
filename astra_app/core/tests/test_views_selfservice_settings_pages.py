@@ -10,7 +10,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from core import views_selfservice
+from core import views_settings
 
 
 class SelfServiceSettingsPagesTests(TestCase):
@@ -52,9 +52,9 @@ class SelfServiceSettingsPagesTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fake_user):
-            with patch("core.views_selfservice.render", autospec=True, side_effect=fake_render):
-                response = views_selfservice.settings_profile(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                response = views_settings.settings_profile(request)
 
         self.assertEqual(response.status_code, 200)
         ctx = captured.get("context")
@@ -106,10 +106,9 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice.FreeIPAUser.get", autospec=True) as mocked_get:
-            mocked_get.return_value = fake_user
-            with patch("core.views_selfservice._update_user_attrs", autospec=True) as mocked_update:
-                response = views_selfservice.settings_profile(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                response = views_settings.settings_profile(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-profile"))
@@ -143,10 +142,9 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice.FreeIPAUser.get", autospec=True) as mocked_get:
-            mocked_get.return_value = fake_user
-            with patch("core.views_selfservice._update_user_attrs", autospec=True) as mocked_update:
-                response = views_selfservice.settings_emails(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                response = views_settings.settings_emails(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-emails"))
@@ -182,10 +180,9 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice.FreeIPAUser.get", autospec=True) as mocked_get:
-            mocked_get.return_value = fake_user
-            with patch("core.views_selfservice._update_user_attrs", autospec=True) as mocked_update:
-                response = views_selfservice.settings_keys(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                response = views_settings.settings_keys(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-keys"))
@@ -210,12 +207,12 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
+        with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
             mocked_client = mocked_client_cls.return_value
             mocked_client.login.return_value = None
             mocked_client.passwd.return_value = None
 
-            response = views_selfservice.settings_password(request)
+            response = views_settings.settings_password(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-password"))
@@ -239,7 +236,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice.ClientMeta", autospec=True) as mocked_client_cls:
+        with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
             mocked_client = mocked_client_cls.return_value
             mocked_client.login.return_value = None
             # Simulate no passwd attribute in this client version.
@@ -247,7 +244,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 delattr(mocked_client, "passwd")
             mocked_client.user_mod.return_value = None
 
-            response = views_selfservice.settings_password(request)
+            response = views_settings.settings_password(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-password"))

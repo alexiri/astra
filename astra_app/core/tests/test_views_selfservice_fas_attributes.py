@@ -9,7 +9,8 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
-from core.views_selfservice import settings_emails, settings_keys, settings_profile, user_profile
+from core.views_settings import settings_emails, settings_keys, settings_profile
+from core.views_users import user_profile
 
 
 @dataclass
@@ -51,8 +52,8 @@ class FASAttributesTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.render", autospec=True, side_effect=fake_render):
+        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_users.render", autospec=True, side_effect=fake_render):
                 resp = user_profile(req, fu.username)
 
         self.assertEqual(resp.status_code, 200)
@@ -183,9 +184,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_profile(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -266,9 +267,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_profile(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -353,9 +354,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_profile(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -404,9 +405,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     with patch("post_office.mail.send", autospec=True) as send_mock:
                         resp = settings_emails(req)
 
@@ -436,9 +437,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req2)
         req2.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     with patch("post_office.mail.send", autospec=True) as send_mock2:
                         resp2 = settings_emails(req2)
 
@@ -468,9 +469,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req3)
         req3.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp3 = settings_emails(req3)
 
         self.assertEqual(resp3.status_code, 302)
@@ -507,9 +508,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_keys(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -543,9 +544,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req2)
         req2.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp2 = settings_keys(req2)
 
         self.assertEqual(resp2.status_code, 302)
@@ -577,9 +578,9 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req3)
         req3.user = self._auth_user()
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp3 = settings_keys(req3)
 
         self.assertEqual(resp3.status_code, 302)

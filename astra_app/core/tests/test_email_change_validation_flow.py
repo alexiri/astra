@@ -31,7 +31,7 @@ class EmailChangeValidationFlowTests(TestCase):
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_emails_post_sends_validation_email_and_defers_update(self):
-        from core import views_selfservice
+        from core import views_settings
 
         fu = SimpleNamespace(
             username="alice",
@@ -50,12 +50,11 @@ class EmailChangeValidationFlowTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice._update_user_attrs", autospec=True) as update_mock:
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
-                        update_mock.return_value = ([], True)
-                        resp = views_selfservice.settings_emails(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    update_mock.return_value = ([], True)
+                    resp = views_settings.settings_emails(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_not_called()
@@ -69,7 +68,7 @@ class EmailChangeValidationFlowTests(TestCase):
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_emails_reuses_verified_mail_for_bugzilla_without_new_validation(self):
-        from core import views_selfservice
+        from core import views_settings
 
         # User has a verified primary email already.
         fu = SimpleNamespace(
@@ -89,12 +88,11 @@ class EmailChangeValidationFlowTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice._update_user_attrs", autospec=True) as update_mock:
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
-                        update_mock.return_value = ([], True)
-                        resp = views_selfservice.settings_emails(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    update_mock.return_value = ([], True)
+                    resp = views_settings.settings_emails(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_called_once()
@@ -102,7 +100,7 @@ class EmailChangeValidationFlowTests(TestCase):
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_emails_reuses_verified_bugzilla_for_mail_without_new_validation(self):
-        from core import views_selfservice
+        from core import views_settings
 
         # User has a verified Bugzilla email already.
         fu = SimpleNamespace(
@@ -122,12 +120,11 @@ class EmailChangeValidationFlowTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_selfservice._update_user_attrs", autospec=True) as update_mock:
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
-                        update_mock.return_value = ([], True)
-                        resp = views_selfservice.settings_emails(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    update_mock.return_value = ([], True)
+                    resp = views_settings.settings_emails(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_called_once()
@@ -135,7 +132,7 @@ class EmailChangeValidationFlowTests(TestCase):
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_email_validate_get_and_post_applies_change(self):
-        from core import views_selfservice
+        from core import views_settings
         from core.tokens import make_signed_token
 
         token = make_signed_token({"u": "alice", "a": "mail", "v": "new@example.org"})
@@ -151,8 +148,8 @@ class EmailChangeValidationFlowTests(TestCase):
             _user_data={"mail": ["old@example.org"]},
         )
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            resp_get = views_selfservice.settings_email_validate(request_get)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            resp_get = views_settings.settings_email_validate(request_get)
 
         self.assertEqual(resp_get.status_code, 200)
         html = resp_get.content.decode("utf-8")
@@ -162,16 +159,16 @@ class EmailChangeValidationFlowTests(TestCase):
         self._add_session_and_messages(request_post)
         request_post.user = self._auth_user("alice")
 
-        with patch("core.views_selfservice._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_selfservice._update_user_attrs", autospec=True) as update_mock:
-                resp_post = views_selfservice.settings_email_validate(request_post)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
+                resp_post = views_settings.settings_email_validate(request_post)
 
         self.assertEqual(resp_post.status_code, 302)
         update_mock.assert_called_once()
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_email_validate_rejects_wrong_user(self):
-        from core import views_selfservice
+        from core import views_settings
         from core.tokens import make_signed_token
 
         token = make_signed_token({"u": "bob", "a": "mail", "v": "bob-new@example.org"})
@@ -180,7 +177,7 @@ class EmailChangeValidationFlowTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        resp = views_selfservice.settings_email_validate(request)
+        resp = views_settings.settings_email_validate(request)
         self.assertEqual(resp.status_code, 302)
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("does not belong" in m.lower() for m in msgs))

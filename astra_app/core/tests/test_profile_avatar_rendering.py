@@ -8,7 +8,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils.functional import SimpleLazyObject
 
-from core import views_selfservice
+from core import views_users
 from core.backends import FreeIPAUser
 
 
@@ -53,9 +53,9 @@ class ProfileAvatarRenderingTests(TestCase):
             _user_data={"mail": ["a@example.org"]},
         )
 
-        with patch("core.views_selfservice.FreeIPAUser.get", autospec=True) as mocked_get:
-            mocked_get.return_value = fake_user
-            response = views_selfservice.user_profile(request, "alice")
+        with patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user:
+            mocked_get_full_user.return_value = fake_user
+            response = views_users.user_profile(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
@@ -90,9 +90,9 @@ class ProfileAvatarRenderingTests(TestCase):
         # to a SimpleLazyObject.
         request.user = SimpleLazyObject(lambda: fu)
 
-        with patch("core.views_selfservice.FreeIPAUser.get", autospec=True) as mocked_get:
-            mocked_get.return_value = fu
-            response = views_selfservice.user_profile(request, "alice")
+        with patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user:
+            mocked_get_full_user.return_value = fu
+            response = views_users.user_profile(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("gravatar.com/avatar", response.content.decode("utf-8"))
