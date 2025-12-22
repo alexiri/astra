@@ -24,4 +24,9 @@ urlpatterns = [
     path("settings/otp/rename/", views_settings_otp.otp_rename, name="otp-rename"),
     path("settings/password/", views_settings.settings_password, name="settings-password"),
     path("settings/agreements/", views_settings.settings_agreements, name="settings-agreements"),
+    path(
+        "settings/agreements/<str:cn>/",
+        views_settings.settings_agreement_detail,
+        name="settings-agreement-detail",
+    ),
 ]

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from django.core.paginator import Paginator
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
-from django.shortcuts import render
-
-from core.backends import FreeIPAGroup
+from django.shortcuts import redirect, render
+from core.backends import FreeIPAGroup, FreeIPAOperationFailed
+from core.agreements import missing_required_agreements_for_user_in_group
 
 
 @login_required(login_url="/login/")
@@ -84,11 +85,88 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     q = (request.GET.get("q") or "").strip()
 
+    username = (request.user.get_username() or "").strip()
+    sponsors = {str(u).strip() for u in (getattr(group, "sponsors", []) or []) if str(u).strip()}
+    members = {str(u).strip() for u in (getattr(group, "members", []) or []) if str(u).strip()}
+    is_sponsor = bool(username) and username in sponsors
+    is_member = bool(username) and username in members
+
+    sponsors_list = sorted(sponsors, key=lambda s: s.lower())
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip().lower()
+
+        if action == "leave":
+            if not is_member:
+                messages.info(request, "You are not a member of this group.")
+                return redirect("group-detail", name)
+            try:
+                request.user.remove_from_group(cn)
+                messages.success(request, "You have left the group.")
+            except Exception:
+                messages.error(request, "Failed to leave group due to an internal error.")
+            return redirect("group-detail", name)
+
+        if action == "stop_sponsoring":
+            if not is_sponsor:
+                messages.info(request, "You are not a sponsor of this group.")
+                return redirect("group-detail", name)
+            try:
+                group.remove_sponsor(username)
+                messages.success(request, "You are no longer a sponsor of this group.")
+            except Exception:
+                messages.error(request, "Failed to update sponsor status due to an internal error.")
+            return redirect("group-detail", name)
+
+        if action in {"add_member", "remove_member"}:
+            if not is_sponsor:
+                messages.error(request, "Only sponsors can manage group members.")
+                return redirect("group-detail", name)
+
+            target = (request.POST.get("username") or "").strip()
+            if not target:
+                messages.error(request, "Please provide a username.")
+                return redirect("group-detail", name)
+
+            if target == username and action == "add_member":
+                messages.error(request, "You can't add yourself to a group.")
+                return redirect("group-detail", name)
+
+            if action == "add_member":
+                missing = missing_required_agreements_for_user_in_group(target, cn)
+                if missing:
+                    messages.error(
+                        request,
+                        "User must sign required agreement(s) before joining: " + ", ".join(missing),
+                    )
+                    return redirect("group-detail", name)
+                try:
+                    group.add_member(target)
+                    messages.success(request, f"Added {target} to the group.")
+                except FreeIPAOperationFailed as e:
+                    messages.error(request, str(e))
+                except Exception:
+                    messages.error(request, "Failed to add member due to an internal error.")
+                return redirect("group-detail", name)
+
+            if action == "remove_member":
+                try:
+                    group.remove_member(target)
+                    messages.success(request, f"Removed {target} from the group.")
+                except FreeIPAOperationFailed as e:
+                    messages.error(request, str(e))
+                except Exception:
+                    messages.error(request, "Failed to remove member due to an internal error.")
+                return redirect("group-detail", name)
+
     return render(
         request,
         "core/group_detail.html",
         {
             "group": group,
             "q": q,
+            "is_member": is_member,
+            "is_sponsor": is_sponsor,
+            "sponsors_list": sponsors_list,
         },
     )

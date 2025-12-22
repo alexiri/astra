@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -18,7 +18,8 @@ import post_office.mail
 
 from python_freeipa import ClientMeta
 
-from core.backends import FreeIPAUser
+from core.agreements import has_enabled_agreements, list_agreements_for_user
+from core.backends import FreeIPAFASAgreement, FreeIPAUser
 from core.forms_selfservice import EmailsForm, KeysForm, PasswordChangeFreeIPAForm, ProfileForm
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import settings_context
@@ -587,5 +588,125 @@ def settings_password(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="/login/")
 def settings_agreements(request: HttpRequest) -> HttpResponse:
-    context = {"agreements": [], **settings_context("agreements")}
+    username = (request.user.get_username() or "").strip()
+    if not username:
+        messages.error(request, "Unable to determine your username.")
+        return redirect("settings-profile")
+
+    # If there are no agreements configured in FreeIPA (or none enabled), hide
+    # the entire feature from the user-facing UI.
+    if not has_enabled_agreements():
+        return redirect("settings-profile")
+
+    fu = _get_full_user(username)
+    groups_raw = getattr(fu, "groups_list", []) if fu else []
+    if isinstance(groups_raw, str):
+        groups_raw = [groups_raw]
+    user_groups = [str(g).strip() for g in (groups_raw or []) if str(g).strip()]
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip().lower()
+        cn = (request.POST.get("cn") or "").strip()
+        if action == "sign" and cn:
+            agreement = FreeIPAFASAgreement.get(cn)
+            if not agreement:
+                messages.error(request, "Agreement not found.")
+                return redirect("settings-agreements")
+
+            if not getattr(agreement, "enabled", True):
+                messages.error(request, "This agreement is currently disabled.")
+                return redirect("settings-agreements")
+
+            users = {
+                str(u).strip()
+                for u in (getattr(agreement, "users", []) or [])
+                if str(u).strip()
+            }
+            if username in users:
+                messages.info(request, "You have already signed this agreement.")
+                return redirect("settings-agreements")
+
+            try:
+                agreement.add_user(username)
+                messages.success(request, "Agreement signed.")
+            except Exception as e:
+                logger.exception("Failed to sign agreement username=%s agreement=%s", username, cn)
+                if settings.DEBUG:
+                    messages.error(request, f"Failed to sign agreement (debug): {e}")
+                else:
+                    messages.error(request, "Failed to sign agreement due to an internal error.")
+            return redirect("settings-agreements")
+
+    agreements = list_agreements_for_user(
+        username,
+        user_groups=user_groups,
+        include_disabled=False,
+        applicable_only=False,
+    )
+    context = {"agreements": agreements, **settings_context("agreements")}
     return render(request, "core/settings_agreements.html", context)
+
+
+@login_required(login_url="/login/")
+def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
+    username = (request.user.get_username() or "").strip()
+    if not username:
+        messages.error(request, "Unable to determine your username.")
+        return redirect("settings-profile")
+
+    if not has_enabled_agreements():
+        return redirect("settings-profile")
+
+    cn = (cn or "").strip()
+    if not cn:
+        raise Http404("Agreement not found")
+
+    fu = _get_full_user(username)
+    groups_raw = getattr(fu, "groups_list", []) if fu else []
+    if isinstance(groups_raw, str):
+        groups_raw = [groups_raw]
+    user_groups = [str(g).strip() for g in (groups_raw or []) if str(g).strip()]
+    agreement = FreeIPAFASAgreement.get(cn)
+    if not agreement:
+        raise Http404("Agreement not found")
+
+    # Never expose disabled agreements on the user side.
+    if not bool(getattr(agreement, "enabled", True)):
+        raise Http404("Agreement not found")
+
+    signed = username in {
+        str(u).strip()
+        for u in (getattr(agreement, "users", []) or [])
+        if str(u).strip()
+    }
+    enabled = True
+    can_sign = not signed
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip().lower()
+        if action == "sign":
+            if not enabled:
+                messages.error(request, "This agreement is currently disabled.")
+                return redirect("settings-agreement-detail", cn=cn)
+            if signed:
+                messages.info(request, "You have already signed this agreement.")
+                return redirect("settings-agreement-detail", cn=cn)
+            try:
+                agreement.add_user(username)
+                messages.success(request, "Agreement signed.")
+                return redirect("settings-agreement-detail", cn=cn)
+            except Exception as e:
+                logger.exception("Failed to sign agreement username=%s agreement=%s", username, cn)
+                if settings.DEBUG:
+                    messages.error(request, f"Failed to sign agreement (debug): {e}")
+                else:
+                    messages.error(request, "Failed to sign agreement due to an internal error.")
+                return redirect("settings-agreement-detail", cn=cn)
+
+    context = {
+        "agreement": agreement,
+        "signed": signed,
+        "can_sign": can_sign,
+        **settings_context("agreements"),
+    }
+    return render(request, "core/settings_agreement_detail.html", context)

@@ -114,6 +114,23 @@ a:hover {
   max-width: 520px;
 }
 
+/* Keep the autocomplete results aligned with the search input. */
+.auth-nav-search #global-search-menu {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 520px;
+}
+
+@media (max-width: 767.98px) {
+  .auth-nav-search #global-search-menu {
+    left: 0;
+    transform: none;
+    max-width: none;
+  }
+}
+
 @media (max-width: 767.98px) {
   .auth-nav-search {
     margin-top: .5rem;

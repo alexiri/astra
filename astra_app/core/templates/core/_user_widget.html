@@ -1,6 +1,23 @@
 {% load avatar_tags %}
 
-<div class="card card-body mb-4 px-2 py-3 card-widget widget-user">
+<div class="card card-body mb-4 px-2 py-3 card-widget widget-user position-relative">
+  {% if remove_from_group_cn %}
+    <form
+      method="post"
+      action="{% url 'group-detail' remove_from_group_cn %}"
+      class="position-absolute"
+      style="top: .35rem; right: .35rem; z-index: 10;"
+      onsubmit="return confirm('Remove {{ username }} from this group?');"
+    >
+      {% csrf_token %}
+      <input type="hidden" name="action" value="remove_member" />
+      <input type="hidden" name="username" value="{{ username }}" />
+      <button type="submit" class="btn btn-outline-danger btn-sm" aria-label="Remove member">
+        <i class="fas fa-user-minus"></i>
+      </button>
+    </form>
+  {% endif %}
+
   <div class="d-flex align-items-center {{ extra_class }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
     <div class="flex-shrink-0 ml-1 mr-3">
       {% if avatar_user %}

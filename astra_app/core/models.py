@@ -64,3 +64,29 @@ class IPAGroup(models.Model):
             fas_discussion_url=getattr(group, "fas_discussion_url", "") or "",
             fas_group=getattr(group, "fas_group", False),
         )
+
+
+class IPAFASAgreement(models.Model):
+    # NOTE: Keep this model unmanaged; it mirrors FreeIPA fasagreement entries.
+    cn = models.CharField(max_length=255, primary_key=True, verbose_name="Agreement name")
+    description = models.TextField(blank=True, default="")
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        managed = False
+        # Keep these in the same admin section as other FreeIPA-backed objects.
+        app_label = "auth"
+        verbose_name = "Agreement"
+        verbose_name_plural = "Agreements"
+
+    def __str__(self) -> str:
+        return self.cn
+
+    @classmethod
+    def from_freeipa(cls, agreement) -> "IPAFASAgreement":
+        # `agreement` is a core.backends.FreeIPAFASAgreement
+        return cls(
+            cn=agreement.cn,
+            description=getattr(agreement, "description", "") or "",
+            enabled=bool(getattr(agreement, "enabled", True)),
+        )

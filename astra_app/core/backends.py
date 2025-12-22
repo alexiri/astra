@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from functools import lru_cache
 import threading
@@ -49,20 +51,52 @@ def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> No
     if not failed:
         return
 
+    def failed_has_truthy(value: object) -> bool:
+        if isinstance(value, dict):
+            return any(failed_has_truthy(v) for v in value.values())
+        if isinstance(value, list):
+            return any(failed_has_truthy(v) for v in value)
+        return _has_truthy_failure(value)
+
     # FreeIPA's group_{add,remove}_member often returns a `failed` skeleton even
     # on success, e.g. {'member': {'user': [], 'group': [], ...}}. Only treat it
     # as an error when any member bucket is non-empty.
     if action in {"group_add_member", "group_remove_member"} and isinstance(failed, dict):
         member = failed.get("member")
         if isinstance(member, dict):
-            buckets = (
+            buckets = [
                 member.get("user"),
                 member.get("group"),
                 member.get("service"),
                 member.get("idoverrideuser"),
-            )
+            ]
             if not any(_has_truthy_failure(b) for b in buckets):
                 return
+
+    if action in {"group_add_member_manager", "group_remove_member_manager"}:
+        # These operations may return a `failed` skeleton on success.
+        if not failed_has_truthy(failed):
+            return
+
+    # FreeIPA's fasagreement membership operations can also return a `failed`
+    # skeleton on success, e.g. {'member': {'group': []}} or
+    # {'memberuser': {'user': []}} depending on method and server version.
+    if action in {
+        "fasagreement_add_group",
+        "fasagreement_remove_group",
+        "fasagreement_add_user",
+        "fasagreement_remove_user",
+    } and isinstance(failed, dict):
+        buckets: list[object] = []
+        member = failed.get("member")
+        if isinstance(member, dict):
+            buckets.extend([member.get("group"), member.get("user")])
+        memberuser = failed.get("memberuser")
+        if isinstance(memberuser, dict):
+            buckets.extend([memberuser.get("user")])
+
+        if buckets and not any(_has_truthy_failure(b) for b in buckets):
+            return
 
     items: list[str] = []
 
@@ -156,6 +190,10 @@ def _groups_list_cache_key() -> str:
     return 'freeipa_groups_all'
 
 
+def _agreements_list_cache_key() -> str:
+    return "freeipa_fasagreements_all"
+
+
 def _invalidate_users_list_cache() -> None:
     cache.delete(_users_list_cache_key())
 
@@ -164,12 +202,24 @@ def _invalidate_groups_list_cache() -> None:
     cache.delete(_groups_list_cache_key())
 
 
+def _invalidate_agreements_list_cache() -> None:
+    cache.delete(_agreements_list_cache_key())
+
+
 def _invalidate_user_cache(username: str) -> None:
     cache.delete(_user_cache_key(username))
 
 
 def _invalidate_group_cache(cn: str) -> None:
     cache.delete(_group_cache_key(cn))
+
+
+def _agreement_cache_key(cn: str) -> str:
+    return f"freeipa_fasagreement_{cn}"
+
+
+def _invalidate_agreement_cache(cn: str) -> None:
+    cache.delete(_agreement_cache_key(cn))
 
 
 @lru_cache(maxsize=4096)
@@ -619,6 +669,17 @@ class FreeIPAGroup:
             members = [members]
         self.members = members
 
+        sponsors = None
+        for key in ("membermanager_user", "membermanager", "membermanageruser_user"):
+            if key in self._group_data:
+                sponsors = self._group_data.get(key)
+                break
+        if sponsors is None:
+            sponsors = []
+        if isinstance(sponsors, str):
+            sponsors = [sponsors]
+        self.sponsors = [str(u).strip() for u in (sponsors or []) if str(u).strip()]
+
         # FAS extension attributes
         fas_url = self._group_data.get('fasurl', None)
         if isinstance(fas_url, list):
@@ -668,6 +729,12 @@ class FreeIPAGroup:
         """Return a FreeIPA client authenticated as the service account."""
 
         return _get_freeipa_service_client_cached()
+
+    @classmethod
+    def _rpc(cls, client: ClientMeta, method: str, args: list[object] | None, params: dict[str, object] | None):
+        if not hasattr(client, "_request"):
+            raise FreeIPAOperationFailed("FreeIPA client does not support raw JSON-RPC requests")
+        return client._request(method, args or [], params or {})
 
     @classmethod
     def all(cls):
@@ -833,6 +900,46 @@ class FreeIPAGroup:
             logger.exception("Failed to add member username=%s group=%s", username, self.cn)
             raise
 
+    def add_sponsor(self, username: str) -> None:
+        username = (username or "").strip()
+        if not username:
+            return
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return self._rpc(client, "group_add_member_manager", [self.cn], {"user": [username]})
+                except Exception:
+                    return self._rpc(client, "group_add_member_manager", [self.cn], {"users": [username]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="group_add_member_manager", subject=f"group={self.cn} user={username}")
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+        except Exception:
+            logger.exception("Failed to add sponsor username=%s group=%s", username, self.cn)
+            raise
+
+    def remove_sponsor(self, username: str) -> None:
+        username = (username or "").strip()
+        if not username:
+            return
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return self._rpc(client, "group_remove_member_manager", [self.cn], {"user": [username]})
+                except Exception:
+                    return self._rpc(client, "group_remove_member_manager", [self.cn], {"users": [username]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="group_remove_member_manager", subject=f"group={self.cn} user={username}")
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+        except Exception:
+            logger.exception("Failed to remove sponsor username=%s group=%s", username, self.cn)
+            raise
+
     def remove_member(self, username):
         try:
             res = _with_freeipa_service_client_retry(
@@ -857,6 +964,306 @@ class FreeIPAGroup:
                 )
         except Exception as e:
             logger.exception("Failed to remove member username=%s group=%s", username, self.cn)
+            raise
+
+
+class FreeIPAFASAgreement:
+    """A non-persistent User Agreement object backed by FreeIPA.
+
+    This relies on the freeipa-fas plugin, which exposes the fasagreement
+    family of commands (fasagreement-find/show/add/mod/del/enable/disable,
+    and membership operations).
+    """
+
+    def __init__(self, cn: str, agreement_data: dict[str, object] | None = None):
+        self.cn = cn
+        self._agreement_data: dict[str, object] = agreement_data or {}
+
+        description = self._agreement_data.get("description", "")
+        if isinstance(description, list):
+            description = description[0] if description else ""
+        self.description: str = str(description or "")
+
+        enabled_raw = self._agreement_data.get("ipaenabledflag", None)
+        if isinstance(enabled_raw, list):
+            enabled_raw = enabled_raw[0] if enabled_raw else None
+        if enabled_raw is None:
+            self.enabled = True
+        elif isinstance(enabled_raw, bool):
+            self.enabled = bool(enabled_raw)
+        else:
+            self.enabled = str(enabled_raw).strip().upper() in {"TRUE", "T", "YES", "Y", "1", "ON"}
+
+        self.groups = self._multi_value_first_present(
+            self._agreement_data,
+            keys=("member_group", "member", "membergroup"),
+        )
+        self.users = self._multi_value_first_present(
+            self._agreement_data,
+            keys=("memberuser_user", "memberuser", "member_user"),
+        )
+
+    @staticmethod
+    def _multi_value_first_present(source: dict[str, object], *, keys: tuple[str, ...]) -> list[str]:
+        for key in keys:
+            value = source.get(key, None)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                return [value]
+            if isinstance(value, list):
+                out: list[str] = []
+                for item in value:
+                    if item is None:
+                        continue
+                    out.append(str(item))
+                return out
+        return []
+
+    def __str__(self) -> str:
+        return self.cn
+
+    @classmethod
+    def get_client(cls) -> ClientMeta:
+        return _get_freeipa_service_client_cached()
+
+    @classmethod
+    def _rpc(cls, client: ClientMeta, method: str, args: list[object] | None, params: dict[str, object] | None):
+        """Call a FreeIPA JSON-RPC method.
+
+        python-freeipa's ClientMeta doesn't necessarily generate methods for
+        custom plugin commands like fasagreement_*. However, all clients expose
+        a raw `_request()` method which can call any command supported by the
+        server.
+        """
+
+        if not hasattr(client, "_request"):
+            raise FreeIPAOperationFailed("FreeIPA client does not support raw JSON-RPC requests")
+
+        return client._request(method, args or [], params or {})
+
+    @classmethod
+    def all(cls) -> list["FreeIPAFASAgreement"]:
+        cache_key = _agreements_list_cache_key()
+        cached = cache.get(cache_key)
+        if cached is not None:
+            agreements = cached or []
+        else:
+            try:
+                result = _with_freeipa_service_client_retry(
+                    cls.get_client,
+                    lambda client: cls._rpc(
+                        client,
+                        "fasagreement_find",
+                        [],
+                        {"all": True, "sizelimit": 0, "timelimit": 0},
+                    ),
+                )
+                agreements = (result or {}).get("result", []) if isinstance(result, dict) else []
+                cache.set(cache_key, agreements)
+            except Exception:
+                logger.exception("Failed to list FAS agreements")
+                return []
+
+        items: list[FreeIPAFASAgreement] = []
+        for a in agreements:
+            if not isinstance(a, dict):
+                continue
+            cn = a.get("cn")
+            if isinstance(cn, list):
+                cn = cn[0] if cn else None
+            if not cn:
+                continue
+            items.append(cls(str(cn), a))
+        return items
+
+    @classmethod
+    def get(cls, cn: str) -> FreeIPAFASAgreement | None:
+        cache_key = _agreement_cache_key(cn)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cls(cn, cached)
+
+        try:
+            result = _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: cls._rpc(
+                    client,
+                    "fasagreement_show",
+                    [cn],
+                    {"all": True},
+                ),
+            )
+            if isinstance(result, dict) and isinstance(result.get("result"), dict):
+                data = result["result"]
+                cache.set(cache_key, data)
+                return cls(cn, data)
+        except Exception:
+            logger.exception("Failed to get FAS agreement cn=%s", cn)
+        return None
+
+    @classmethod
+    def create(cls, cn: str, *, description: str | None = None) -> "FreeIPAFASAgreement":
+        desc = (description or "").strip()
+        try:
+            params: dict[str, object] = {}
+            if desc:
+                params["description"] = desc
+            _with_freeipa_service_client_retry(
+                cls.get_client,
+                lambda client: cls._rpc(
+                    client,
+                    "fasagreement_add",
+                    [cn],
+                    params,
+                ),
+            )
+            _invalidate_agreements_list_cache()
+            return cls.get(cn) or cls(cn, {"cn": [cn], "description": [desc], "ipaenabledflag": ["TRUE"]})
+        except Exception:
+            logger.exception("Failed to create FAS agreement cn=%s", cn)
+            raise
+
+    def set_description(self, description: str | None) -> None:
+        desc = (description or "").strip()
+        try:
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: self._rpc(
+                    client,
+                    "fasagreement_mod",
+                    [self.cn],
+                    {"description": desc},
+                ),
+            )
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+            self.description = desc
+        except Exception:
+            logger.exception("Failed to modify FAS agreement description cn=%s", self.cn)
+            raise
+
+    def set_enabled(self, enabled: bool) -> None:
+        try:
+            if enabled:
+                _with_freeipa_service_client_retry(
+                    self.get_client,
+                    lambda client: self._rpc(client, "fasagreement_enable", [self.cn], {}),
+                )
+            else:
+                _with_freeipa_service_client_retry(
+                    self.get_client,
+                    lambda client: self._rpc(client, "fasagreement_disable", [self.cn], {}),
+                )
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+            self.enabled = bool(enabled)
+        except Exception:
+            logger.exception("Failed to set FAS agreement enabled cn=%s enabled=%s", self.cn, enabled)
+            raise
+
+    def add_group(self, group_cn: str) -> None:
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return self._rpc(client, "fasagreement_add_group", [self.cn], {"group": [group_cn]})
+                except Exception:
+                    # Some clients/servers may accept 'groups' as parameter name.
+                    return self._rpc(client, "fasagreement_add_group", [self.cn], {"groups": [group_cn]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="fasagreement_add_group", subject=f"agreement={self.cn} group={group_cn}")
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+        except Exception:
+            logger.exception("Failed to add group to FAS agreement cn=%s group=%s", self.cn, group_cn)
+            raise
+
+    def remove_group(self, group_cn: str) -> None:
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return self._rpc(client, "fasagreement_remove_group", [self.cn], {"group": [group_cn]})
+                except Exception:
+                    return self._rpc(client, "fasagreement_remove_group", [self.cn], {"groups": [group_cn]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="fasagreement_remove_group", subject=f"agreement={self.cn} group={group_cn}")
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+        except Exception:
+            logger.exception("Failed to remove group from FAS agreement cn=%s group=%s", self.cn, group_cn)
+            raise
+
+    def add_user(self, username: str) -> None:
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return self._rpc(client, "fasagreement_add_user", [self.cn], {"user": [username]})
+                except Exception:
+                    return self._rpc(client, "fasagreement_add_user", [self.cn], {"users": [username]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="fasagreement_add_user", subject=f"agreement={self.cn} user={username}")
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+        except Exception:
+            logger.exception("Failed to add user to FAS agreement cn=%s user=%s", self.cn, username)
+            raise
+
+    def remove_user(self, username: str) -> None:
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return self._rpc(client, "fasagreement_remove_user", [self.cn], {"user": [username]})
+                except Exception:
+                    return self._rpc(client, "fasagreement_remove_user", [self.cn], {"users": [username]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="fasagreement_remove_user", subject=f"agreement={self.cn} user={username}")
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+        except Exception:
+            logger.exception("Failed to remove user from FAS agreement cn=%s user=%s", self.cn, username)
+            raise
+
+    def delete(self) -> None:
+        try:
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: self._rpc(client, "fasagreement_del", [self.cn], {}),
+            )
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+        except exceptions.Denied as e:
+            # freeipa-fas blocks deletion when groups/users are still linked.
+            # Deleting the agreement implies these links should be removed, so
+            # do that automatically and retry once.
+            msg = str(e)
+            if "Not allowed to delete User Agreement with linked groups" not in msg:
+                logger.exception("Failed to delete FAS agreement cn=%s", self.cn)
+                raise
+
+            logger.info(
+                "FreeIPA denied deletion of agreement cn=%s due to linked members; unlinking and retrying",
+                self.cn,
+            )
+
+            _invalidate_agreement_cache(self.cn)
+            fresh = self.get(self.cn) or self
+            for group_cn in list(getattr(fresh, "groups", []) or []):
+                fresh.remove_group(group_cn)
+            for username in list(getattr(fresh, "users", []) or []):
+                fresh.remove_user(username)
+
+            _with_freeipa_service_client_retry(
+                self.get_client,
+                lambda client: self._rpc(client, "fasagreement_del", [self.cn], {}),
+            )
+            _invalidate_agreement_cache(self.cn)
+            _invalidate_agreements_list_cache()
+        except Exception:
+            logger.exception("Failed to delete FAS agreement cn=%s", self.cn)
             raise
 
 

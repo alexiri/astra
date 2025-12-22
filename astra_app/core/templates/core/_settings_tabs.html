@@ -14,7 +14,9 @@
   <li class="nav-item">
     <a class="nav-link {% if active_tab == 'password' %}active{% endif %}" href="{% url 'settings-password' %}">Password</a>
   </li>
-  <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'agreements' %}active{% endif %}" href="{% url 'settings-agreements' %}">Agreements</a>
-  </li>
+  {% if show_agreements_tab %}
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'agreements' %}active{% endif %}" href="{% url 'settings-agreements' %}">Agreements</a>
+    </li>
+  {% endif %}
 </ul>

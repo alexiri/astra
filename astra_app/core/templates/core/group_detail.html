@@ -1,72 +1,148 @@
 {% extends 'core/base.html' %}
 
 {% load core_user_grid %}
+{% load core_user_widget %}
 
 {% block title %}Group {{ group.cn }}{% endblock %}
 
 {% block header %}
-  <h1 class="m-0">
-    Group: {{ group.cn }}
-    <small class="text-muted">({{ group.members|length }} members)</small>
-  </h1>
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1 class="m-0">
+      Group: {{ group.cn }}
+      <small class="text-muted">({{ group.members|length }} members)</small>
+    </h1>
+
+    {% if is_member %}
+      <form method="post" class="m-0" onsubmit="return confirm('Leave this group?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="leave" />
+        <button type="submit" class="btn btn-outline-danger">
+          Leave group
+        </button>
+      </form>
+    {% endif %}
+  </div>
 {% endblock %}
 
 {% block content %}
+  <div class="row">
+    <div class="{% if is_sponsor %}col-lg-8{% else %}col-lg-12{% endif %}">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Group info</h3>
+        </div>
+        <div class="card-body p-0">
+          <table class="table">
+            <tbody>
+              <tr>
+                <th style="width: 180px;">Description</th>
+                <td>{% if group.description %}{{ group.description }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+              </tr>
+              <tr>
+                <th>URL</th>
+                <td>
+                  {% if group.fas_url %}
+                    <a href="{{ group.fas_url }}" rel="noopener" target="_blank">{{ group.fas_url }}</a>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              <tr>
+                <th>Mailing list</th>
+                <td>
+                  {% if group.fas_mailing_list %}
+                    <a href="mailto:{{ group.fas_mailing_list }}">{{ group.fas_mailing_list }}</a>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              <tr>
+                <th>IRC channels</th>
+                <td>
+                  {% if group.fas_irc_channels %}
+                    {% for ch in group.fas_irc_channels %}
+                      <span class="badge badge-secondary">{{ ch }}</span>
+                    {% endfor %}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              <tr>
+                <th>Discussion URL</th>
+                <td>
+                  {% if group.fas_discussion_url %}
+                    <a href="{{ group.fas_discussion_url }}" rel="noopener" target="_blank">{{ group.fas_discussion_url }}</a>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    {% if is_sponsor %}
+      <div class="col-lg-4">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Sponsor tools</h3>
+          </div>
+          <div class="card-body">
+            <form method="post" class="mb-2">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="add_member" />
+              <div class="input-group">
+                <input
+                  id="sponsor-add-username"
+                  type="text"
+                  name="username"
+                  class="form-control"
+                  placeholder="Add member by username"
+                  list="sponsor-user-suggestions"
+                  autocomplete="off"
+                />
+                <button class="btn btn-primary" type="submit">Add</button>
+              </div>
+            </form>
+
+            <datalist id="sponsor-user-suggestions"></datalist>
+
+            <form method="post" class="m-0" onsubmit="return confirm('Stop being a sponsor of this group?');">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="stop_sponsoring" />
+              <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Stop being a sponsor</button>
+            </form>
+
+            <small class="text-muted d-block mt-2">
+              Users must have signed required agreements before being added.
+            </small>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
   <div class="card">
     <div class="card-header">
-      <h3 class="card-title">Group info</h3>
+      <h3 class="card-title">Sponsors</h3>
     </div>
-    <div class="card-body p-0">
-      <table class="table">
-        <tbody>
-          <tr>
-            <th style="width: 180px;">Description</th>
-            <td>{% if group.description %}{{ group.description }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-          </tr>
-          <tr>
-            <th>URL</th>
-            <td>
-              {% if group.fas_url %}
-                <a href="{{ group.fas_url }}" rel="noopener" target="_blank">{{ group.fas_url }}</a>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>Mailing list</th>
-            <td>
-              {% if group.fas_mailing_list %}
-                <a href="mailto:{{ group.fas_mailing_list }}">{{ group.fas_mailing_list }}</a>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>IRC channels</th>
-            <td>
-              {% if group.fas_irc_channels %}
-                {% for ch in group.fas_irc_channels %}
-                  <span class="badge badge-secondary">{{ ch }}</span>
-                {% endfor %}
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>Discussion URL</th>
-            <td>
-              {% if group.fas_discussion_url %}
-                <a href="{{ group.fas_discussion_url }}" rel="noopener" target="_blank">{{ group.fas_discussion_url }}</a>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="card-body">
+      {% if sponsors_list %}
+        <div class="row">
+          {% for username in sponsors_list %}
+            <div class="col-12 col-md-6 col-lg-4 col-xl-3">
+              {% user username %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">No sponsors found.</div>
+      {% endif %}
     </div>
   </div>
 
@@ -103,7 +179,69 @@
     </div>
 
     <div class="card-body">
-      {% user_grid group=group %}
+      {% user_grid group=group member_manage_enabled=is_sponsor member_manage_group_cn=group.cn %}
     </div>
   </div>
+
+  <script>
+    (function () {
+      const input = document.getElementById('sponsor-add-username');
+      const list = document.getElementById('sponsor-user-suggestions');
+      if (!input || !list) return;
+
+      let timer = null;
+      let lastQuery = '';
+      let inflight = null;
+
+      function clearOptions() {
+        list.innerHTML = '';
+      }
+
+      function setOptions(usernames) {
+        clearOptions();
+        for (const u of usernames) {
+          const opt = document.createElement('option');
+          opt.value = u;
+          list.appendChild(opt);
+        }
+      }
+
+      async function fetchSuggestions(q) {
+        if (!q) {
+          clearOptions();
+          return;
+        }
+
+        lastQuery = q;
+        if (inflight && typeof inflight.abort === 'function') {
+          inflight.abort();
+        }
+        inflight = new AbortController();
+
+        try {
+          const resp = await fetch('/search/?q=' + encodeURIComponent(q), {
+            headers: { 'Accept': 'application/json' },
+            signal: inflight.signal,
+          });
+          if (!resp.ok) return;
+          const data = await resp.json();
+          if (q !== lastQuery) return;
+          const users = Array.isArray(data.users) ? data.users : [];
+          const usernames = users
+            .map((x) => (x && x.username ? String(x.username) : ''))
+            .filter((x) => x)
+            .slice(0, 12);
+          setOptions(usernames);
+        } catch (e) {
+          if (e && e.name === 'AbortError') return;
+        }
+      }
+
+      input.addEventListener('input', function () {
+        const q = (input.value || '').trim();
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(function () { fetchSuggestions(q); }, 180);
+      });
+    })();
+  </script>
 {% endblock %}

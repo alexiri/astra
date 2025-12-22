@@ -7,13 +7,17 @@ from typing import Any
 from django.conf import settings
 
 from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
+from core.agreements import has_enabled_agreements
 
 
 logger = logging.getLogger(__name__)
 
 
-def settings_context(active_tab: str) -> dict[str, str]:
-    return {"active_tab": active_tab}
+def settings_context(active_tab: str) -> dict[str, object]:
+    return {
+        "active_tab": active_tab,
+        "show_agreements_tab": has_enabled_agreements(),
+    }
 
 
 _ATTR_NOT_ALLOWED_RE = re.compile(r"attribute\s+['\"]?([a-zA-Z0-9_-]+)['\"]?\s+not\s+allowed", re.IGNORECASE)

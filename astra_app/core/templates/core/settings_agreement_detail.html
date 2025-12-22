@@ -1,0 +1,49 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Settings - Agreement{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Settings for <a href="{% url 'user-profile' request.user.get_username %}">{{ request.user.get_username }}</a></h1>
+{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+  <div class="card card-primary card-tabs settings-card mt-3">
+    <div class="card-header p-0 pt-1">
+      {% include 'core/_settings_tabs.html' %}
+    </div>
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <h3 class="h5 mb-1">{{ agreement.cn }}</h3>
+          {% if signed %}
+            <span class="badge badge-success">Signed</span>
+          {% else %}
+            <span class="badge badge-warning">Not signed</span>
+          {% endif %}
+        </div>
+        <div>
+          <a class="btn btn-sm btn-outline-secondary" href="{% url 'settings-agreements' %}">Back</a>
+        </div>
+      </div>
+
+      <hr />
+
+      {% if agreement.description %}
+        <div class="agreement-body">{{ agreement.description|linebreaksbr }}</div>
+      {% else %}
+        <p class="text-muted mb-0">No agreement text is available.</p>
+      {% endif %}
+
+      {% if can_sign %}
+        <hr />
+        <form method="post" class="m-0">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="sign" />
+          <button type="submit" class="btn btn-primary">Sign agreement</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

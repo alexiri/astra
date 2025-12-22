@@ -85,6 +85,10 @@ def user_grid(context: Context, **kwargs: Any) -> str:
     users_arg = kwargs.get("users", None)
     title_arg = kwargs.get("title", None)
 
+    member_manage_enabled = bool(kwargs.get("member_manage_enabled", False))
+    member_manage_group_cn_raw = kwargs.get("member_manage_group_cn", None)
+    member_manage_group_cn = ("" if member_manage_group_cn_raw is None else str(member_manage_group_cn_raw)).strip() or None
+
     title = ("" if title_arg is None else str(title_arg)).strip() or None
 
     group_obj: object | None = None
@@ -155,6 +159,8 @@ def user_grid(context: Context, **kwargs: Any) -> str:
             "show_last": show_last,
             "users": users_page,
             "usernames": usernames_page,
+            "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
+            "member_manage_group_cn": member_manage_group_cn,
         },
         request=http_request,
     )

@@ -12,6 +12,7 @@ from django.utils import timezone
 from zoneinfo import ZoneInfo
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
 
 
@@ -45,12 +46,44 @@ def _profile_context_for_user(
 
     # Only show FAS groups on the public profile page.
     # Using `FreeIPAGroup.all()` keeps this one cached call vs. per-group lookups.
-    fas_cns = {
-        str(getattr(g, "cn", "")).strip().lower()
-        for g in (FreeIPAGroup.all() or [])
-        if getattr(g, "fas_group", False)
-    }
-    groups = [g for g in groups_list if g.lower() in fas_cns]
+    fas_groups = [g for g in (FreeIPAGroup.all() or []) if getattr(g, "fas_group", False)]
+    fas_cns = {str(getattr(g, "cn", "")).strip().lower() for g in fas_groups if getattr(g, "cn", None)}
+
+    member_groups = {g for g in groups_list if g.lower() in fas_cns}
+
+    sponsor_groups: set[str] = set()
+    for g in fas_groups:
+        cn = str(getattr(g, "cn", "") or "").strip()
+        if not cn:
+            continue
+        sponsors = {str(u).strip() for u in (getattr(g, "sponsors", []) or []) if str(u).strip()}
+        if fu.username in sponsors:
+            sponsor_groups.add(cn)
+
+    visible_groups = sorted(member_groups | sponsor_groups, key=str.lower)
+    groups = [
+        {
+            "cn": cn,
+            "role": "Sponsor" if cn in sponsor_groups else "Member",
+        }
+        for cn in visible_groups
+    ]
+
+    show_agreements = has_enabled_agreements()
+    if show_agreements:
+        agreements = [
+            a.cn
+            for a in list_agreements_for_user(
+                fu.username,
+                user_groups=groups_list,
+                include_disabled=False,
+                applicable_only=False,
+            )
+            if a.signed
+        ]
+        agreements = sorted({str(a).strip() for a in agreements if str(a).strip()}, key=str.lower)
+    else:
+        agreements = []
 
     def _as_list(value: object) -> list[str]:
         if isinstance(value, list):
@@ -83,9 +116,11 @@ def _profile_context_for_user(
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
         "is_self": is_self,
-        "groups": sorted(groups),
+        "groups": groups,
         "groups_count": len(groups),
-        "agreements_count": 0,
+        "show_agreements": show_agreements,
+        "agreements": agreements,
+        "agreements_count": len(agreements),
         "timezone": tz_name,
         "timezone_name": tz_name,
         "current_time": now_local,

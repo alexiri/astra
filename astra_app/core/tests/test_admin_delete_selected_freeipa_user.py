@@ -14,14 +14,8 @@ class AdminDeleteSelectedIPAUserTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_delete_selected_action_does_not_crash(self) -> None:
-        """Regression test for Django admin bulk-delete on unmanaged IPAUser.
-
-        Django's built-in delete action calls admin utils like model_ngettext()
-        with the queryset object itself. Our changelist uses a lightweight
-        QuerySet-like wrapper, so it must provide enough model metadata for the
-        admin action to render its confirmation page.
-        """
+    def test_bulk_delete_action_shows_confirmation(self) -> None:
+        """Bulk-delete should render Django's confirmation page."""
 
         self._login_as_freeipa_admin("alice")
 
@@ -47,6 +41,7 @@ class AdminDeleteSelectedIPAUserTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
             patch("core.backends.FreeIPAUser.all", return_value=[target_user]),
+            patch.object(target_user, "delete", return_value=None),
         ):
             url = reverse("admin:auth_ipauser_changelist")
             resp = self.client.post(
@@ -60,7 +55,5 @@ class AdminDeleteSelectedIPAUserTests(TestCase):
                 follow=False,
             )
 
-        # Before the fix, this endpoint 500s with:
-        # AttributeError: '_ListBackedQuerySet' object has no attribute 'verbose_name'
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Are you sure", status_code=200)

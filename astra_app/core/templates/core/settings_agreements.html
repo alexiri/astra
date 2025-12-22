@@ -13,15 +13,45 @@
       {% include 'core/_settings_tabs.html' %}
     </div>
     <div class="card-body">
-    {% if agreements %}
-      <ul class="list-group">
-        {% for a in agreements %}
-          <li class="list-group-item">{{ a }}</li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="text-muted mb-0">No agreements to show yet.</p>
-    {% endif %}
+      {% if agreements %}
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Agreement</th>
+                <th class="text-right" style="width: 1%;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in agreements %}
+                <tr>
+                  <td>
+                    <div class="d-flex align-items-center">
+                      <strong>{{ a.cn }}</strong>
+                      {% if a.signed %}
+                        <span class="badge badge-success ml-2">Signed</span>
+                      {% endif %}
+                    </div>
+                  </td>
+                  <td class="text-right" style="white-space: nowrap;">
+                    <a class="btn btn-sm btn-outline-secondary" href="{% url 'settings-agreement-detail' a.cn %}">View agreement</a>
+                    {% if not a.signed %}
+                      <form method="post" class="d-inline" action="{% url 'settings-agreements' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="sign" />
+                        <input type="hidden" name="cn" value="{{ a.cn }}" />
+                        <button type="submit" class="btn btn-sm btn-primary">Sign</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">No agreements to show.</p>
+      {% endif %}
     </div>
   </div>
 </div>

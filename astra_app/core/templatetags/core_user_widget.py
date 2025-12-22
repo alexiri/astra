@@ -41,6 +41,9 @@ def user_widget(context: Context, username: object, **kwargs: Any) -> str:
     extra_class = kwargs.get("class", "") or ""
     extra_style = kwargs.get("style", "") or ""
 
+    remove_from_group_cn_raw = kwargs.get("remove_from_group_cn")
+    remove_from_group_cn = ("" if remove_from_group_cn_raw is None else str(remove_from_group_cn_raw)).strip() or ""
+
     # Per-template-render cache (avoids repeated FreeIPA lookups in a table).
     render_cache = context.render_context
     existing_cache = render_cache.get("_core_user_widget_cache")
@@ -84,6 +87,7 @@ def user_widget(context: Context, username: object, **kwargs: Any) -> str:
             "full_name": full_name,
             "extra_class": extra_class,
             "extra_style": extra_style,
+            "remove_from_group_cn": remove_from_group_cn,
         },
         request=context.get("request"),
     )

@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.contrib.messages import get_messages
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.contrib.sessions.middleware import SessionMiddleware
+from django.http import HttpResponse
+from django.test import RequestFactory, TestCase
+from django.urls import reverse
+
+from core.backends import FreeIPAFASAgreement
+from core import views_settings, views_users
+
+
+class AgreementsSelfServiceTests(TestCase):
+    def _add_session_and_messages(self, request):
+        SessionMiddleware(lambda r: None).process_request(request)
+        request.session.save()
+        setattr(request, "_messages", FallbackStorage(request))
+        return request
+
+    def _auth_user(self, username: str = "alice"):
+        return SimpleNamespace(is_authenticated=True, get_username=lambda: username)
+
+    def test_profile_includes_signed_agreements(self):
+        factory = RequestFactory()
+        request = factory.get("/user/alice/")
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"]},
+        )
+
+        agreements = [FreeIPAFASAgreement("cla", {"cn": ["cla"], "ipaenabledflag": ["TRUE"]})]
+        agreement_detail = FreeIPAFASAgreement(
+            "cla",
+            {
+                "cn": ["cla"],
+                "ipaenabledflag": ["TRUE"],
+                "memberuser_user": ["alice"],
+                "description": ["CLA text"],
+            },
+        )
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
+                    with patch(
+                        "core.backends.FreeIPAFASAgreement.get",
+                        autospec=True,
+                        return_value=agreement_detail,
+                    ):
+                        with patch("core.views_users.render", autospec=True, side_effect=fake_render):
+                            resp = views_users.user_profile(request, "alice")
+
+        self.assertEqual(resp.status_code, 200)
+        ctx = captured["context"]
+        self.assertEqual(ctx["agreements_count"], 1)
+        self.assertIn("cla", ctx["agreements"])
+
+    def test_settings_agreements_lists_enabled_agreements(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/agreements/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"]},
+        )
+
+        agreements = [FreeIPAFASAgreement("cla", {"cn": ["cla"], "ipaenabledflag": ["TRUE"]})]
+        agreement_detail = FreeIPAFASAgreement(
+            "cla",
+            {
+                "cn": ["cla"],
+                "ipaenabledflag": ["TRUE"],
+                # The user isn't in this group yet, but they still must be able to
+                # sign agreements ahead of joining.
+                "member_group": ["packagers"],
+                "memberuser_user": [],
+                "description": ["CLA text"],
+            },
+        )
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
+                with patch(
+                    "core.backends.FreeIPAFASAgreement.get",
+                    autospec=True,
+                    return_value=agreement_detail,
+                ):
+                    with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                        resp = views_settings.settings_agreements(request)
+
+        self.assertEqual(resp.status_code, 200)
+        ctx = captured["context"]
+        self.assertEqual([a.cn for a in ctx["agreements"]], ["cla"])
+
+    def test_settings_agreements_post_signs_agreement(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/agreements/",
+            data={"action": "sign", "cn": "cla"},
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"]},
+        )
+
+        agreement = FreeIPAFASAgreement(
+            "cla",
+            {
+                "cn": ["cla"],
+                "ipaenabledflag": ["TRUE"],
+                "member_group": ["packagers"],
+                "memberuser_user": [],
+                "description": ["CLA text"],
+            },
+        )
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.backends.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                with patch.object(agreement, "add_user", autospec=True) as mocked_add:
+                    resp = views_settings.settings_agreements(request)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("settings-agreements"))
+        mocked_add.assert_called_once_with("alice")
+        msgs = [m.message for m in get_messages(request)]
+        self.assertTrue(any("signed" in m.lower() for m in msgs))
+
+    def test_settings_agreements_redirects_when_no_enabled_agreements(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/agreements/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"]},
+        )
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=[]):
+                resp = views_settings.settings_agreements(request)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("settings-profile"))

@@ -1,27 +1,350 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import Any
 from typing import override
 from django import forms
 from django.contrib import admin
+from django.contrib.admin import helpers
+from django.contrib.admin.utils import model_ngettext
 from django.contrib import messages
 from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
+from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseRedirect
+from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils.translation import gettext_lazy as _
 
 from .backends import (
     FreeIPAGroup,
+    FreeIPAFASAgreement,
     FreeIPAOperationFailed,
     FreeIPAUser,
-    _with_freeipa_service_client_retry,
-    _invalidate_group_cache,
-    _invalidate_groups_list_cache,
+    _invalidate_agreement_cache,
+    _invalidate_agreements_list_cache,
 )
 from .listbacked_queryset import _ListBackedQuerySet
-from .models import IPAGroup, IPAUser
+from .models import IPAFASAgreement, IPAGroup, IPAUser
+from core.agreements import missing_required_agreements_for_user_in_group
 
 logger = logging.getLogger(__name__)
+
+
+class FreeIPAModelAdmin(admin.ModelAdmin):
+    """Common admin UX for FreeIPA-backed (unmanaged) models.
+
+    Django's default admin flows assume DB-backed objects and a bulk delete
+    action that can reliably report success. FreeIPA operations can fail per
+    object (permissions, server-side constraints), so we provide:
+
+    - Consistent error surfacing for change forms and deletes.
+    - A custom bulk delete action that reports per-object failures.
+    """
+
+    # Keep a dedicated name for our implementation, but we map it to the
+    # standard 'delete_selected' action key in get_actions() so users get the
+    # usual Django confirmation flow and wording.
+    actions = ("delete_selected_freeipa_objects",)
+
+    # Subclasses should set this to the matching FreeIPA backend class, e.g.
+    # FreeIPAUser / FreeIPAGroup / FreeIPAFASAgreement.
+    freeipa_backend: Any | None = None
+
+    class Media:
+        js = (
+            "core/js/admin_duallistbox_init.js",
+        )
+
+    @override
+    def get_queryset(self, request) -> Any:
+        backend = getattr(self, "freeipa_backend", None)
+        if backend is None:
+            return super().get_queryset(request)
+
+        from_freeipa: Callable[[Any], Any] | None = getattr(self.model, "from_freeipa", None)
+        if not callable(from_freeipa):
+            raise RuntimeError(f"{self.model.__name__} must define a classmethod from_freeipa()")
+
+        items = [from_freeipa(obj) for obj in backend.all()]
+        return _ListBackedQuerySet(self.model, items)
+
+    @override
+    def get_object(self, request, object_id, from_field=None) -> Any:
+        backend = getattr(self, "freeipa_backend", None)
+        if backend is None:
+            return super().get_object(request, object_id, from_field=from_field)
+
+        # Prefer the list-backed queryset when available. This preserves
+        # Django's normal admin semantics (and test fixtures that only stub
+        # `.all()`), while still allowing a fallback for cases where the
+        # object isn't present in the listing.
+        obj = super().get_object(request, object_id, from_field=from_field)
+        if obj is not None:
+            return obj
+
+        from_freeipa: Callable[[Any], Any] | None = getattr(self.model, "from_freeipa", None)
+        if not callable(from_freeipa):
+            raise RuntimeError(f"{self.model.__name__} must define a classmethod from_freeipa()")
+
+        freeipa_obj = backend.get(object_id)
+        if not freeipa_obj:
+            return None
+        return from_freeipa(freeipa_obj)
+
+    @override
+    def get_search_results(self, request, queryset, search_term) -> tuple[Any, bool]:
+        # For DB-backed models, defer to Django.
+        if not isinstance(queryset, _ListBackedQuerySet):
+            return super().get_search_results(request, queryset, search_term)
+
+        if not search_term or not getattr(self, "search_fields", None):
+            return queryset, False
+
+        term = search_term.lower()
+
+        def matches(obj: Any) -> bool:
+            for raw_field in self.search_fields:
+                if not raw_field:
+                    continue
+
+                lookup = raw_field[0]
+                if lookup in {"^", "=", "@"}:
+                    field = raw_field[1:]
+                else:
+                    lookup = ""
+                    field = raw_field
+
+                try:
+                    value = getattr(obj, field, "")
+                except Exception:
+                    continue
+                if value is None:
+                    continue
+
+                text = str(value).lower()
+                if lookup == "=":
+                    if text == term:
+                        return True
+                elif lookup == "^":
+                    if text.startswith(term):
+                        return True
+                else:
+                    # Default to case-insensitive substring match.
+                    if term in text:
+                        return True
+            return False
+
+        return _ListBackedQuerySet(self.model, [o for o in queryset if matches(o)]), False
+
+    def _freeipa_object_id(self, obj: object) -> str:
+        # Prefer model pk; fall back to common FreeIPA identifiers.
+        for attr in ("pk", "username", "cn"):
+            value = getattr(obj, attr, None)
+            if value:
+                return str(value)
+        return str(obj)
+
+    @override
+    def delete_model(self, request, obj) -> None:
+        backend = getattr(self, "freeipa_backend", None)
+        if backend is None:
+            return super().delete_model(request, obj)
+
+        object_id = self._freeipa_object_id(obj)
+        freeipa_obj = backend.get(object_id)
+        if freeipa_obj:
+            freeipa_obj.delete()
+
+    @override
+    def delete_queryset(self, request, queryset) -> None:
+        backend = getattr(self, "freeipa_backend", None)
+        if backend is None:
+            return super().delete_queryset(request, queryset)
+
+        # For our list-backed querysets, loop and call delete_model so we don't
+        # rely on `_ListBackedQuerySet.delete()` (which is intentionally minimal
+        # and not model-generic).
+        for obj in list(queryset):
+            self.delete_model(request, obj)
+
+    @override
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None) -> Any:
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except FreeIPAOperationFailed as e:
+            self.message_user(request, str(e), level=messages.ERROR)
+            return HttpResponseRedirect(request.path)
+        except Exception as e:
+            logger.exception(
+                "Unhandled exception in admin changeform_view model=%s object_id=%s",
+                getattr(self.model, "__name__", "?"),
+                object_id,
+            )
+            self.message_user(request, str(e), level=messages.ERROR)
+            return HttpResponseRedirect(request.path)
+
+    @override
+    def delete_view(self, request, object_id, extra_context=None) -> Any:
+        try:
+            return super().delete_view(request, object_id, extra_context)
+        except FreeIPAOperationFailed as e:
+            self.message_user(request, str(e), level=messages.ERROR)
+            return HttpResponseRedirect(self._changelist_url())
+        except Exception as e:
+            logger.exception(
+                "Unhandled exception in admin delete_view model=%s object_id=%s",
+                getattr(self.model, "__name__", "?"),
+                object_id,
+            )
+            self.message_user(request, str(e), level=messages.ERROR)
+            return HttpResponseRedirect(self._changelist_url())
+
+    def _changelist_url(self) -> str:
+        return reverse(f"admin:{self.opts.app_label}_{self.opts.model_name}_changelist")
+
+    @override
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        # Replace Django's built-in bulk delete action with our FreeIPA-aware
+        # implementation, but keep the standard action key so Django renders the
+        # usual confirmation page and UI label.
+        actions.pop("delete_selected", None)
+
+        # Move our action (generated by super().get_actions) to the standard
+        # key. The action tuple contains the unbound method which Django can
+        # call as func(modeladmin, request, queryset).
+        freeipa_action = actions.pop("delete_selected_freeipa_objects", None)
+        func = freeipa_action[0] if freeipa_action else type(self).delete_selected_freeipa_objects
+
+        description = _("Delete selected %(verbose_name_plural)s") % {
+            "verbose_name_plural": self.model._meta.verbose_name_plural,
+        }
+        actions["delete_selected"] = (func, "delete_selected", description)
+        return actions
+
+    def _object_key(self, obj) -> str:
+        for attr in ("pk", "username", "cn"):
+            value = getattr(obj, attr, None)
+            if value:
+                return str(value)
+        return str(obj)
+
+    def delete_selected_freeipa_objects(self, request, queryset):
+        """Delete action with Django's confirmation flow + per-object failures.
+
+        Mirrors Django's built-in delete action UX (confirmation page), but when
+        confirmed it deletes objects one-by-one so we can surface partial failures
+        instead of reporting a misleading blanket success.
+        """
+
+        opts = self.model._meta
+        app_label = opts.app_label
+
+        (
+            deletable_objects,
+            model_count,
+            perms_needed,
+            protected,
+        ) = self.get_deleted_objects(queryset, request)
+
+        if request.POST.get("post") and not protected:
+            if perms_needed:
+                raise PermissionDenied
+
+            deleted_keys: list[str] = []
+            deleted_objects: list[object] = []
+            failed: dict[str, str] = {}
+
+            for obj in list(queryset):
+                key = self._object_key(obj)
+                try:
+                    self.delete_model(request, obj)
+                    deleted_keys.append(key)
+                    deleted_objects.append(obj)
+                except Exception as e:
+                    failed[key] = str(e)
+                    logger.exception(
+                        "Failed to delete FreeIPA-backed object model=%s key=%s",
+                        getattr(self.model, "__name__", "?"),
+                        key,
+                    )
+
+            # Django's log_deletions() is batch-oriented and is the supported API
+            # in this Django version (there is no per-object log_deletion).
+            # This should not convert successful deletes into failures.
+            if deleted_objects:
+                try:
+                    # ContentType caches can survive across test DB setup and
+                    # unmanaged models (especially with custom app_label) may
+                    # not have ContentType rows until first use.
+                    ContentType.objects.clear_cache()
+                    ContentType.objects.get_for_model(self.model, for_concrete_model=False)
+                    log_deletions = getattr(self, "log_deletions", None)
+                    if callable(log_deletions):
+                        log_deletions(request, _ListBackedQuerySet(self.model, deleted_objects))
+                except Exception:
+                    logger.exception(
+                        "Failed to write admin deletion LogEntry rows model=%s count=%s",
+                        getattr(self.model, "__name__", "?"),
+                        len(deleted_objects),
+                    )
+
+            if deleted_keys:
+                n = len(deleted_keys)
+                self.message_user(
+                    request,
+                    _("Successfully deleted %(count)d %(items)s.")
+                    % {"count": n, "items": model_ngettext(self.opts, n)},
+                    messages.SUCCESS,
+                )
+
+            if failed:
+                details = "; ".join(f"{k}: {v}" for k, v in sorted(failed.items()))
+                self.message_user(
+                    request,
+                    f"Failed to delete {len(failed)} object(s): {details}",
+                    messages.ERROR,
+                )
+
+            # Return None to display the change list page again.
+            return None
+
+        objects_name = model_ngettext(queryset)
+        if perms_needed or protected:
+            title = _("Cannot delete %(name)s") % {"name": objects_name}
+        else:
+            title = _("Delete multiple objects")
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": title,
+            "subtitle": None,
+            "objects_name": str(objects_name),
+            "deletable_objects": [deletable_objects],
+            "model_count": dict(model_count).items(),
+            "queryset": queryset,
+            "perms_lacking": perms_needed,
+            "protected": protected,
+            "opts": opts,
+            "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+            "media": self.media,
+        }
+
+        request.current_app = self.admin_site.name
+
+        return TemplateResponse(
+            request,
+            self.delete_selected_confirmation_template
+            or [
+                "admin/%s/%s/delete_selected_confirmation.html" % (app_label, opts.model_name),
+                "admin/%s/delete_selected_confirmation.html" % app_label,
+                "admin/delete_selected_confirmation.html",
+            ],
+            context,
+        )
 
 def _override_post_office_log_admin():
     """Disable manual creation of django-post-office Log rows in admin.
@@ -166,6 +489,11 @@ class IPAGroupForm(forms.ModelForm):
         widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
         help_text="Select the users that should be members of this group.",
     )
+    sponsors = forms.MultipleChoiceField(
+        required=False,
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        help_text="Select the users that should be sponsors (memberManager) of this group.",
+    )
     fas_url = forms.CharField(
         required=False,
         label="FAS URL",
@@ -207,6 +535,7 @@ class IPAGroupForm(forms.ModelForm):
         users = FreeIPAUser.all()
         usernames = sorted({getattr(u, "username", "") for u in users if getattr(u, "username", "")})
         self.fields["members"].choices = [(u, u) for u in usernames]
+        self.fields["sponsors"].choices = [(u, u) for u in usernames]
 
         # Group name is immutable in FreeIPA.
         if self.instance and getattr(self.instance, "cn", None):
@@ -223,6 +552,12 @@ class IPAGroupForm(forms.ModelForm):
                 if missing:
                     self.fields["members"].choices = [(u, u) for u in (usernames + missing)]
                 self.initial.setdefault("members", current)
+
+                current_sponsors = sorted(getattr(freeipa, "sponsors", []) or [])
+                missing_sponsors = [u for u in current_sponsors if u not in dict(self.fields["sponsors"].choices)]
+                if missing_sponsors:
+                    self.fields["sponsors"].choices = [(u, u) for u in (usernames + missing_sponsors)]
+                self.initial.setdefault("sponsors", current_sponsors)
                 self.initial.setdefault("fas_url", getattr(freeipa, "fas_url", "") or "")
                 self.initial.setdefault("fas_mailing_list", getattr(freeipa, "fas_mailing_list", "") or "")
                 self.initial.setdefault("fas_irc_channels", "\n".join(sorted(getattr(freeipa, "fas_irc_channels", []) or [])))
@@ -237,55 +572,87 @@ class IPAGroupForm(forms.ModelForm):
         return
 
 
+class IPAFASAgreementForm(forms.ModelForm):
+    groups = forms.MultipleChoiceField(
+        required=False,
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        help_text="Select the FreeIPA groups this agreement applies to.",
+    )
+    users = forms.MultipleChoiceField(
+        required=False,
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        help_text="Select the users who have consented to this agreement.",
+    )
+    enabled = forms.BooleanField(
+        required=False,
+        initial=True,
+        help_text="Enable or disable this agreement.",
+    )
+
+    class Meta:
+        model = IPAFASAgreement
+        fields = ("cn", "description", "enabled")
+
+    @override
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # These models are unmanaged and have no DB tables; skip DB-backed uniqueness checks.
+        self._validate_unique = False
+
+        if "description" in self.fields:
+            self.fields["description"].label = "Text"
+
+        groups = FreeIPAGroup.all()
+        group_names = sorted(
+            {
+                getattr(g, "cn", "")
+                for g in groups
+                if getattr(g, "cn", "") and bool(getattr(g, "fas_group", False))
+            }
+        )
+        self.fields["groups"].choices = [(name, name) for name in group_names]
+
+        users = FreeIPAUser.all()
+        usernames = sorted({getattr(u, "username", "") for u in users if getattr(u, "username", "")})
+        self.fields["users"].choices = [(u, u) for u in usernames]
+
+        # Agreement name is immutable in FreeIPA.
+        if self.instance and getattr(self.instance, "cn", None):
+            self.fields["cn"].disabled = True
+
+        cn = getattr(self.instance, "cn", None)
+        if cn:
+            freeipa = FreeIPAFASAgreement.get(cn)
+            if freeipa:
+                self.initial.setdefault("description", getattr(freeipa, "description", "") or "")
+                self.initial.setdefault("enabled", bool(getattr(freeipa, "enabled", True)))
+
+                current_groups = sorted(getattr(freeipa, "groups", []) or [])
+                missing_groups = [g for g in current_groups if g not in dict(self.fields["groups"].choices)]
+                if missing_groups:
+                    self.fields["groups"].choices = [(g, g) for g in (group_names + missing_groups)]
+                self.initial.setdefault("groups", current_groups)
+
+                current_users = sorted(getattr(freeipa, "users", []) or [])
+                missing_users = [u for u in current_users if u not in dict(self.fields["users"].choices)]
+                if missing_users:
+                    self.fields["users"].choices = [(u, u) for u in (usernames + missing_users)]
+                self.initial.setdefault("users", current_users)
+
+    @override
+    def validate_unique(self):
+        # No DB; uniqueness is enforced by FreeIPA.
+        return
+
+
 @admin.register(IPAUser)
-class IPAUserAdmin(admin.ModelAdmin):
+class IPAUserAdmin(FreeIPAModelAdmin):
     form = IPAUserForm
+    freeipa_backend = FreeIPAUser
     list_display = ("username", "first_name", "last_name", "email", "is_active", "is_staff")
     ordering = ("username",)
+    search_fields = ("username", "first_name", "last_name", "email")
     readonly_fields = ()
-
-    class Media:
-        js = (
-            "core/js/admin_duallistbox_init.js",
-        )
-
-    @override
-    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
-        try:
-            return super().changeform_view(request, object_id, form_url, extra_context)
-        except FreeIPAOperationFailed as e:
-            # FreeIPA can return structured partial failures without raising.
-            # Surface the error and keep the admin on the change form.
-            self.message_user(request, str(e), level=messages.ERROR)
-            return HttpResponseRedirect(request.path)
-
-    @override
-    def get_queryset(self, request):
-        users = FreeIPAUser.all()
-        items = [IPAUser.from_freeipa(u) for u in users]
-        return _ListBackedQuerySet(IPAUser, items)
-
-    @override
-    def get_object(self, request, object_id, from_field=None):
-        freeipa = FreeIPAUser.get(object_id)
-        if not freeipa:
-            return None
-        return IPAUser.from_freeipa(freeipa)
-
-    @override
-    def get_search_results(self, request, queryset, search_term):
-        if not search_term:
-            return queryset, False
-
-        term = search_term.lower()
-
-        def hit(u: IPAUser) -> bool:
-            return any(
-                (getattr(u, f, "") or "").lower().find(term) != -1
-                for f in ("username", "first_name", "last_name", "email")
-            )
-
-        return _ListBackedQuerySet(IPAUser, [u for u in queryset if hit(u)]), False
 
     @override
     def save_model(self, request, obj, form, change):
@@ -316,63 +683,22 @@ class IPAUserAdmin(admin.ModelAdmin):
 
         current_groups = set(getattr(freeipa, "groups_list", []) or [])
         for g in sorted(desired_groups - current_groups):
+            missing = missing_required_agreements_for_user_in_group(username, g)
+            if missing:
+                raise FreeIPAOperationFailed(
+                    f"Cannot add user '{username}' to group '{g}' until they have signed: {', '.join(missing)}"
+                )
             freeipa.add_to_group(g)
         for g in sorted(current_groups - desired_groups):
             freeipa.remove_from_group(g)
 
-    @override
-    def delete_model(self, request, obj):
-        freeipa = FreeIPAUser.get(obj.username)
-        if freeipa:
-            freeipa.delete()
-
-
 @admin.register(IPAGroup)
-class IPAGroupAdmin(admin.ModelAdmin):
+class IPAGroupAdmin(FreeIPAModelAdmin):
     form = IPAGroupForm
+    freeipa_backend = FreeIPAGroup
     list_display = ("cn", "description", "fas_group", "fas_url", "fas_mailing_list")
     ordering = ("cn",)
-
-    class Media:
-        js = (
-            "core/js/admin_duallistbox_init.js",
-        )
-
-    @override
-    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
-        try:
-            return super().changeform_view(request, object_id, form_url, extra_context)
-        except FreeIPAOperationFailed as e:
-            self.message_user(request, str(e), level=messages.ERROR)
-            return HttpResponseRedirect(request.path)
-
-    @override
-    def get_queryset(self, request):
-        groups = FreeIPAGroup.all()
-        items = [IPAGroup.from_freeipa(g) for g in groups]
-        return _ListBackedQuerySet(IPAGroup, items)
-
-    @override
-    def get_object(self, request, object_id, from_field=None):
-        freeipa = FreeIPAGroup.get(object_id)
-        if not freeipa:
-            return None
-        return IPAGroup.from_freeipa(freeipa)
-
-    @override
-    def get_search_results(self, request, queryset, search_term):
-        if not search_term:
-            return queryset, False
-
-        term = search_term.lower()
-
-        def hit(g: IPAGroup) -> bool:
-            return any(
-                (getattr(g, f, "") or "").lower().find(term) != -1
-                for f in ("cn", "description")
-            )
-
-        return _ListBackedQuerySet(IPAGroup, [g for g in queryset if hit(g)]), False
+    search_fields = ("cn", "description")
 
     @override
     def save_model(self, request, obj, form, change):
@@ -381,6 +707,7 @@ class IPAGroupAdmin(admin.ModelAdmin):
             return
 
         desired_members = set(form.cleaned_data.get("members") or [])
+        desired_sponsors = set(form.cleaned_data.get("sponsors") or [])
         description = form.cleaned_data.get("description") or ""
         fas_url = form.cleaned_data.get("fas_url") or ""
         fas_mailing_list = form.cleaned_data.get("fas_mailing_list") or ""
@@ -398,7 +725,9 @@ class IPAGroupAdmin(admin.ModelAdmin):
                 freeipa = FreeIPAGroup.get(cn)
                 current_fas = bool(getattr(freeipa, "fas_group", False))
                 if not current_fas:
-                    raise RuntimeError("FreeIPA server did not create a fasGroup at creation time; toggling is not supported")
+                    raise RuntimeError(
+                        "FreeIPA server did not create a fasGroup at creation time; toggling is not supported"
+                    )
         else:
             freeipa = FreeIPAGroup.get(cn)
             if not freeipa:
@@ -441,16 +770,75 @@ class IPAGroupAdmin(admin.ModelAdmin):
 
         current_members = set(getattr(freeipa, "members", []) or [])
         for u in sorted(desired_members - current_members):
+            missing = missing_required_agreements_for_user_in_group(u, cn)
+            if missing:
+                raise FreeIPAOperationFailed(
+                    f"Cannot add user '{u}' to group '{cn}' until they have signed: {', '.join(missing)}"
+                )
             freeipa.add_member(u)
         for u in sorted(current_members - desired_members):
             freeipa.remove_member(u)
 
-    @override
-    def delete_model(self, request, obj):
-        freeipa = FreeIPAGroup.get(obj.cn)
-        if freeipa:
-            freeipa.delete()
+        current_sponsors = set(getattr(freeipa, "sponsors", []) or [])
+        for u in sorted(desired_sponsors - current_sponsors):
+            freeipa.add_sponsor(u)
+        for u in sorted(current_sponsors - desired_sponsors):
+            freeipa.remove_sponsor(u)
 
+@admin.register(IPAFASAgreement)
+class IPAFASAgreementAdmin(FreeIPAModelAdmin):
+    form = IPAFASAgreementForm
+    freeipa_backend = FreeIPAFASAgreement
+    list_display = ("cn", "enabled")
+    ordering = ("cn",)
+    search_fields = ("cn", "description")
+
+    @override
+    def save_model(self, request, obj, form, change):
+        try:
+            cn: str = form.cleaned_data.get("cn") or obj.cn
+            description: str = (form.cleaned_data.get("description") or "").strip()
+            enabled: bool = bool(form.cleaned_data.get("enabled", False))
+            selected_groups = set(form.cleaned_data.get("groups") or [])
+            selected_users = set(form.cleaned_data.get("users") or [])
+
+            # Treat disabled agreements as non-applicable for group membership.
+            # The FreeIPA plugin may still enforce agreements linked to groups,
+            # so we remove group links when the agreement is disabled.
+            if not enabled:
+                selected_groups = set()
+
+            if not change:
+                freeipa = FreeIPAFASAgreement.create(cn, description=description or None)
+            else:
+                freeipa = FreeIPAFASAgreement.get(cn)
+                if freeipa is None:
+                    raise FreeIPAOperationFailed(f"Agreement not found after edit: {cn}")
+                if (getattr(freeipa, "description", "") or "").strip() != description:
+                    freeipa.set_description(description or None)
+
+            current_groups = set(getattr(freeipa, "groups", []) or [])
+            for group_cn in sorted(selected_groups - current_groups):
+                freeipa.add_group(group_cn)
+            for group_cn in sorted(current_groups - selected_groups):
+                freeipa.remove_group(group_cn)
+
+            current_users = set(getattr(freeipa, "users", []) or [])
+            for username in sorted(selected_users - current_users):
+                freeipa.add_user(username)
+            for username in sorted(current_users - selected_users):
+                freeipa.remove_user(username)
+
+            if bool(getattr(freeipa, "enabled", True)) != enabled:
+                freeipa.set_enabled(enabled)
+
+            _invalidate_agreement_cache(cn)
+            _invalidate_agreements_list_cache()
+        except FreeIPAOperationFailed:
+            raise
+        except Exception as e:
+            logger.exception("Failed to save FAS agreement cn=%s", getattr(obj, "cn", None) or form.cleaned_data.get("cn"))
+            raise FreeIPAOperationFailed(str(e))
 
 # Replace DB-backed auth models in admin with FreeIPA-backed listings.
 try:

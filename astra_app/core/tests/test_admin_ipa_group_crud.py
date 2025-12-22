@@ -298,7 +298,7 @@ class AdminIPAGroupCRUDTests(TestCase):
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(existing_group, "save") as mock_save,
-            patch("core.admin._with_freeipa_service_client_retry", side_effect=_fake_retry),
+            patch("core.backends._with_freeipa_service_client_retry", side_effect=_fake_retry),
             patch.object(existing_group, "add_member"),
             patch.object(existing_group, "remove_member"),
         ):
