@@ -27,17 +27,18 @@ def _profile_context_for_user(
 ) -> dict[str, object]:
     data = fu._user_data
 
-    tz_name = timezone.get_current_timezone_name()
     fas_tz_name = _first(data, "fasTimezone", "")
-    tzinfo = timezone.get_current_timezone()
+    tz_name = ""
+    tzinfo: ZoneInfo | None = None
     if fas_tz_name:
         try:
             tzinfo = ZoneInfo(fas_tz_name)
             tz_name = fas_tz_name
         except Exception:
-            pass
+            tz_name = ""
+            tzinfo = None
 
-    now_local = timezone.localtime(timezone.now(), timezone=tzinfo)
+    now_local = timezone.localtime(timezone.now(), timezone=tzinfo) if tzinfo else None
 
     groups_list = fu.groups_list
 
@@ -159,7 +160,9 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
     if not fu:
         raise Http404("User not found")
 
-    context = _profile_context_for_user(request, fu=fu, is_self=(username == viewer_username))
+    is_self = username == viewer_username
+
+    context = _profile_context_for_user(request, fu=fu, is_self=is_self)
     return render(request, "core/user_profile.html", context)
 
 

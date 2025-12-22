@@ -40,10 +40,12 @@
         </div>
 
         <ul class="list-group list-group-flush" id="user_attributes">
-          <li class="list-group-item d-flex justify-content-between align-items-center">
-            <strong class="profile-attr-label" title="Pronouns"><i class="fas fa-user-tag"></i> Pronouns</strong>
-            <div class="profile-attr-value text-end">{{ pronouns|default:"" }}</div>
-          </li>
+          {% if pronouns %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Pronouns"><i class="fas fa-user-tag"></i> Pronouns</strong>
+              <div class="profile-attr-value text-end">{{ pronouns }}</div>
+            </li>
+          {% endif %}
 
           {% if locale %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -52,16 +54,18 @@
             </li>
           {% endif %}
 
-          <li class="list-group-item d-flex justify-content-between align-items-center">
-            <strong class="profile-attr-label" title="Timezone"><i class="fas fa-globe"></i> Timezone</strong>
-            <div class="profile-attr-value text-end">{{ timezone }}</div>
-          </li>
-          <li class="list-group-item" id="user-timezone" data-timezone="{{ timezone_name|default:'' }}">
-            <div class="d-flex justify-content-between align-items-center">
-              <strong class="profile-attr-label" title="Current Time"><i class="far fa-clock"></i> Current Time</strong>
-              <div class="profile-attr-value text-end" id="user-time">{{ current_time|date:"l H:i:s" }}</div>
-            </div>
-          </li>
+          {% if timezone_name %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Timezone"><i class="fas fa-globe"></i> Timezone</strong>
+              <div class="profile-attr-value text-end">{{ timezone_name }}</div>
+            </li>
+            <li class="list-group-item" id="user-timezone" data-timezone="{{ timezone_name }}">
+              <div class="d-flex justify-content-between align-items-center">
+                <strong class="profile-attr-label" title="Current Time"><i class="far fa-clock"></i> Current Time</strong>
+                <div class="profile-attr-value text-end" id="user-time">{{ current_time|date:"l H:i:s" }}</div>
+              </div>
+            </li>
+          {% endif %}
 
           {% if irc_nicks %}
             <li class="list-group-item d-flex justify-content-between">

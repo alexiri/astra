@@ -39,7 +39,7 @@ def get_timezone_options() -> list[str]:
 def get_locale_options() -> list[str]:
     # Build a suggestion list from Python's locale alias registry.
     # Keep it permissive: this is for dropdown hints only; validation remains in clean_fasLocale.
-    aliases = getattr(locale, "locale_alias", {}) or {}
+    aliases = locale.locale_alias
     candidates: set[str] = set()
 
     def _add(raw: str):
@@ -76,7 +76,7 @@ def _is_valid_locale_code(value: str) -> bool:
         normalized.lower(),
         normalized.split(".", 1)[0].lower(),
     }
-    aliases = getattr(locale, "locale_alias", {}) or {}
+    aliases = locale.locale_alias
     return any(c in aliases for c in candidates)
 
 
@@ -182,7 +182,7 @@ class ProfileForm(_StyledForm):
         widget=forms.TextInput(attrs={"autocomplete": "username"}),
     )
 
-    fasIsPrivate = forms.BooleanField(label="Private", required=False)
+    fasIsPrivate = forms.BooleanField(label="Private profile", required=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
+
 
 class GlobalSearchTests(TestCase):
     def _login_as_freeipa(self, username: str) -> None:
@@ -57,3 +59,42 @@ class GlobalSearchTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"users": [], "groups": []})
+
+    def test_search_does_not_match_private_user_by_full_name(self) -> None:
+        self._login_as_freeipa("admin")
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.org"],
+                "fasIsPrivate": ["FALSE"],
+            },
+        )
+        set_current_viewer_username("admin")
+        try:
+            bob_private = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        with (
+            patch("core.backends.FreeIPAUser.all", return_value=[alice, bob_private]),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.get("/search/?q=User")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("alice", {u["username"] for u in data["users"]})
+        self.assertNotIn("bob", {u["username"] for u in data["users"]})

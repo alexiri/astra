@@ -78,10 +78,19 @@
 
 Before introducing new helpers/constants:
 - Search the repo for existing equivalents (setting names, helper functions, payload shapes) and reuse them.
-- If a value is already defined in `settings.py` (especially via `env.*`), do NOT add a second default via `getattr(settings, ...)` elsewhere. Use `settings.X` directly.
-- In general, don't use `getattr` unless absolutely necessary. Don't write `getattr(agreement, "users", [])` when `agreement.users` will do, verify that the data preparation layer has already set sensible defaults.
 - Do not add “wrapper” functions that merely forward arguments or return `settings.*` unless they add real semantics and are used in 2+ places.
 - Avoid convoluted constructions like `signed = username in { str(u).strip() for u in (getattr(agreement, "users", []) or []) if str(u).strip() }` when simply `signed = username in agreement.users` will do. You need to have a very valid reason for writing convoluted code.
+- Avoid getattr (required)
+  - Do not use `getattr()` for normal application code.
+  - Prefer direct access (obj.attr, settings.X, module.NAME) and let errors surface during tests.
+  - Only use `getattr()` when one of these is true:
+    - You’re dealing with duck-typed / optional interfaces (e.g., template tags handling User | AnonymousUser | SimpleNamespace).
+    - You’re interacting with threadlocals / request objects where the attribute may or may not exist; prefer `hasattr()` + direct access, or try/except AttributeError.
+    - You’re probing optional third-party APIs (feature detection), where the attribute genuinely may not exist.
+  - If you use `getattr()`, you must:
+    - Add a short comment explaining why direct access isn’t safe here.
+    - Avoid “double defaults” (don’t mirror defaults already defined in settings or upstream data prep).
+- Treat any new `getattr()` in core app code as a regression unless justified by one of the allowed cases above.
 
 When you notice duplicated logic across files:
 - Refactor only if it reduces the number of implementations/branches. Moving code into a new module is not enough if the same logic still exists in multiple wrappers.

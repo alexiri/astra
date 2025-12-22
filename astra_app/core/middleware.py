@@ -8,7 +8,12 @@ from django.contrib.auth.models import AnonymousUser
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 
-from core.backends import FreeIPAUser, clear_freeipa_service_client_cache
+from core.backends import (
+    FreeIPAUser,
+    clear_current_viewer_username,
+    clear_freeipa_service_client_cache,
+    set_current_viewer_username,
+)
 
 
 def _first_ci(data: object, attr: str):
@@ -71,9 +76,29 @@ class FreeIPAAuthenticationMiddleware:
         # preserve it. Otherwise, wrap request.user so we can restore a FreeIPA
         # user from session-stored username even if Django resolves to
         # AnonymousUser (e.g. when no DB row exists).
-        existing_user = getattr(request, "user", None)
-        if not getattr(existing_user, "is_authenticated", False):
+        upstream_user = getattr(request, "user", None)
+        if not getattr(upstream_user, "is_authenticated", False):
             request.user = SimpleLazyObject(lambda: _get_freeipa_or_default_user(request))
+
+        # Expose the viewer username to the FreeIPAUser ingestion boundary so
+        # privacy redaction (fasIsPrivate) can happen at initialization time.
+        #
+        # Important: do not force evaluation of `request.user` here when it's a
+        # SimpleLazyObject; that evaluation may trigger FreeIPAUser.get() before
+        # the viewer context is set.
+        viewer_username: str | None = None
+        try:
+            if getattr(upstream_user, "is_authenticated", False) and hasattr(upstream_user, "get_username"):
+                viewer_username = str(upstream_user.get_username()).strip() or None
+        except Exception:
+            viewer_username = None
+
+        if not viewer_username:
+            try:
+                viewer_username = str(request.session.get("_freeipa_username") or "").strip() or None
+            except Exception:
+                viewer_username = None
+        set_current_viewer_username(viewer_username)
 
         # Activate the user's timezone for this request so template tags/filters
         # (and timezone.localtime) reflect the user's configured FreeIPA timezone.
@@ -97,6 +122,7 @@ class FreeIPAAuthenticationMiddleware:
         finally:
             if activated:
                 timezone.deactivate()
+            clear_current_viewer_username()
 
 
 class FreeIPAServiceClientReuseMiddleware:

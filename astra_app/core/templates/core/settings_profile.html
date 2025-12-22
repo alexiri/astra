@@ -167,7 +167,7 @@
 
           <div class="form-group form-check">
             {{ form.fasIsPrivate }}
-            <label class="form-check-label" for="{{ form.fasIsPrivate.id_for_label }}">{{ form.fasIsPrivate.label }} <small class="text-muted">Hide personal data.</small></label>
+            <label class="form-check-label" for="{{ form.fasIsPrivate.id_for_label }}">{{ form.fasIsPrivate.label }} <small class="text-muted">Hide personal data (except username and email address).</small></label>
             {% if form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ form.fasIsPrivate.errors }}</div>{% endif %}
           </div>
         </div>

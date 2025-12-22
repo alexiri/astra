@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.template import Context, Template
 from django.test import RequestFactory, TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
 
 
 class UserGridTemplateTagTests(TestCase):
@@ -70,3 +70,30 @@ class UserGridTemplateTagTests(TestCase):
 
         self.assertIn('href="/user/alice/"', html)
         self.assertIn('href="/user/bob/"', html)
+
+    def test_user_widget_anonymizes_private_user_for_non_self_viewer(self) -> None:
+        request = RequestFactory().get("/group/example/")
+        request.user = SimpleNamespace(is_authenticated=True, get_username=lambda: "alice")
+
+        set_current_viewer_username("alice")
+        try:
+            bob = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        tpl = Template("" "{% load core_user_widget %}{% user 'bob' %}" "")
+
+        with patch("core.templatetags.core_user_widget.FreeIPAUser.get", return_value=bob):
+            html = tpl.render(Context({"request": request}))
+
+        self.assertIn('href="/user/bob/"', html)
+        self.assertNotIn("Bob User", html)

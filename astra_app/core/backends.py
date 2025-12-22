@@ -15,6 +15,7 @@ from python_freeipa import ClientMeta, exceptions
 logger = logging.getLogger(__name__)
 
 _service_client_local = threading.local()
+_viewer_username_local = threading.local()
 
 _T = TypeVar("_T")
 
@@ -47,6 +48,32 @@ def _clean_str_list(values: object) -> list[str]:
 
     s = str(values).strip()
     return [s] if s else []
+
+
+def _first_attr_ci(data: dict[str, object], key: str, default: object | None = None) -> object | None:
+    """Return the first value for an attribute key, case-insensitively.
+
+    FreeIPA extensions sometimes expose attributes in different casings
+    depending on client/server/plugin versions (e.g. `fasisprivate` vs
+    `fasIsPrivate`).
+    """
+
+    if key in data:
+        value = data.get(key, default)
+    else:
+        key_lower = key.lower()
+        value = data.get(key_lower)
+        if value is None:
+            for k, v in data.items():
+                if str(k).lower() == key_lower:
+                    value = v
+                    break
+            else:
+                value = default
+
+    if isinstance(value, list):
+        return value[0] if value else default
+    return value
 
 
 class FreeIPAOperationFailed(RuntimeError):
@@ -173,10 +200,13 @@ def _get_freeipa_service_client_cached() -> ClientMeta:
     The per-request middleware clears this cache at request boundaries.
     """
 
-    client = getattr(_service_client_local, "client", None)
-    if client is None:
-        client = _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
-        _service_client_local.client = client
+    if hasattr(_service_client_local, "client"):
+        client = _service_client_local.client
+        if client is not None:
+            return client
+
+    client = _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
+    _service_client_local.client = client
     return client
 
 
@@ -185,6 +215,43 @@ def clear_freeipa_service_client_cache() -> None:
 
     if hasattr(_service_client_local, "client"):
         delattr(_service_client_local, "client")
+
+
+def set_current_viewer_username(username: str | None) -> None:
+    """Set the per-request viewer username for privacy redaction.
+
+    We redact "private" users (fasIsPrivate) for everyone except the viewer.
+    This is stored in a threadlocal so the anonymization decision can be made
+    at the FreeIPA ingestion boundary (FreeIPAUser initialization).
+    """
+
+    if username is None:
+        if hasattr(_viewer_username_local, "username"):
+            delattr(_viewer_username_local, "username")
+        return
+
+    normalized = str(username).strip()
+    if not normalized:
+        if hasattr(_viewer_username_local, "username"):
+            delattr(_viewer_username_local, "username")
+        return
+
+    _viewer_username_local.username = normalized
+
+
+def clear_current_viewer_username() -> None:
+    if hasattr(_viewer_username_local, "username"):
+        delattr(_viewer_username_local, "username")
+
+
+def _get_current_viewer_username() -> str | None:
+    if not hasattr(_viewer_username_local, "username"):
+        return None
+
+    username = _viewer_username_local.username
+    if isinstance(username, str) and username.strip():
+        return username
+    return None
 
 
 def _with_freeipa_service_client_retry(get_client: Callable[[], ClientMeta], fn: Callable[[ClientMeta], _T]) -> _T:
@@ -305,7 +372,10 @@ class FreeIPAUser:
     def __init__(self, username, user_data=None):
         self.username = str(username).strip() if username else ""
         self.backend = 'core.backends.FreeIPAAuthBackend'
-        self._user_data = user_data or {}
+        # Never keep a direct reference to cached data (especially with the
+        # locmem cache backend) to avoid any accidental cross-request/viewer
+        # contamination.
+        self._user_data = dict(user_data) if isinstance(user_data, dict) else {}
         self.is_authenticated = True
         self.is_anonymous = False
         # Django's auth/session machinery expects model-like metadata.
@@ -329,6 +399,18 @@ class FreeIPAUser:
         # FreeIPA users may not have a mail attribute, so normalize to "".
         self.email = _first('mail') or ""
 
+        # Privacy flag is commonly exposed as `fasisprivate` (Noggin/FAS), but
+        # some clients/plugins surface it as `fasIsPrivate`.
+        fas_is_private_raw = _first_attr_ci(self._user_data, "fasIsPrivate", None)
+        if fas_is_private_raw is None:
+            fas_is_private_raw = _first_attr_ci(self._user_data, "fasisprivate", None)
+        if fas_is_private_raw is None:
+            self.fas_is_private = False
+        elif isinstance(fas_is_private_raw, bool):
+            self.fas_is_private = bool(fas_is_private_raw)
+        else:
+            self.fas_is_private = str(fas_is_private_raw).strip().upper() in {"TRUE", "T", "YES", "Y", "1", "ON"}
+
         # Determine status based on FreeIPA data
         # nsaccountlock: True means locked (inactive)
         nsaccountlock = self._user_data.get('nsaccountlock', False)
@@ -344,6 +426,10 @@ class FreeIPAUser:
         admin_group = settings.FREEIPA_ADMIN_GROUP
         self.is_staff = admin_group in self.groups_list
         self.is_superuser = admin_group in self.groups_list
+
+        viewer_username = _get_current_viewer_username()
+        if self.fas_is_private and viewer_username and viewer_username.lower() != self.username.lower():
+            self.anonymize()
 
     @property
     def groups(self):
@@ -374,6 +460,32 @@ class FreeIPAUser:
     def get_full_name(self):
         full_name = f"{self.first_name or ''} {self.last_name or ''}".strip()
         return full_name or self.username
+
+    def anonymize(self) -> None:
+        """Redact private fields in-place if the user opted into privacy.
+
+        This keeps only:
+        - username
+        - email
+        - groups (memberof_group)
+        - fasIsPrivate itself
+
+        Agreements are computed separately from FreeIPA and are not stored on
+        the user object.
+        """
+
+        if not self.fas_is_private:
+            return
+
+        self.first_name = ""
+        self.last_name = ""
+
+        self._user_data = {
+            "uid": [self.username],
+            "mail": [self.email] if self.email else [],
+            "memberof_group": list(self.groups_list),
+            "fasIsPrivate": ["TRUE"],
+        }
 
     def get_short_name(self):
         return self.first_name or self.username
