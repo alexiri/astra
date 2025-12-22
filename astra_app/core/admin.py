@@ -29,6 +29,7 @@ from .backends import (
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import IPAFASAgreement, IPAGroup, IPAUser
 from core.agreements import missing_required_agreements_for_user_in_group
+from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
 
@@ -468,8 +469,8 @@ class IPAUserForm(forms.ModelForm):
                 self.initial.setdefault("first_name", freeipa.first_name or "")
                 self.initial.setdefault("last_name", freeipa.last_name or "")
                 self.initial.setdefault("email", freeipa.email or "")
-                self.initial.setdefault("is_active", bool(getattr(freeipa, "is_active", True)))
-                current = sorted(getattr(freeipa, "groups_list", []) or [])
+                self.initial.setdefault("is_active", freeipa.is_active)
+                current = sorted(freeipa.groups_list)
                 # If the server returns groups outside our enumerated list,
                 # keep them selectable so we don't drop memberships on save.
                 missing = [g for g in current if g not in dict(self.fields["groups"].choices)]
@@ -545,24 +546,24 @@ class IPAGroupForm(forms.ModelForm):
         if cn:
             freeipa = FreeIPAGroup.get(cn)
             if freeipa:
-                self.initial.setdefault("description", getattr(freeipa, "description", "") or "")
-                current = sorted(getattr(freeipa, "members", []) or [])
+                self.initial.setdefault("description", freeipa.description or "")
+                current = sorted(freeipa.members)
                 # Groups can contain entries that aren't part of the standard user listing.
                 missing = [u for u in current if u not in dict(self.fields["members"].choices)]
                 if missing:
                     self.fields["members"].choices = [(u, u) for u in (usernames + missing)]
                 self.initial.setdefault("members", current)
 
-                current_sponsors = sorted(getattr(freeipa, "sponsors", []) or [])
+                current_sponsors = sorted(freeipa.sponsors)
                 missing_sponsors = [u for u in current_sponsors if u not in dict(self.fields["sponsors"].choices)]
                 if missing_sponsors:
                     self.fields["sponsors"].choices = [(u, u) for u in (usernames + missing_sponsors)]
                 self.initial.setdefault("sponsors", current_sponsors)
-                self.initial.setdefault("fas_url", getattr(freeipa, "fas_url", "") or "")
-                self.initial.setdefault("fas_mailing_list", getattr(freeipa, "fas_mailing_list", "") or "")
-                self.initial.setdefault("fas_irc_channels", "\n".join(sorted(getattr(freeipa, "fas_irc_channels", []) or [])))
-                self.initial.setdefault("fas_discussion_url", getattr(freeipa, "fas_discussion_url", "") or "")
-                self.initial.setdefault("fas_group", getattr(freeipa, "fas_group", False))
+                self.initial.setdefault("fas_url", freeipa.fas_url or "")
+                self.initial.setdefault("fas_mailing_list", freeipa.fas_mailing_list or "")
+                self.initial.setdefault("fas_irc_channels", "\n".join(sorted(freeipa.fas_irc_channels)))
+                self.initial.setdefault("fas_discussion_url", freeipa.fas_discussion_url or "")
+                self.initial.setdefault("fas_group", freeipa.fas_group)
             # `fas_group` is a creation-time property; disallow toggling on edit.
             self.fields["fas_group"].disabled = True
 
@@ -624,16 +625,16 @@ class IPAFASAgreementForm(forms.ModelForm):
         if cn:
             freeipa = FreeIPAFASAgreement.get(cn)
             if freeipa:
-                self.initial.setdefault("description", getattr(freeipa, "description", "") or "")
-                self.initial.setdefault("enabled", bool(getattr(freeipa, "enabled", True)))
+                self.initial.setdefault("description", freeipa.description)
+                self.initial.setdefault("enabled", freeipa.enabled)
 
-                current_groups = sorted(getattr(freeipa, "groups", []) or [])
+                current_groups = sorted(freeipa.groups)
                 missing_groups = [g for g in current_groups if g not in dict(self.fields["groups"].choices)]
                 if missing_groups:
                     self.fields["groups"].choices = [(g, g) for g in (group_names + missing_groups)]
                 self.initial.setdefault("groups", current_groups)
 
-                current_users = sorted(getattr(freeipa, "users", []) or [])
+                current_users = sorted(freeipa.users)
                 missing_users = [u for u in current_users if u not in dict(self.fields["users"].choices)]
                 if missing_users:
                     self.fields["users"].choices = [(u, u) for u in (usernames + missing_users)]
@@ -681,7 +682,7 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             freeipa.is_active = bool(form.cleaned_data.get("is_active"))
             freeipa.save()
 
-        current_groups = set(getattr(freeipa, "groups_list", []) or [])
+        current_groups = set(freeipa.groups_list)
         for g in sorted(desired_groups - current_groups):
             missing = missing_required_agreements_for_user_in_group(username, g)
             if missing:
@@ -723,7 +724,7 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
             if fas_group:
                 # Re-fetch authoritative state and verify.
                 freeipa = FreeIPAGroup.get(cn)
-                current_fas = bool(getattr(freeipa, "fas_group", False))
+                current_fas = bool(freeipa.fas_group)
                 if not current_fas:
                     raise RuntimeError(
                         "FreeIPA server did not create a fasGroup at creation time; toggling is not supported"
@@ -757,7 +758,7 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
         # change this value, ignore it and log at INFO level for visibility.
         if change:
             try:
-                current_fas = bool(getattr(freeipa, "fas_group", False))
+                current_fas = bool(freeipa.fas_group)
                 if fas_group != current_fas:
                     logger.info(
                         "Ignoring fas_group toggle for existing group %s: current=%s requested=%s",
@@ -768,7 +769,7 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
             except Exception:
                 pass
 
-        current_members = set(getattr(freeipa, "members", []) or [])
+        current_members = set(freeipa.members)
         for u in sorted(desired_members - current_members):
             missing = missing_required_agreements_for_user_in_group(u, cn)
             if missing:
@@ -779,7 +780,7 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
         for u in sorted(current_members - desired_members):
             freeipa.remove_member(u)
 
-        current_sponsors = set(getattr(freeipa, "sponsors", []) or [])
+        current_sponsors = set(freeipa.sponsors)
         for u in sorted(desired_sponsors - current_sponsors):
             freeipa.add_sponsor(u)
         for u in sorted(current_sponsors - desired_sponsors):
@@ -797,8 +798,8 @@ class IPAFASAgreementAdmin(FreeIPAModelAdmin):
     def save_model(self, request, obj, form, change):
         try:
             cn: str = form.cleaned_data.get("cn") or obj.cn
-            description: str = (form.cleaned_data.get("description") or "").strip()
-            enabled: bool = bool(form.cleaned_data.get("enabled", False))
+            description: str = _normalize_str(form.cleaned_data.get("description"))
+            enabled: bool = form.cleaned_data.get("enabled", False)
             selected_groups = set(form.cleaned_data.get("groups") or [])
             selected_users = set(form.cleaned_data.get("users") or [])
 
@@ -814,22 +815,22 @@ class IPAFASAgreementAdmin(FreeIPAModelAdmin):
                 freeipa = FreeIPAFASAgreement.get(cn)
                 if freeipa is None:
                     raise FreeIPAOperationFailed(f"Agreement not found after edit: {cn}")
-                if (getattr(freeipa, "description", "") or "").strip() != description:
+                if freeipa.description != description:
                     freeipa.set_description(description or None)
 
-            current_groups = set(getattr(freeipa, "groups", []) or [])
+            current_groups = set(freeipa.groups)
             for group_cn in sorted(selected_groups - current_groups):
                 freeipa.add_group(group_cn)
             for group_cn in sorted(current_groups - selected_groups):
                 freeipa.remove_group(group_cn)
 
-            current_users = set(getattr(freeipa, "users", []) or [])
+            current_users = set(freeipa.users)
             for username in sorted(selected_users - current_users):
                 freeipa.add_user(username)
             for username in sorted(current_users - selected_users):
                 freeipa.remove_user(username)
 
-            if bool(getattr(freeipa, "enabled", True)) != enabled:
+            if freeipa.enabled != enabled:
                 freeipa.set_enabled(enabled)
 
             _invalidate_agreement_cache(cn)

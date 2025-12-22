@@ -7,6 +7,7 @@ from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
 from core.backends import FreeIPAUser
+from core.views_utils import _normalize_str
 
 register = Library()
 
@@ -34,7 +35,7 @@ def _try_get_full_name(user: object) -> str:
 
 @register.simple_tag(takes_context=True, name="user")
 def user_widget(context: Context, username: object, **kwargs: Any) -> str:
-    raw = ("" if username is None else str(username)).strip()
+    raw = _normalize_str(username)
     if not raw:
         return ""
 
@@ -42,7 +43,7 @@ def user_widget(context: Context, username: object, **kwargs: Any) -> str:
     extra_style = kwargs.get("style", "") or ""
 
     remove_from_group_cn_raw = kwargs.get("remove_from_group_cn")
-    remove_from_group_cn = ("" if remove_from_group_cn_raw is None else str(remove_from_group_cn_raw)).strip() or ""
+    remove_from_group_cn = _normalize_str(remove_from_group_cn_raw)
 
     # Per-template-render cache (avoids repeated FreeIPA lookups in a table).
     render_cache = context.render_context

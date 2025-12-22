@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -20,9 +21,8 @@ class _DummyFreeIPAUser:
     last_name: str = ""
     email: str = ""
     _user_data: dict | None = None
-    groups_list: list[str] | None = None
+    groups_list: list[str] = field(default_factory=list)
 
-    @property
     def get_full_name(self) -> str:
         return f"{self.first_name} {self.last_name}".strip()
 
@@ -217,7 +217,7 @@ class FASAttributesTests(TestCase):
 
         after = self._load_profile(fu)
         self.assertEqual(after.get("pronouns"), "she/her")
-        self.assertEqual(after["fu"].get_full_name, "Alice User")
+        self.assertEqual(after["fu"].get_full_name(), "Alice User")
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC", "Europe/Paris"])
     @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en_US", "fr_FR"])
@@ -304,7 +304,7 @@ class FASAttributesTests(TestCase):
 
         after = self._load_profile(fu)
         self.assertIn("they/them", after.get("pronouns", ""))
-        self.assertEqual(after["fu"].get_full_name, "Alicia User")
+        self.assertEqual(after["fu"].get_full_name(), "Alicia User")
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
     @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en_US"])

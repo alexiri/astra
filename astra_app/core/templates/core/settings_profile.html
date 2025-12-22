@@ -32,7 +32,7 @@
               <div class="ml-3">
                 <a class="btn btn-outline-secondary" href="{% url 'avatar-manage' %}" target="_blank" rel="noopener">Change avatar</a>
                 <div class="mt-1">
-                  <small class="text-muted">We don’t host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).</small>
+                  <small class="text-muted">We don't host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).</small>
                 </div>
               </div>
             </div>
@@ -167,7 +167,7 @@
 
           <div class="form-group form-check">
             {{ form.fasIsPrivate }}
-            <label class="form-check-label" for="{{ form.fasIsPrivate.id_for_label }}">{{ form.fasIsPrivate.label }} <small class="text-muted">Hide information from other users.</small></label>
+            <label class="form-check-label" for="{{ form.fasIsPrivate.id_for_label }}">{{ form.fasIsPrivate.label }} <small class="text-muted">Hide personal data.</small></label>
             {% if form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ form.fasIsPrivate.errors }}</div>{% endif %}
           </div>
         </div>

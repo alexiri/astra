@@ -102,6 +102,7 @@ class GroupDetailRouteTests(TestCase):
             fas_irc_channels=["#fas1"],
             fas_discussion_url="https://discussion.example.org/c/fas1",
             members=["alice", "bob"],
+            sponsors=[],
         )
 
         def _fake_user_get(username: str) -> FreeIPAUser:
@@ -145,7 +146,7 @@ class GroupDetailRouteTests(TestCase):
         self._login_as_freeipa("admin")
 
         members = [f"user{i:03d}" for i in range(65)]
-        group = SimpleNamespace(cn="fas1", description="", fas_group=True, members=members)
+        group = SimpleNamespace(cn="fas1", description="", fas_group=True, members=members, sponsors=[])
 
         def _fake_user_get(username: str) -> FreeIPAUser:
             return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})
@@ -168,7 +169,7 @@ class GroupDetailRouteTests(TestCase):
     def test_group_detail_members_search_filters(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(cn="fas1", description="", fas_group=True, members=["alice", "bob"])
+        group = SimpleNamespace(cn="fas1", description="", fas_group=True, members=["alice", "bob"], sponsors=[])
 
         def _fake_user_get(username: str) -> FreeIPAUser:
             return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})

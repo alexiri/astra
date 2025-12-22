@@ -15,6 +15,7 @@ import requests
 from python_freeipa import ClientMeta, exceptions
 
 from .forms_auth import ExpiredPasswordChangeForm, FreeIPAAuthenticationForm, SyncTokenForm
+from core.views_utils import _normalize_str
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def password_expired(request: HttpRequest) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         username = form.cleaned_data["username"]
         current_password = form.cleaned_data["current_password"]
-        otp = (form.cleaned_data.get("otp") or "").strip() or None
+        otp = _normalize_str(form.cleaned_data.get("otp")) or None
         new_password = form.cleaned_data["new_password"]
 
         try:
@@ -127,7 +128,7 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
         password = form.cleaned_data["password"]
         first_code = form.cleaned_data["first_code"]
         second_code = form.cleaned_data["second_code"]
-        token = (form.cleaned_data.get("token") or "").strip() or None
+        token = _normalize_str(form.cleaned_data.get("token")) or None
 
         url = f"https://{settings.FREEIPA_HOST}/ipa/session/sync_token"
         data = {

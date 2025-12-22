@@ -85,8 +85,10 @@ class IPAFASAgreement(models.Model):
     @classmethod
     def from_freeipa(cls, agreement) -> "IPAFASAgreement":
         # `agreement` is a core.backends.FreeIPAFASAgreement
+        # Coerce to concrete types so the Django admin list display doesn't
+        # receive MagicMock values from tests or partial stubs.
         return cls(
             cn=agreement.cn,
-            description=getattr(agreement, "description", "") or "",
+            description=str(getattr(agreement, "description", "") or ""),
             enabled=bool(getattr(agreement, "enabled", True)),
         )

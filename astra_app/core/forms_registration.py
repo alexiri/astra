@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django import forms
 
+from core.views_utils import _normalize_str
+
 
 _USERNAME_RE = r"^[a-z0-9](?:[a-z0-9-]{3,30})[a-z0-9]$"  # length 5..32, no leading/trailing '-'
 
@@ -34,14 +36,13 @@ class RegistrationForm(forms.Form):
                 field.widget.attrs.setdefault("class", "form-control")
 
     def clean_username(self) -> str:
-        username = (self.cleaned_data.get("username") or "").strip()
+        username = _normalize_str(self.cleaned_data.get("username"))
         if username != username.lower():
             raise forms.ValidationError("Mixed case is not allowed; use lowercase.")
         return username
 
     def clean_email(self) -> str:
-        email = (self.cleaned_data.get("email") or "").strip().lower()
-        return email
+        return _normalize_str(self.cleaned_data.get("email")).lower()
 
 
 class ResendRegistrationEmailForm(forms.Form):

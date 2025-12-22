@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -26,7 +25,7 @@ def _profile_context_for_user(
     fu: FreeIPAUser,
     is_self: bool,
 ) -> dict[str, object]:
-    data = getattr(fu, "_user_data", {})
+    data = fu._user_data
 
     tz_name = timezone.get_current_timezone_name()
     fas_tz_name = _first(data, "fasTimezone", "")
@@ -40,25 +39,21 @@ def _profile_context_for_user(
 
     now_local = timezone.localtime(timezone.now(), timezone=tzinfo)
 
-    groups_raw = getattr(fu, "groups_list", []) or []
-    if isinstance(groups_raw, str):
-        groups_raw = [groups_raw]
-    groups_list = [str(g).strip() for g in groups_raw if str(g).strip()]
+    groups_list = fu.groups_list
 
     # Only show FAS groups on the public profile page.
     # Using `FreeIPAGroup.all()` keeps this one cached call vs. per-group lookups.
-    fas_groups = [g for g in (FreeIPAGroup.all() or []) if getattr(g, "fas_group", False)]
-    fas_cns = {str(getattr(g, "cn", "")).strip().lower() for g in fas_groups if getattr(g, "cn", None)}
+    fas_groups = [g for g in FreeIPAGroup.all() if g.fas_group]
+    fas_cns = {g.cn for g in fas_groups if g.cn}
 
-    member_groups = {g for g in groups_list if g.lower() in fas_cns}
+    member_groups = {g for g in groups_list if g in fas_cns}
 
     sponsor_groups: set[str] = set()
     for g in fas_groups:
-        cn = str(getattr(g, "cn", "") or "").strip()
+        cn = g.cn
         if not cn:
             continue
-        sponsors = {str(u).strip() for u in (getattr(g, "sponsors", []) or []) if str(u).strip()}
-        if fu.username in sponsors:
+        if fu.username in g.sponsors:
             sponsor_groups.add(cn)
 
     visible_groups = sorted(member_groups | sponsor_groups, key=str.lower)
@@ -117,18 +112,7 @@ def _profile_context_for_user(
     gpg_keys = _as_list(_data_get(data, "fasGPGKeyId", []))
     ssh_keys = _as_list(_data_get(data, "ipasshpubkey", []))
 
-    # django-avatar expects either a Django user model or an authenticated object
-    # with get_username(). Some tests (and some call sites) use lightweight
-    # user stubs for `fu` that don't implement that method.
     profile_avatar_user: object = fu
-    if not getattr(fu, "is_authenticated", False) or not hasattr(fu, "get_username"):
-        safe_username = getattr(fu, "username", "") or ""
-        profile_avatar_user = SimpleNamespace(
-            is_authenticated=True,
-            get_username=lambda: safe_username,
-            username=safe_username,
-            email=getattr(fu, "email", "") or "",
-        )
 
     return {
         "fu": fu,
@@ -155,7 +139,7 @@ def _profile_context_for_user(
 
 @login_required(login_url="/login/")
 def home(request: HttpRequest) -> HttpResponse:
-    username = (request.user.get_username() or "").strip()
+    username = _normalize_str(request.user.get_username())
     if not username:
         messages.error(request, "Unable to determine your username.")
         return redirect("login")
@@ -164,11 +148,11 @@ def home(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="/login/")
 def user_profile(request: HttpRequest, username: str) -> HttpResponse:
-    username = (username or "").strip()
+    username = _normalize_str(username)
     if not username:
         raise Http404("User not found")
 
-    viewer_username = (request.user.get_username() or "").strip()
+    viewer_username = _normalize_str(request.user.get_username())
     logger.debug("User profile view: username=%s viewer=%s", username, viewer_username)
 
     fu = _get_full_user(username)
@@ -182,7 +166,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 @login_required(login_url="/login/")
 def users(request: HttpRequest) -> HttpResponse:
     users_list = FreeIPAUser.all()
-    q = (request.GET.get("q") or "").strip()
+    q = _normalize_str(request.GET.get("q"))
 
     return render(
         request,

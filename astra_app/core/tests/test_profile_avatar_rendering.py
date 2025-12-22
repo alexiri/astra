@@ -44,13 +44,15 @@ class ProfileAvatarRenderingTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user(email="a@example.org")
 
-        fake_user = SimpleNamespace(
-            username="alice",
-            email="a@example.org",
-            is_authenticated=True,
-            get_full_name=lambda: "Alice User",
-            groups_list=[],
-            _user_data={"mail": ["a@example.org"]},
+        fake_user = FreeIPAUser(
+            "alice",
+            user_data={
+                "uid": ["alice"],
+                "mail": ["a@example.org"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "memberof_group": [],
+            },
         )
 
         with patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user:

@@ -6,6 +6,8 @@ from django.core.cache import caches
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
+from core.views_utils import _normalize_str
+
 
 def _safe_preview(value: Any, *, max_chars: int) -> Any:
     if value is None:
@@ -44,14 +46,15 @@ def cache_debug_view(request):
     backend = caches["default"]
     backend_path = f"{backend.__class__.__module__}.{backend.__class__.__name__}"
 
-    max_chars = request.GET.get("max_chars", "4000")
+    max_chars = _normalize_str(request.GET.get("max_chars", "4000"))
     try:
         max_chars_i = int(max_chars)
     except ValueError:
         max_chars_i = 4000
+    max_chars_i = max(0, min(max_chars_i, 50000))
 
-    prefix = request.GET.get("prefix")
-    key = request.GET.get("key")
+    prefix = _normalize_str(request.GET.get("prefix")) or None
+    key = _normalize_str(request.GET.get("key")) or None
 
     keys = _list_keys_from_backend(backend)
     supports_key_listing = keys is not None

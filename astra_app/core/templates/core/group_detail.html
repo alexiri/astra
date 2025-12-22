@@ -61,13 +61,11 @@
               <tr>
                 <th>IRC channels</th>
                 <td>
-                  {% if group.fas_irc_channels %}
-                    {% for ch in group.fas_irc_channels %}
-                      <span class="badge badge-secondary">{{ ch }}</span>
-                    {% endfor %}
-                  {% else %}
+                  {% for ch in group.fas_irc_channels %}
+                    <span class="badge badge-secondary">{{ ch }}</span>
+                  {% empty %}
                     <span class="text-muted">—</span>
-                  {% endif %}
+                  {% endfor %}
                 </td>
               </tr>
               <tr>
@@ -84,20 +82,21 @@
               <tr>
                 <th>Required agreements</th>
                 <td>
-                  {% if required_agreements %}
-                    {% for a in required_agreements %}
-                      {% if a.signed %}
-                        <span class="badge badge-success">{{ a.cn }} (Signed)</span>
-                      {% else %}
-                        <a class="badge badge-warning" href="{{ a.detail_url }}">{{ a.cn }} (Unsigned)</a>
-                      {% endif %}
-                    {% endfor %}
-                    <div class="small text-muted mt-1">
-                      Sign agreements in <a href="{% url 'settings-agreements' %}">Settings → Agreements</a>.
-                    </div>
-                  {% else %}
+                  {% for a in required_agreements %}
+                    {% if a.signed %}
+                      <span class="badge badge-success">{{ a.cn }} (Signed)</span>
+                    {% else %}
+                      <a class="badge badge-warning" href="{{ a.detail_url }}">{{ a.cn }} (Unsigned)</a>
+                    {% endif %}
+
+                    {% if forloop.last %}
+                      <div class="small text-muted mt-1">
+                        Sign agreements in <a href="{% url 'settings-agreements' %}">Settings → Agreements</a>.
+                      </div>
+                    {% endif %}
+                  {% empty %}
                     <span class="text-muted">—</span>
-                  {% endif %}
+                  {% endfor %}
                 </td>
               </tr>
             </tbody>
@@ -152,21 +151,19 @@
       <h3 class="card-title">Sponsors</h3>
     </div>
     <div class="card-body">
-      {% if sponsors_list %}
-        <div class="row">
-          {% for username in sponsors_list %}
-            <div class="col-12 col-md-6 col-lg-4 col-xl-3">
-              {% if unsigned_usernames and username in unsigned_usernames %}
-                {% user username class="text-muted" style="opacity:0.55;" %}
-              {% else %}
-                {% user username %}
-              {% endif %}
-            </div>
-          {% endfor %}
+      {% for username in sponsors_list %}
+        {% if forloop.first %}<div class="row">{% endif %}
+        <div class="col-12 col-md-6 col-lg-4 col-xl-3">
+          {% if unsigned_usernames and username in unsigned_usernames %}
+            {% user username class="text-muted" style="opacity:0.55;" %}
+          {% else %}
+            {% user username %}
+          {% endif %}
         </div>
-      {% else %}
+        {% if forloop.last %}</div>{% endif %}
+      {% empty %}
         <div class="text-muted">No sponsors found.</div>
-      {% endif %}
+      {% endfor %}
     </div>
   </div>
 

@@ -10,6 +10,8 @@ from django import forms
 
 import pyotp
 
+from core.views_utils import _normalize_str
+
 
 # Noggin-inspired nickname validation (adapted for our simpler fields)
 _IRC_NICK_RE = re.compile(r"^[a-z_\[\]\\^{}|`-][a-z0-9_\[\]\\^{}|`-]*$", re.IGNORECASE)
@@ -41,7 +43,7 @@ def get_locale_options() -> list[str]:
     candidates: set[str] = set()
 
     def _add(raw: str):
-        v = (raw or "").strip()
+        v = _normalize_str(raw)
         if not v:
             return
         # Normalize common forms; strip encoding and modifiers for concise suggestions.
@@ -61,7 +63,7 @@ def get_locale_options() -> list[str]:
 def _is_valid_locale_code(value: str) -> bool:
     # Use Python's locale alias registry. This is not the same as "installed locales",
     # but it is an official reference source and avoids hardcoding.
-    v = (value or "").strip()
+    v = _normalize_str(value)
     if not v:
         return True
 
@@ -190,7 +192,7 @@ class ProfileForm(_StyledForm):
                 # Bound forms should validate against the known choices.
                 return ""
             v = self.initial.get(name)
-            return (v or "").strip()
+            return _normalize_str(v)
 
         def _choices(options: list[str], *, current: str) -> list[tuple[str, str]]:
             out: list[tuple[str, str]] = [("", "—")]
@@ -294,7 +296,7 @@ class ProfileForm(_StyledForm):
                 if not nick and parsed.fragment:
                     nick = parsed.fragment.lstrip("#@")
                 nick = nick.lstrip("@").strip()
-                server = (parsed.netloc or "").strip()
+                server = _normalize_str(parsed.netloc)
             else:
                 # Heuristics for common inputs:
                 # - Matrix: @nick:server
@@ -342,7 +344,7 @@ class ProfileForm(_StyledForm):
 
     def clean_fasLocale(self):
         # Matches baseruserfas: Str("faslocale?", maxlength=64)
-        value = (self.cleaned_data.get("fasLocale") or "").strip()
+        value = _normalize_str(self.cleaned_data.get("fasLocale"))
         if len(value) > 64:
             raise forms.ValidationError("Locale must be at most 64 characters")
         if value and not _is_valid_locale_code(value):
@@ -351,7 +353,7 @@ class ProfileForm(_StyledForm):
 
     def clean_fasTimezone(self):
         # Matches baseruserfas: Str("fastimezone?", maxlength=64)
-        value = (self.cleaned_data.get("fasTimezone") or "").strip()
+        value = _normalize_str(self.cleaned_data.get("fasTimezone"))
         if len(value) > 64:
             raise forms.ValidationError("Timezone must be at most 64 characters")
         if value:
@@ -362,7 +364,7 @@ class ProfileForm(_StyledForm):
 
     def clean_fasGitHubUsername(self):
         # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
-        value = (self.cleaned_data.get("fasGitHubUsername") or "").strip()
+        value = _normalize_str(self.cleaned_data.get("fasGitHubUsername"))
         value = value.lstrip("@").strip()
         if value and not _GITHUB_USERNAME_RE.match(value):
             raise forms.ValidationError("GitHub username is not valid")
@@ -370,7 +372,7 @@ class ProfileForm(_StyledForm):
 
     def clean_fasGitLabUsername(self):
         # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
-        value = (self.cleaned_data.get("fasGitLabUsername") or "").strip()
+        value = _normalize_str(self.cleaned_data.get("fasGitLabUsername"))
         value = value.lstrip("@").strip()
         if value and not _GITLAB_USERNAME_RE.match(value):
             raise forms.ValidationError("GitLab username is not valid")
@@ -382,8 +384,7 @@ class EmailsForm(_StyledForm):
 
     def clean_fasRHBZEmail(self):
         # Matches freeipa-fas userfas.check_fasuser_attr and baseruserfas normalizer strip
-        value = (self.cleaned_data.get("fasRHBZEmail") or "").strip()
-        return value
+        return _normalize_str(self.cleaned_data.get("fasRHBZEmail"))
 
 
 class KeysForm(_StyledForm):
@@ -434,8 +435,8 @@ class OTPConfirmForm(_StyledForm):
     )
 
     def clean_code(self):
-        code = (self.cleaned_data.get("code") or "").strip()
-        secret = (self.cleaned_data.get("secret") or "").strip()
+        code = _normalize_str(self.cleaned_data.get("code"))
+        secret = _normalize_str(self.cleaned_data.get("secret"))
         if not secret:
             raise forms.ValidationError("Could not find the token secret")
 

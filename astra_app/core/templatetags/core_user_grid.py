@@ -9,6 +9,7 @@ from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.views_utils import _normalize_str
 
 register = Library()
 
@@ -71,8 +72,8 @@ def user_grid(context: Context, **kwargs: Any) -> str:
     base_query = ""
     page_url_prefix = "?page="
     if http_request is not None:
-        q = (http_request.GET.get("q") or "").strip()
-        page_number = (http_request.GET.get("page") or "").strip() or None
+        q = _normalize_str(http_request.GET.get("q"))
+        page_number = _normalize_str(http_request.GET.get("page")) or None
 
         params = http_request.GET.copy()
         params.pop("page", None)
@@ -87,21 +88,21 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
     member_manage_enabled = bool(kwargs.get("member_manage_enabled", False))
     member_manage_group_cn_raw = kwargs.get("member_manage_group_cn", None)
-    member_manage_group_cn = ("" if member_manage_group_cn_raw is None else str(member_manage_group_cn_raw)).strip() or None
+    member_manage_group_cn = _normalize_str(member_manage_group_cn_raw) or None
 
     muted_usernames_raw = kwargs.get("muted_usernames", None)
     muted_usernames: set[str] = set()
     if isinstance(muted_usernames_raw, (list, set, tuple)):
         muted_usernames = {str(u).strip() for u in muted_usernames_raw if str(u).strip()}
 
-    title = ("" if title_arg is None else str(title_arg)).strip() or None
+    title = _normalize_str(title_arg) or None
 
     group_obj: object | None = None
     if group_arg is not None:
         if hasattr(group_arg, "members"):
             group_obj = group_arg
         else:
-            group_name = str(group_arg).strip()
+            group_name = _normalize_str(group_arg)
             if group_name:
                 group_obj = FreeIPAGroup.get(group_name)
 
@@ -109,7 +110,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
     users_page: list[object] | None = None
 
     if group_obj is not None:
-        members = _normalize_members(getattr(group_obj, "members", []) or [])
+        members = _normalize_members(group_obj.members)
         if q:
             q_lower = q.lower()
             members = [m for m in members if q_lower in m.lower()]
@@ -135,7 +136,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
                 if q_lower in username:
                     return True
                 full_name = _get_full_name_for_filter(user).lower()
-                return bool(full_name) and q_lower in full_name
+                return q_lower in full_name
 
             users_list = [u for u in users_list if _matches(u)]
 

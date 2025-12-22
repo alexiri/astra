@@ -18,7 +18,7 @@ from python_freeipa import ClientMeta, exceptions
 
 from core.backends import FreeIPAUser
 from core.forms_selfservice import OTPAddForm, OTPConfirmForm, OTPTokenActionForm, OTPTokenRenameForm
-from core.views_utils import settings_context
+from core.views_utils import _normalize_str, settings_context
 
 
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
@@ -67,9 +67,9 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
     secret: str | None = None
 
     if is_add and add_form.is_valid():
-        description = (add_form.cleaned_data.get("description") or "").strip()
+        description = _normalize_str(add_form.cleaned_data.get("description"))
         password = add_form.cleaned_data.get("password") or ""
-        otp = (add_form.cleaned_data.get("otp") or "").strip()
+        otp = _normalize_str(add_form.cleaned_data.get("otp"))
         if otp:
             password = f"{password}{otp}"
 
@@ -95,10 +95,10 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
             )
 
     if is_confirm:
-        secret = (request.POST.get("confirm-secret") or "").strip() or None
+        secret = _normalize_str(request.POST.get("confirm-secret")) or None
 
         if confirm_form.is_valid():
-            description = (confirm_form.cleaned_data.get("description") or "").strip()
+            description = _normalize_str(confirm_form.cleaned_data.get("description"))
             try:
                 svc = _service_client()
                 svc.otptoken_add(
@@ -125,12 +125,12 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
         issuer = f"{username}@{realm}" if realm else username
 
         if is_confirm:
-            description = (request.POST.get("confirm-description") or "").strip()
+            description = _normalize_str(request.POST.get("confirm-description"))
         elif is_add:
-            description = (add_form.cleaned_data.get("description") or "").strip()
+            description = _normalize_str(add_form.cleaned_data.get("description"))
         else:
             description = (getattr(confirm_form, "initial", {}) or {}).get("description") or ""
-            description = (description or "").strip()
+            description = _normalize_str(description)
 
         token = pyotp.TOTP(secret)
         otp_uri = str(token.provisioning_uri(name=description or "(no name)", issuer_name=issuer))
@@ -215,7 +215,7 @@ def otp_rename(request: HttpRequest) -> HttpResponse:
     form = OTPTokenRenameForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         token = form.cleaned_data["token"]
-        description = (form.cleaned_data.get("description") or "").strip()
+        description = _normalize_str(form.cleaned_data.get("description"))
         try:
             client = FreeIPAUser.get_client()
             client.otptoken_mod(a_ipatokenuniqueid=token, o_description=description)

@@ -3,6 +3,8 @@ from __future__ import annotations
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 
+from core.views_utils import _normalize_str
+
 
 class FreeIPAAuthenticationForm(AuthenticationForm):
     """AuthenticationForm with a separate OTP field.
@@ -21,7 +23,7 @@ class FreeIPAAuthenticationForm(AuthenticationForm):
     def clean(self):
         # Ensure the OTP is applied before AuthenticationForm runs authenticate().
         password = (self.cleaned_data.get("password") or "")
-        otp = (self.cleaned_data.get("otp") or "").strip()
+        otp = _normalize_str(self.cleaned_data.get("otp"))
         if password and otp:
             self.cleaned_data["password"] = f"{password}{otp}"
         return super().clean()

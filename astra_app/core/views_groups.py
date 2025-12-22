@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from django.core.paginator import Paginator
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -7,40 +9,30 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
-from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed
+from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed, FreeIPAUser
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
+from core.views_utils import _normalize_str
 
 
 @login_required(login_url="/login/")
 def groups(request: HttpRequest) -> HttpResponse:
-    q = (request.GET.get("q") or "").strip()
-    page_number = (request.GET.get("page") or "").strip() or None
+    q = _normalize_str(request.GET.get("q"))
+    page_number = _normalize_str(request.GET.get("page")) or None
 
-    def _cn(group: object) -> str:
-        cn = getattr(group, "cn", None)
-        return str(cn).strip() if cn is not None else ""
+    def _sort_key(group: FreeIPAGroup) -> str:
+        return group.cn.lower()
 
-    def _sort_key(group: object) -> str:
-        return _cn(group).lower()
-
-    def _description(group: object) -> str:
-        desc = getattr(group, "description", None)
-        return str(desc).strip() if desc is not None else ""
-
-    def _is_fas_group(group: object) -> bool:
-        return bool(getattr(group, "fas_group", False))
-
-    def _matches_query(group: object, query: str) -> bool:
+    def _matches_query(group: FreeIPAGroup, query: str) -> bool:
         if not query:
             return True
         query_lower = query.lower()
-        if query_lower in _sort_key(group):
+        if query_lower in group.cn.lower():
             return True
-        desc = _description(group).lower()
-        return bool(desc) and query_lower in desc
+        desc = (group.description or "").lower()
+        return query_lower in desc
 
     groups_list = FreeIPAGroup.all()
-    groups_filtered = [g for g in groups_list if _is_fas_group(g) and _matches_query(g, q)]
+    groups_filtered = [g for g in groups_list if g.fas_group and _matches_query(g, q)]
     groups_sorted = sorted(groups_filtered, key=_sort_key)
 
     paginator = Paginator(groups_sorted, 30)
@@ -77,21 +69,21 @@ def groups(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="/login/")
 def group_detail(request: HttpRequest, name: str) -> HttpResponse:
-    cn = (name or "").strip()
+    cn = _normalize_str(name)
     if not cn:
         raise Http404("Group not found")
 
     group = FreeIPAGroup.get(cn)
-    if not group or not getattr(group, "fas_group", False):
+    if not group or not group.fas_group:
         raise Http404("Group not found")
 
-    q = (request.GET.get("q") or "").strip()
+    q = _normalize_str(request.GET.get("q"))
 
-    username = (request.user.get_username() or "").strip()
-    sponsors = {str(u).strip() for u in (getattr(group, "sponsors", []) or []) if str(u).strip()}
-    members = {str(u).strip() for u in (getattr(group, "members", []) or []) if str(u).strip()}
-    is_sponsor = bool(username) and username in sponsors
-    is_member = bool(username) and username in members
+    username = _normalize_str(request.user.get_username())
+    sponsors = set(group.sponsors)
+    members = set(group.members)
+    is_sponsor = username in sponsors
+    is_member = username in members
 
     sponsors_list = sorted(sponsors, key=lambda s: s.lower())
 
@@ -102,7 +94,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
         agreement_user_sets: dict[str, set[str]] = {}
         for agreement_cn in required_agreement_cns:
             agreement = FreeIPAFASAgreement.get(agreement_cn)
-            users = {str(u).strip() for u in (getattr(agreement, "users", []) or []) if str(u).strip()} if agreement else set()
+            users = set(agreement.users) if agreement else set()
             agreement_user_sets[agreement_cn] = users
 
         for agreement_cn in required_agreement_cns:
@@ -110,7 +102,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             required_agreements.append(
                 {
                     "cn": agreement_cn,
-                    "signed": bool(username) and username in users_signed,
+                    "signed": username in users_signed,
                     "detail_url": reverse("settings-agreement-detail", kwargs={"cn": agreement_cn}),
                     "list_url": reverse("settings-agreements"),
                 }
@@ -123,14 +115,14 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                     break
 
     if request.method == "POST":
-        action = (request.POST.get("action") or "").strip().lower()
+        action = _normalize_str(request.POST.get("action")).lower()
 
         if action == "leave":
             if not is_member:
                 messages.info(request, "You are not a member of this group.")
                 return redirect("group-detail", name)
             try:
-                request.user.remove_from_group(cn)
+                cast(FreeIPAUser, request.user).remove_from_group(cn)
                 messages.success(request, "You have left the group.")
             except Exception:
                 messages.error(request, "Failed to leave group due to an internal error.")
@@ -152,7 +144,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 messages.error(request, "Only sponsors can manage group members.")
                 return redirect("group-detail", name)
 
-            target = (request.POST.get("username") or "").strip()
+            target = _normalize_str(request.POST.get("username"))
             if not target:
                 messages.error(request, "Please provide a username.")
                 return redirect("group-detail", name)

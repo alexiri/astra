@@ -20,6 +20,7 @@ from python_freeipa import ClientMeta, exceptions
 from .backends import FreeIPAUser
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
 from .tokens import make_signed_token, read_signed_token
+from core.views_utils import _normalize_str
 
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ def confirm(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         return redirect("home")
 
-    username = (request.GET.get("username") or "").strip()
+    username = _normalize_str(request.GET.get("username"))
     if not username:
         return HttpResponse("No username provided", status=400)
 
@@ -200,7 +201,7 @@ def activate(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         return redirect("home")
 
-    token_string = (request.GET.get("token") or "").strip()
+    token_string = _normalize_str(request.GET.get("token"))
     if not token_string:
         messages.warning(request, "No token provided, please check your email validation link.")
         return redirect("register")
@@ -214,8 +215,8 @@ def activate(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "The token is invalid, please register again.")
         return redirect("register")
 
-    username = (token.get("u") or "").strip()
-    token_email = (token.get("e") or "").strip().lower()
+    username = _normalize_str(token.get("u"))
+    token_email = _normalize_str(token.get("e")).lower()
 
     client = FreeIPAUser.get_client()
     try:
@@ -232,7 +233,7 @@ def activate(request: HttpRequest) -> HttpResponse:
             user_email = (raw[0] if raw else None)
         else:
             user_email = raw
-    if (user_email or "").strip().lower() != token_email:
+    if _normalize_str(user_email).lower() != token_email:
         logger.error(
             "Registration token email mismatch username=%s token_email=%s user_email=%s",
             username,

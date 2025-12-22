@@ -10,6 +10,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
 from core import views_users
+from core.backends import FreeIPAUser
 
 
 class ProfileExtraAttributesRenderTests(TestCase):
@@ -41,13 +42,12 @@ class ProfileExtraAttributesRenderTests(TestCase):
             ),
         )
 
-        fake_user = SimpleNamespace(
-            username="alice",
-            email="a@example.org",
-            is_authenticated=True,
-            get_full_name=lambda: "Alice User",
-            groups_list=[],
-            _user_data={
+        fake_user = FreeIPAUser(
+            "alice",
+            user_data={
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
                 "mail": ["a@example.org"],
                 "fasTimezone": ["Europe/Paris"],
                 "fasLocale": ["en_US"],
@@ -59,6 +59,7 @@ class ProfileExtraAttributesRenderTests(TestCase):
                 "fasGitLabUsername": ["alicegl"],
                 "fasGPGKeyId": ["0123456789ABCDEF"],
                 "ipasshpubkey": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE... alice@laptop"],
+                "memberof_group": [],
             },
         )
 

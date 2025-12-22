@@ -36,8 +36,20 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
             get_full_name=lambda: "Alice User",
         )
 
-        disabled = SimpleNamespace(cn="disabled-agreement", enabled=False, users=["alice"], groups=[])
-        enabled_other = SimpleNamespace(cn="enabled-agreement", enabled=True, users=[], groups=[])
+        disabled = SimpleNamespace(
+            cn="disabled-agreement",
+            enabled=False,
+            users=["alice"],
+            groups=[],
+            description="Disabled agreement",
+        )
+        enabled_other = SimpleNamespace(
+            cn="enabled-agreement",
+            enabled=True,
+            users=[],
+            groups=[],
+            description="Enabled agreement",
+        )
 
         with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
             with patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[disabled, enabled_other]):

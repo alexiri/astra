@@ -133,11 +133,11 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
 
-    data = getattr(fu, "_user_data", {})
+    data = fu._user_data
 
     initial = {
-        "givenname": getattr(fu, "first_name", "") or _first(data, "givenname", "") or "",
-        "sn": getattr(fu, "last_name", "") or _first(data, "sn", "") or "",
+        "givenname": fu.first_name,
+        "sn": fu.last_name,
         "fasPronoun": _value_to_csv(_data_get(data, "fasPronoun", "")),
         "fasLocale": _first(data, "fasLocale", "") or "",
         "fasTimezone": _first(data, "fasTimezone", "") or "",
@@ -242,8 +242,8 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
             new_value=form.cleaned_data["fasGitLabUsername"],
         )
 
-        current_private = bool(initial.get("fasIsPrivate"))
-        new_private = bool(form.cleaned_data["fasIsPrivate"])
+        current_private = initial["fasIsPrivate"]
+        new_private = form.cleaned_data["fasIsPrivate"]
         if current_private != new_private:
             setattrs.append(f"fasIsPrivate={_bool_to_ipa(new_private)}")
 
@@ -295,10 +295,10 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
 
-    data = getattr(fu, "_user_data", {})
+    data = fu._user_data
 
     initial = {
-        "mail": getattr(fu, "email", "") or _first(data, "mail", "") or "",
+        "mail": fu.email,
         "fasRHBZEmail": _first(data, "fasRHBZEmail", "") or "",
     }
 
@@ -368,10 +368,7 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
                     messages.info(request, "No changes were applied.")
 
             if pending_validations:
-                name = (
-                    getattr(fu, "get_full_name", "")
-                    or f"{getattr(fu, 'first_name', '')} {getattr(fu, 'last_name', '')}".strip()
-                )
+                name = fu.get_full_name()
                 for attr, address in pending_validations:
                     _send_email_validation_email(request, username=username, name=name, attr=attr, address=address)
 
@@ -395,7 +392,7 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
 @login_required(login_url="/login/")
 def settings_email_validate(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
-    token_string = (request.GET.get("token") or "").strip()
+    token_string = _normalize_str(request.GET.get("token"))
     if not token_string:
         messages.warning(request, "No token provided, please check your email validation link.")
         return redirect("settings-emails")
@@ -409,9 +406,9 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "The token is invalid, please request a new validation email.")
         return redirect("settings-emails")
 
-    token_user = (token.get("u") or "").strip()
-    attr = (token.get("a") or "").strip()
-    value = (token.get("v") or "").strip().lower()
+    token_user = _normalize_str(token.get("u"))
+    attr = _normalize_str(token.get("a"))
+    value = _normalize_str(token.get("v")).lower()
 
     if token_user != username:
         messages.warning(request, "This token does not belong to you.")
@@ -466,7 +463,7 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
 
-    data = getattr(fu, "_user_data", {})
+    data = fu._user_data
 
     gpg = _data_get(data, "fasGPGKeyId", [])
     ssh = _data_get(data, "ipasshpubkey", [])
@@ -555,7 +552,7 @@ def settings_password(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST" and form.is_valid():
         current = form.cleaned_data["current_password"]
-        otp = (form.cleaned_data.get("otp") or "").strip()
+        otp = _normalize_str(form.cleaned_data.get("otp"))
         if otp:
             current = f"{current}{otp}"
         new = form.cleaned_data["new_password"]
@@ -588,7 +585,7 @@ def settings_password(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="/login/")
 def settings_agreements(request: HttpRequest) -> HttpResponse:
-    username = (request.user.get_username() or "").strip()
+    username = _normalize_str(request.user.get_username())
     if not username:
         messages.error(request, "Unable to determine your username.")
         return redirect("settings-profile")
@@ -599,30 +596,22 @@ def settings_agreements(request: HttpRequest) -> HttpResponse:
         return redirect("settings-profile")
 
     fu = _get_full_user(username)
-    groups_raw = getattr(fu, "groups_list", []) if fu else []
-    if isinstance(groups_raw, str):
-        groups_raw = [groups_raw]
-    user_groups = [str(g).strip() for g in (groups_raw or []) if str(g).strip()]
+    user_groups = fu.groups_list if fu else []
 
     if request.method == "POST":
-        action = (request.POST.get("action") or "").strip().lower()
-        cn = (request.POST.get("cn") or "").strip()
+        action = _normalize_str(request.POST.get("action")).lower()
+        cn = _normalize_str(request.POST.get("cn"))
         if action == "sign" and cn:
             agreement = FreeIPAFASAgreement.get(cn)
             if not agreement:
                 messages.error(request, "Agreement not found.")
                 return redirect("settings-agreements")
 
-            if not getattr(agreement, "enabled", True):
+            if not agreement.enabled:
                 messages.error(request, "This agreement is currently disabled.")
                 return redirect("settings-agreements")
 
-            users = {
-                str(u).strip()
-                for u in (getattr(agreement, "users", []) or [])
-                if str(u).strip()
-            }
-            if username in users:
+            if username in set(agreement.users):
                 messages.info(request, "You have already signed this agreement.")
                 return redirect("settings-agreements")
 
@@ -649,7 +638,7 @@ def settings_agreements(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="/login/")
 def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
-    username = (request.user.get_username() or "").strip()
+    username = _normalize_str(request.user.get_username())
     if not username:
         messages.error(request, "Unable to determine your username.")
         return redirect("settings-profile")
@@ -657,7 +646,7 @@ def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
     if not has_enabled_agreements():
         return redirect("settings-profile")
 
-    cn = (cn or "").strip()
+    cn = _normalize_str(cn)
     if not cn:
         raise Http404("Agreement not found")
 
@@ -668,7 +657,7 @@ def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
     signed = username in agreement.users
 
     if request.method == "POST":
-        action = (request.POST.get("action") or "").strip().lower()
+        action = _normalize_str(request.POST.get("action")).lower()
         if action == "sign":
             if signed:
                 messages.info(request, "You have already signed this agreement.")

@@ -4,6 +4,8 @@ import logging
 
 from django.contrib.auth import get_user_model
 
+from core.views_utils import _normalize_str
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,8 +39,8 @@ def _get_or_create_shadow_user_id(username: str, *, is_staff: bool, is_superuser
             username=username,
             defaults={
                 "is_active": True,
-                "is_staff": bool(is_staff),
-                "is_superuser": bool(is_superuser),
+                "is_staff": is_staff,
+                "is_superuser": is_superuser,
             },
         )
 
@@ -48,8 +50,8 @@ def _get_or_create_shadow_user_id(username: str, *, is_staff: bool, is_superuser
 
         # Keep derived flags up to date (derived from FreeIPA groups).
         changed = False
-        desired_staff = bool(is_staff)
-        desired_superuser = bool(is_superuser)
+        desired_staff = is_staff
+        desired_superuser = is_superuser
         if getattr(user_obj, "is_staff", False) != desired_staff:
             user_obj.is_staff = desired_staff
             changed = True
@@ -99,7 +101,7 @@ class AdminShadowUserLogEntryMiddleware:
             username = None
             if hasattr(user, "get_username"):
                 username = user.get_username()
-            username = (username or getattr(user, "username", None) or "").strip()
+            username = _normalize_str(username) or _normalize_str(getattr(user, "username", None))
             if not username:
                 return self.get_response(request)
 

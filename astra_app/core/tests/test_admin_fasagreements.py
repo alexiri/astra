@@ -112,6 +112,8 @@ class AdminFASAgreementTests(TestCase):
 
         listed = MagicMock()
         listed.cn = "test_agreement"
+        listed.description = ""
+        listed.enabled = True
 
         freeipa = MagicMock()
         freeipa.delete.side_effect = Denied(

@@ -10,6 +10,8 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, TestCase, override_settings
 
+from core.backends import FreeIPAUser
+
 
 class EmailChangeValidationFlowTests(TestCase):
     def setUp(self):
@@ -33,14 +35,15 @@ class EmailChangeValidationFlowTests(TestCase):
     def test_settings_emails_post_sends_validation_email_and_defers_update(self):
         from core import views_settings
 
-        fu = SimpleNamespace(
-            username="alice",
-            email="old@example.org",
-            is_authenticated=True,
-            first_name="Alice",
-            last_name="User",
-            get_full_name="Alice User",
-            _user_data={"mail": ["old@example.org"], "fasRHBZEmail": [""]},
+        fu = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["old@example.org"],
+                "fasRHBZEmail": [""],
+            },
         )
 
         request = self.factory.post(
@@ -71,14 +74,15 @@ class EmailChangeValidationFlowTests(TestCase):
         from core import views_settings
 
         # User has a verified primary email already.
-        fu = SimpleNamespace(
-            username="alice",
-            email="verified@example.org",
-            is_authenticated=True,
-            first_name="Alice",
-            last_name="User",
-            get_full_name="Alice User",
-            _user_data={"mail": ["verified@example.org"], "fasRHBZEmail": [""]},
+        fu = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["verified@example.org"],
+                "fasRHBZEmail": [""],
+            },
         )
 
         request = self.factory.post(
@@ -103,14 +107,15 @@ class EmailChangeValidationFlowTests(TestCase):
         from core import views_settings
 
         # User has a verified Bugzilla email already.
-        fu = SimpleNamespace(
-            username="alice",
-            email="old@example.org",
-            is_authenticated=True,
-            first_name="Alice",
-            last_name="User",
-            get_full_name="Alice User",
-            _user_data={"mail": ["old@example.org"], "fasRHBZEmail": ["verified-bz@example.org"]},
+        fu = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["old@example.org"],
+                "fasRHBZEmail": ["verified-bz@example.org"],
+            },
         )
 
         request = self.factory.post(

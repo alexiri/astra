@@ -6,6 +6,8 @@ from django.conf import settings
 from django.template import Library
 from django.utils.html import format_html
 
+from core.views_utils import _normalize_str
+
 register = Library()
 
 
@@ -53,7 +55,7 @@ def nickname(value: str | None, scheme: str | None = None) -> str:
         nick = (parsed.path or "").lstrip("/")
         if not nick and parsed.fragment:
             nick = parsed.fragment.lstrip("#@")
-        server = (parsed.netloc or "").strip() or (default_server or "")
+        server = _normalize_str(parsed.netloc) or (default_server or "")
     else:
         # Plain forms like nick, nick:server, nick@server, @nick:server
         cleaned = raw.lstrip("@").strip()

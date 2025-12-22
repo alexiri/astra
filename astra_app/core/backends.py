@@ -19,6 +19,36 @@ _service_client_local = threading.local()
 _T = TypeVar("_T")
 
 
+def _clean_str_list(values: object) -> list[str]:
+    """Normalize FreeIPA multi-valued attributes into a clean list[str].
+
+    FreeIPA (and plugins) can return strings, lists, or missing values.
+    We sanitize at the ingestion boundary so the rest of the codebase can
+    treat these as stable, already-clean lists.
+    """
+
+    if values is None:
+        return []
+    if isinstance(values, str):
+        s = values.strip()
+        return [s] if s else []
+    if isinstance(values, (list, tuple, set)):
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            if item is None:
+                continue
+            s = str(item).strip()
+            if not s or s in seen:
+                continue
+            out.append(s)
+            seen.add(s)
+        return out
+
+    s = str(values).strip()
+    return [s] if s else []
+
+
 class FreeIPAOperationFailed(RuntimeError):
     """Raised when FreeIPA returns a structured failure without raising."""
 
@@ -273,7 +303,7 @@ class FreeIPAUser:
     A non-persistent user object backed by FreeIPA.
     """
     def __init__(self, username, user_data=None):
-        self.username = username
+        self.username = str(username).strip() if username else ""
         self.backend = 'core.backends.FreeIPAAuthBackend'
         self._user_data = user_data or {}
         self.is_authenticated = True
@@ -307,9 +337,7 @@ class FreeIPAUser:
         self.is_active = not bool(nsaccountlock)
 
         # Permissions/Groups logic
-        self.groups_list = self._user_data.get('memberof_group', [])
-        if isinstance(self.groups_list, str):
-            self.groups_list = [self.groups_list]
+        self.groups_list = _clean_str_list(self._user_data.get('memberof_group', []))
 
         # Simple mapping for staff/superuser based on groups
         # Configure these group names in settings
@@ -615,7 +643,7 @@ class FreeIPAUser:
                 raise FreeIPAOperationFailed(
                     f"FreeIPA group_add_member reported success but user could not be re-fetched (user={self.username} group={group_name})"
                 )
-            if group_name not in (getattr(fresh_user, "groups_list", []) or []):
+            if group_name not in fresh_user.groups_list:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_add_member reported success but membership not present after refresh "
                     f"(user={self.username} group={group_name} response={_compact_repr(res)})"
@@ -641,7 +669,7 @@ class FreeIPAUser:
                 raise FreeIPAOperationFailed(
                     f"FreeIPA group_remove_member reported success but user could not be re-fetched (user={self.username} group={group_name})"
                 )
-            if group_name in (getattr(fresh_user, "groups_list", []) or []):
+            if group_name in fresh_user.groups_list:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_remove_member reported success but membership still present after refresh "
                     f"(user={self.username} group={group_name} response={_compact_repr(res)})"
@@ -656,29 +684,22 @@ class FreeIPAGroup:
     A non-persistent group object backed by FreeIPA.
     """
     def __init__(self, cn, group_data=None):
-        self.cn = cn
+        self.cn = str(cn).strip() if cn else ""
         self._group_data = group_data or {}
 
         description = self._group_data.get('description', None)
         if isinstance(description, list):
             description = description[0] if description else None
-        self.description = description
+        self.description = str(description).strip() if description else ""
 
-        members = self._group_data.get('member_user', [])
-        if isinstance(members, str):
-            members = [members]
-        self.members = members
+        self.members = _clean_str_list(self._group_data.get('member_user', []))
 
         sponsors = None
         for key in ("membermanager_user", "membermanager", "membermanageruser_user"):
             if key in self._group_data:
                 sponsors = self._group_data.get(key)
                 break
-        if sponsors is None:
-            sponsors = []
-        if isinstance(sponsors, str):
-            sponsors = [sponsors]
-        self.sponsors = [str(u).strip() for u in (sponsors or []) if str(u).strip()]
+        self.sponsors = _clean_str_list(sponsors)
 
         # FAS extension attributes
         fas_url = self._group_data.get('fasurl', None)
@@ -691,10 +712,7 @@ class FreeIPAGroup:
             fas_mailing_list = fas_mailing_list[0] if fas_mailing_list else None
         self.fas_mailing_list = fas_mailing_list
 
-        fas_irc_channels = self._group_data.get('fasircchannel', [])
-        if isinstance(fas_irc_channels, str):
-            fas_irc_channels = [fas_irc_channels]
-        self.fas_irc_channels = fas_irc_channels
+        self.fas_irc_channels = _clean_str_list(self._group_data.get('fasircchannel', []))
 
         fas_discussion_url = self._group_data.get('fasdiscussionurl', None)
         if isinstance(fas_discussion_url, list):
@@ -716,9 +734,7 @@ class FreeIPAGroup:
                 s = str(fasgroup_field).strip().upper()
                 self.fas_group = s in {"TRUE", "T", "YES", "Y", "1", "ON"}
         else:
-            object_classes = self._group_data.get('objectclass', [])
-            if isinstance(object_classes, str):
-                object_classes = [object_classes]
+            object_classes = _clean_str_list(self._group_data.get('objectclass', []))
             self.fas_group = 'fasgroup' in [oc.lower() for oc in object_classes]
     
     def __str__(self):
@@ -886,12 +902,12 @@ class FreeIPAGroup:
             # Warm both caches.
             fresh_group = FreeIPAGroup.get(self.cn)
             fresh_user = FreeIPAUser.get(username)
-            if fresh_group and username not in (getattr(fresh_group, "members", []) or []):
+            if fresh_group and username not in fresh_group.members:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_add_member reported success but membership not present after refresh "
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
                 )
-            if fresh_user and self.cn not in (getattr(fresh_user, "groups_list", []) or []):
+            if fresh_user and self.cn not in fresh_user.groups_list:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_add_member reported success but user does not show membership after refresh "
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
@@ -901,7 +917,7 @@ class FreeIPAGroup:
             raise
 
     def add_sponsor(self, username: str) -> None:
-        username = (username or "").strip()
+        username = username.strip()
         if not username:
             return
         try:
@@ -921,7 +937,7 @@ class FreeIPAGroup:
             raise
 
     def remove_sponsor(self, username: str) -> None:
-        username = (username or "").strip()
+        username = username.strip()
         if not username:
             return
         try:
@@ -952,12 +968,12 @@ class FreeIPAGroup:
             _invalidate_groups_list_cache()
             fresh_group = FreeIPAGroup.get(self.cn)
             fresh_user = FreeIPAUser.get(username)
-            if fresh_group and username in (getattr(fresh_group, "members", []) or []):
+            if fresh_group and username in fresh_group.members:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_remove_member reported success but membership still present after refresh "
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
                 )
-            if fresh_user and self.cn in (getattr(fresh_user, "groups_list", []) or []):
+            if fresh_user and self.cn in fresh_user.groups_list:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_remove_member reported success but user still shows membership after refresh "
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
@@ -976,13 +992,13 @@ class FreeIPAFASAgreement:
     """
 
     def __init__(self, cn: str, agreement_data: dict[str, object] | None = None):
-        self.cn = cn
+        self.cn = cn.strip()
         self._agreement_data: dict[str, object] = agreement_data or {}
 
         description = self._agreement_data.get("description", "")
         if isinstance(description, list):
             description = description[0] if description else ""
-        self.description: str = str(description or "")
+        self.description: str = str(description).strip() if description else ""
 
         enabled_raw = self._agreement_data.get("ipaenabledflag", None)
         if isinstance(enabled_raw, list):
@@ -1009,15 +1025,9 @@ class FreeIPAFASAgreement:
             value = source.get(key, None)
             if value is None:
                 continue
-            if isinstance(value, str):
-                return [value]
-            if isinstance(value, list):
-                out: list[str] = []
-                for item in value:
-                    if item is None:
-                        continue
-                    out.append(str(item))
-                return out
+            cleaned = _clean_str_list(value)
+            if cleaned:
+                return cleaned
         return []
 
     def __str__(self) -> str:
@@ -1104,7 +1114,7 @@ class FreeIPAFASAgreement:
 
     @classmethod
     def create(cls, cn: str, *, description: str | None = None) -> "FreeIPAFASAgreement":
-        desc = (description or "").strip()
+        desc = description.strip() if description else ""
         try:
             params: dict[str, object] = {}
             if desc:
@@ -1125,7 +1135,7 @@ class FreeIPAFASAgreement:
             raise
 
     def set_description(self, description: str | None) -> None:
-        desc = (description or "").strip()
+        desc = description.strip() if description else ""
         try:
             _with_freeipa_service_client_retry(
                 self.get_client,
@@ -1251,9 +1261,9 @@ class FreeIPAFASAgreement:
 
             _invalidate_agreement_cache(self.cn)
             fresh = self.get(self.cn) or self
-            for group_cn in list(getattr(fresh, "groups", []) or []):
+            for group_cn in list(fresh.groups):
                 fresh.remove_group(group_cn)
-            for username in list(getattr(fresh, "users", []) or []):
+            for username in list(fresh.users):
                 fresh.remove_user(username)
 
             _with_freeipa_service_client_retry(

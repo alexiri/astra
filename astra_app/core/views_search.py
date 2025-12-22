@@ -4,21 +4,12 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-
-
-def _user_full_name(user: object) -> str:
-    get_full_name = getattr(user, "get_full_name", None)
-    if callable(get_full_name):
-        try:
-            return str(get_full_name()).strip()
-        except Exception:
-            return ""
-    return ""
+from core.views_utils import _normalize_str
 
 
 @login_required(login_url="/login/")
 def global_search(request: HttpRequest) -> JsonResponse:
-    q = (request.GET.get("q") or "").strip()
+    q = _normalize_str(request.GET.get("q"))
     if not q:
         return JsonResponse({"users": [], "groups": []})
 
@@ -26,39 +17,28 @@ def global_search(request: HttpRequest) -> JsonResponse:
 
     users_out: list[dict[str, str]] = []
     for u in FreeIPAUser.all():
-        username = getattr(u, "username", "")
-        if not isinstance(username, str):
-            continue
-        username_norm = username.strip()
-        if not username_norm:
+        if not u.username:
             continue
 
-        full_name = _user_full_name(u)
-        if q_lower not in username_norm.lower() and (not full_name or q_lower not in full_name.lower()):
+        full_name = u.get_full_name()
+        if q_lower not in u.username.lower() and q_lower not in full_name.lower():
             continue
 
-        users_out.append({"username": username_norm, "full_name": full_name})
+        users_out.append({"username": u.username, "full_name": full_name})
         if len(users_out) >= 7:
             break
 
     groups_out: list[dict[str, str]] = []
     for g in FreeIPAGroup.all():
-        if not getattr(g, "fas_group", False):
+        if not g.fas_group:
             continue
-        cn = getattr(g, "cn", "")
-        if not isinstance(cn, str):
-            continue
-        cn_norm = cn.strip()
-        if not cn_norm:
+        if not g.cn:
             continue
 
-        desc = getattr(g, "description", "")
-        desc_norm = desc.strip() if isinstance(desc, str) else ""
-
-        if q_lower not in cn_norm.lower() and (not desc_norm or q_lower not in desc_norm.lower()):
+        if q_lower not in g.cn.lower() and (not g.description or q_lower not in g.description.lower()):
             continue
 
-        groups_out.append({"cn": cn_norm, "description": desc_norm})
+        groups_out.append({"cn": g.cn, "description": g.description})
         if len(groups_out) >= 7:
             break
 

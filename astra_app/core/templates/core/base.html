@@ -110,23 +110,22 @@
 
     <div class="content">
       <div class="container">
-        {% if messages %}
-          {% for message in messages %}
-            {% with tags=message.tags|default:'info' %}
-              {% if 'error' in tags %}
-                {% with cls='danger' %}
-                  <div class="alert alert-{{ cls }}">{{ message }}</div>
-                {% endwith %}
-              {% elif 'debug' in tags %}
-                {% with cls='secondary' %}
-                  <div class="alert alert-{{ cls }}">{{ message }}</div>
-                {% endwith %}
-              {% else %}
-                <div class="alert alert-{{ tags }}">{{ message }}</div>
-              {% endif %}
-            {% endwith %}
-          {% endfor %}
-        {% endif %}
+        {% for message in messages %}
+          {% with tags=message.tags|default:'info' %}
+            {% if 'error' in tags %}
+              {% with cls='danger' %}
+                <div class="alert alert-{{ cls }}">{{ message }}</div>
+              {% endwith %}
+            {% elif 'debug' in tags %}
+              {% with cls='secondary' %}
+                <div class="alert alert-{{ cls }}">{{ message }}</div>
+              {% endwith %}
+            {% else %}
+              <div class="alert alert-{{ tags }}">{{ message }}</div>
+            {% endif %}
+          {% endwith %}
+        {% empty %}
+        {% endfor %}
 
         {% block content %}{% endblock %}
       </div>

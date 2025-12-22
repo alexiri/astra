@@ -13,11 +13,12 @@ class AgreementForUser:
     signed: bool
     applicable: bool
     enabled: bool
+    groups: tuple[str, ...]
 
 
 def has_enabled_agreements() -> bool:
-    for agreement in FreeIPAFASAgreement.all() or []:
-        if bool(getattr(agreement, "enabled", True)):
+    for agreement in FreeIPAFASAgreement.all():
+        if agreement.enabled:
             return True
     return False
 
@@ -29,35 +30,35 @@ def list_agreements_for_user(
     include_disabled: bool = False,
     applicable_only: bool = False,
 ) -> list[AgreementForUser]:
-    username = (username or "").strip()
-    groups_set = {str(g).strip().lower() for g in (user_groups or []) if str(g).strip()}
+    username = username.strip()
+    groups_set = {g.lower() for g in user_groups}
 
     out: list[AgreementForUser] = []
-    for agreement in FreeIPAFASAgreement.all() or []:
-        cn = str(getattr(agreement, "cn", "") or "").strip()
+    for agreement in FreeIPAFASAgreement.all():
+        cn = agreement.cn
         if not cn:
             continue
 
         full = FreeIPAFASAgreement.get(cn) or agreement
-        enabled = bool(getattr(full, "enabled", True))
+        enabled = full.enabled
         if not include_disabled and not enabled:
             continue
 
-        agreement_groups = {str(g).strip().lower() for g in (getattr(full, "groups", []) or []) if str(g).strip()}
+        agreement_groups = {g.lower() for g in full.groups}
         applicable = not agreement_groups or bool(groups_set & agreement_groups)
         if applicable_only and not applicable:
             continue
 
-        users = {str(u).strip() for u in (getattr(full, "users", []) or []) if str(u).strip()}
-        signed = username in users if username else False
+        groups = tuple(sorted(full.groups, key=str.lower))
 
         out.append(
             AgreementForUser(
                 cn=cn,
-                description=str(getattr(full, "description", "") or ""),
-                signed=signed,
+                description=full.description,
+                signed=username in full.users,
                 applicable=applicable,
                 enabled=enabled,
+                groups=groups,
             )
         )
 
@@ -71,27 +72,23 @@ def required_agreements_for_group(group_cn: str) -> list[str]:
     linked groups.
     """
 
-    group_cn = (group_cn or "").strip()
+    group_cn = group_cn.strip()
     if not group_cn:
         return []
 
     group_key = group_cn.lower()
     required: list[str] = []
 
-    for agreement in FreeIPAFASAgreement.all() or []:
-        cn = str(getattr(agreement, "cn", "") or "").strip()
+    for agreement in FreeIPAFASAgreement.all():
+        cn = agreement.cn
         if not cn:
             continue
 
         full = FreeIPAFASAgreement.get(cn) or agreement
-        if not bool(getattr(full, "enabled", True)):
+        if not full.enabled:
             continue
 
-        agreement_groups = {
-            str(g).strip().lower()
-            for g in (getattr(full, "groups", []) or [])
-            if str(g).strip()
-        }
+        agreement_groups = {g.lower() for g in full.groups}
         if group_key in agreement_groups:
             required.append(cn)
 
@@ -101,18 +98,17 @@ def required_agreements_for_group(group_cn: str) -> list[str]:
 def missing_required_agreements_for_user_in_group(username: str, group_cn: str) -> list[str]:
     """Return agreement CNs the user must sign before joining a group."""
 
-    username = (username or "").strip()
+    username = username.strip()
     if not username:
         return []
 
     missing: list[str] = []
     for agreement_cn in required_agreements_for_group(group_cn):
         agreement = FreeIPAFASAgreement.get(agreement_cn)
-        if not agreement or not bool(getattr(agreement, "enabled", True)):
+        if not agreement or not agreement.enabled:
             continue
 
-        users = {str(u).strip() for u in (getattr(agreement, "users", []) or []) if str(u).strip()}
-        if username not in users:
+        if username not in set(agreement.users):
             missing.append(agreement_cn)
 
     return sorted(set(missing), key=str.lower)

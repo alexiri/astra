@@ -177,6 +177,90 @@ class AgreementsSelfServiceTests(TestCase):
         ctx = captured["context"]
         self.assertEqual([a.cn for a in ctx["agreements"]], ["cla"])
 
+    def test_settings_agreements_renders_required_for_group_and_danger_not_signed_badge(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/agreements/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"]},
+        )
+
+        agreements = [FreeIPAFASAgreement("cla", {"cn": ["cla"], "ipaenabledflag": ["TRUE"]})]
+        agreement_detail = FreeIPAFASAgreement(
+            "cla",
+            {
+                "cn": ["cla"],
+                "ipaenabledflag": ["TRUE"],
+                "member_group": ["packagers"],
+                "memberuser_user": [],
+                "description": ["CLA text"],
+            },
+        )
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
+                with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
+                    with patch(
+                        "core.backends.FreeIPAFASAgreement.get",
+                        autospec=True,
+                        return_value=agreement_detail,
+                    ):
+                        resp = views_settings.settings_agreements(request)
+
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8")
+
+        self.assertIn('badge badge-danger', content)
+        self.assertIn('Not signed', content)
+        self.assertIn('Required for:', content)
+        self.assertIn(
+            f'href="{reverse("group-detail", kwargs={"name": "packagers"})}"',
+            content,
+        )
+        self.assertIn('>packagers<', content)
+
+    def test_settings_agreement_detail_renders_required_for_group_and_danger_not_signed_badge(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/agreements/cla/")
+        request.user = self._auth_user("alice")
+
+        agreement_detail = FreeIPAFASAgreement(
+            "cla",
+            {
+                "cn": ["cla"],
+                "ipaenabledflag": ["TRUE"],
+                "member_group": ["packagers"],
+                "memberuser_user": [],
+                "description": ["CLA text"],
+            },
+        )
+
+        with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
+            with patch(
+                "core.backends.FreeIPAFASAgreement.get",
+                autospec=True,
+                return_value=agreement_detail,
+            ):
+                resp = views_settings.settings_agreement_detail(request, "cla")
+
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8")
+
+        self.assertIn('badge badge-danger', content)
+        self.assertIn('Not signed', content)
+        self.assertIn('Required for:', content)
+        self.assertIn(
+            f'href="{reverse("group-detail", kwargs={"name": "packagers"})}"',
+            content,
+        )
+        self.assertIn('>packagers<', content)
+
     def test_settings_agreements_post_signs_agreement(self):
         factory = RequestFactory()
         request = factory.post(
