@@ -8,6 +8,7 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import Http404, HttpResponse
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 
 from core import views_groups, views_settings, views_users
 from core.agreements import AgreementForUser
@@ -52,7 +53,121 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
                     )
 
         self.assertEqual(ctx["agreements"], [])
-        self.assertEqual(ctx["agreements_count"], 0)
+        self.assertEqual(len(ctx["agreements"]), 0)
+
+    def test_profile_renders_missing_required_agreements_when_user_is_member(self):
+        factory = RequestFactory()
+        request = factory.get("/user/alice/")
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=["packagers"],
+            _user_data={},
+            email="",
+            get_full_name=lambda: "Alice User",
+        )
+
+        fas_group = SimpleNamespace(cn="packagers", fas_group=True, sponsors=[])
+
+        # Required for group, unsigned for alice.
+        agreement_summary = SimpleNamespace(cn="cla", enabled=True, groups=["packagers"], users=[])
+        agreement_full = SimpleNamespace(cn="cla", enabled=True, groups=["packagers"], users=[], description="CLA")
+
+        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[fas_group]):
+                with patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[agreement_summary]):
+                    with patch(
+                        "core.agreements.FreeIPAFASAgreement.get",
+                        autospec=True,
+                        return_value=agreement_full,
+                    ):
+                        response = views_users.user_profile(request, "alice")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        self.assertIn("Missing Agreement", html)
+        self.assertIn(reverse("settings-agreement-detail", kwargs={"cn": "cla"}), html)
+
+    def test_group_detail_shows_required_agreements_with_signed_status_and_link(self):
+        factory = RequestFactory()
+        request = factory.get("/group/testgroup/")
+        request.user = self._auth_user("alice")
+
+        group = SimpleNamespace(
+            cn="testgroup",
+            fas_group=True,
+            description="",
+            members=["alice"],
+            sponsors=[],
+        )
+
+        agreement_summary = SimpleNamespace(cn="cla", enabled=True, groups=["testgroup"], users=[])
+        agreement_full = SimpleNamespace(cn="cla", enabled=True, groups=["testgroup"], users=[], description="CLA")
+
+        fake_user = SimpleNamespace(username="alice", is_authenticated=True, get_username=lambda: "alice", get_full_name=lambda: "Alice")
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            with patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[agreement_summary]):
+                with patch("core.agreements.FreeIPAFASAgreement.get", autospec=True, return_value=agreement_full):
+                    with patch(
+                        "core.templatetags.core_user_widget.FreeIPAUser.get",
+                        autospec=True,
+                        return_value=fake_user,
+                    ):
+                        response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        self.assertIn("Required agreements", html)
+        self.assertIn("Unsigned", html)
+        self.assertIn(reverse("settings-agreements"), html)
+
+    def test_group_detail_greys_out_members_and_sponsors_missing_required_agreements(self):
+        factory = RequestFactory()
+        request = factory.get("/group/testgroup/")
+        request.user = self._auth_user("alice")
+
+        group = SimpleNamespace(
+            cn="testgroup",
+            fas_group=True,
+            description="",
+            members=["bob"],
+            sponsors=["carol"],
+        )
+
+        # Agreement required for testgroup. Bob has signed; Carol has not.
+        agreement_summary = SimpleNamespace(cn="cla", enabled=True, groups=["testgroup"], users=[])
+        agreement_full = SimpleNamespace(cn="cla", enabled=True, groups=["testgroup"], users=["bob"], description="CLA")
+
+        def fake_user_lookup(*args, **_kwargs):
+            username = str(args[-1])
+            return SimpleNamespace(
+                username=username,
+                is_authenticated=True,
+                get_username=lambda: username,
+                get_full_name=lambda: username,
+            )
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            with patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[agreement_summary]):
+                with patch("core.agreements.FreeIPAFASAgreement.get", autospec=True, return_value=agreement_full):
+                    with patch(
+                        "core.templatetags.core_user_widget.FreeIPAUser.get",
+                        autospec=True,
+                        side_effect=fake_user_lookup,
+                    ):
+                        response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        # Carol should be greyed out; Bob should not.
+        self.assertIn('href="/user/carol/"', html)
+        self.assertIn('d-flex align-items-center text-muted', html)
+        self.assertIn('href="/user/bob/"', html)
+        self.assertLess(html.index('d-flex align-items-center text-muted'), html.index('href="/user/carol/"'))
 
     def test_settings_agreement_detail_disabled_is_not_visible(self):
         factory = RequestFactory()

@@ -35,7 +35,7 @@
         <p class="text-muted mb-0">No agreement text is available.</p>
       {% endif %}
 
-      {% if can_sign %}
+      {% if not signed %}
         <hr />
         <form method="post" class="m-0">
           {% csrf_token %}

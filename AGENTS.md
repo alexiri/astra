@@ -79,7 +79,9 @@
 Before introducing new helpers/constants:
 - Search the repo for existing equivalents (setting names, helper functions, payload shapes) and reuse them.
 - If a value is already defined in `settings.py` (especially via `env.*`), do NOT add a second default via `getattr(settings, ...)` elsewhere. Use `settings.X` directly.
+- In general, don't use `getattr` unless absolutely necessary. Don't write `getattr(agreement, "users", [])` when `agreement.users` will do, verify that the data preparation layer has already set sensible defaults.
 - Do not add “wrapper” functions that merely forward arguments or return `settings.*` unless they add real semantics and are used in 2+ places.
+- Avoid convoluted constructions like `signed = username in { str(u).strip() for u in (getattr(agreement, "users", []) or []) if str(u).strip() }` when simply `signed = username in agreement.users` will do. You need to have a very valid reason for writing convoluted code.
 
 When you notice duplicated logic across files:
 - Refactor only if it reduces the number of implementations/branches. Moving code into a new module is not enough if the same logic still exists in multiple wrappers.

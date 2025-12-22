@@ -661,33 +661,15 @@ def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
     if not cn:
         raise Http404("Agreement not found")
 
-    fu = _get_full_user(username)
-    groups_raw = getattr(fu, "groups_list", []) if fu else []
-    if isinstance(groups_raw, str):
-        groups_raw = [groups_raw]
-    user_groups = [str(g).strip() for g in (groups_raw or []) if str(g).strip()]
     agreement = FreeIPAFASAgreement.get(cn)
-    if not agreement:
+    if not agreement or not agreement.enabled:
         raise Http404("Agreement not found")
 
-    # Never expose disabled agreements on the user side.
-    if not bool(getattr(agreement, "enabled", True)):
-        raise Http404("Agreement not found")
-
-    signed = username in {
-        str(u).strip()
-        for u in (getattr(agreement, "users", []) or [])
-        if str(u).strip()
-    }
-    enabled = True
-    can_sign = not signed
+    signed = username in agreement.users
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip().lower()
         if action == "sign":
-            if not enabled:
-                messages.error(request, "This agreement is currently disabled.")
-                return redirect("settings-agreement-detail", cn=cn)
             if signed:
                 messages.info(request, "You have already signed this agreement.")
                 return redirect("settings-agreement-detail", cn=cn)
@@ -706,7 +688,6 @@ def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
     context = {
         "agreement": agreement,
         "signed": signed,
-        "can_sign": can_sign,
         **settings_context("agreements"),
     }
     return render(request, "core/settings_agreement_detail.html", context)

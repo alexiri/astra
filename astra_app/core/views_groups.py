@@ -5,8 +5,10 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-from core.backends import FreeIPAGroup, FreeIPAOperationFailed
-from core.agreements import missing_required_agreements_for_user_in_group
+from django.urls import reverse
+
+from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed
+from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
 
 
 @login_required(login_url="/login/")
@@ -93,6 +95,33 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     sponsors_list = sorted(sponsors, key=lambda s: s.lower())
 
+    required_agreement_cns = required_agreements_for_group(cn)
+    required_agreements: list[dict[str, object]] = []
+    unsigned_usernames: set[str] = set()
+    if required_agreement_cns:
+        agreement_user_sets: dict[str, set[str]] = {}
+        for agreement_cn in required_agreement_cns:
+            agreement = FreeIPAFASAgreement.get(agreement_cn)
+            users = {str(u).strip() for u in (getattr(agreement, "users", []) or []) if str(u).strip()} if agreement else set()
+            agreement_user_sets[agreement_cn] = users
+
+        for agreement_cn in required_agreement_cns:
+            users_signed = agreement_user_sets.get(agreement_cn, set())
+            required_agreements.append(
+                {
+                    "cn": agreement_cn,
+                    "signed": bool(username) and username in users_signed,
+                    "detail_url": reverse("settings-agreement-detail", kwargs={"cn": agreement_cn}),
+                    "list_url": reverse("settings-agreements"),
+                }
+            )
+
+        for u in sorted(members | sponsors, key=lambda s: s.lower()):
+            for agreement_cn in required_agreement_cns:
+                if u not in agreement_user_sets.get(agreement_cn, set()):
+                    unsigned_usernames.add(u)
+                    break
+
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip().lower()
 
@@ -168,5 +197,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             "is_member": is_member,
             "is_sponsor": is_sponsor,
             "sponsors_list": sponsors_list,
+            "required_agreements": required_agreements,
+            "unsigned_usernames": sorted(unsigned_usernames, key=lambda s: s.lower()),
         },
     )

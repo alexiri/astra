@@ -80,6 +80,26 @@
                   {% endif %}
                 </td>
               </tr>
+
+              <tr>
+                <th>Required agreements</th>
+                <td>
+                  {% if required_agreements %}
+                    {% for a in required_agreements %}
+                      {% if a.signed %}
+                        <span class="badge badge-success">{{ a.cn }} (Signed)</span>
+                      {% else %}
+                        <a class="badge badge-warning" href="{{ a.detail_url }}">{{ a.cn }} (Unsigned)</a>
+                      {% endif %}
+                    {% endfor %}
+                    <div class="small text-muted mt-1">
+                      Sign agreements in <a href="{% url 'settings-agreements' %}">Settings → Agreements</a>.
+                    </div>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -136,7 +156,11 @@
         <div class="row">
           {% for username in sponsors_list %}
             <div class="col-12 col-md-6 col-lg-4 col-xl-3">
-              {% user username %}
+              {% if unsigned_usernames and username in unsigned_usernames %}
+                {% user username class="text-muted" style="opacity:0.55;" %}
+              {% else %}
+                {% user username %}
+              {% endif %}
             </div>
           {% endfor %}
         </div>
@@ -179,7 +203,7 @@
     </div>
 
     <div class="card-body">
-      {% user_grid group=group member_manage_enabled=is_sponsor member_manage_group_cn=group.cn %}
+      {% user_grid group=group member_manage_enabled=is_sponsor member_manage_group_cn=group.cn muted_usernames=unsigned_usernames %}
     </div>
   </div>
 

@@ -89,6 +89,11 @@ def user_grid(context: Context, **kwargs: Any) -> str:
     member_manage_group_cn_raw = kwargs.get("member_manage_group_cn", None)
     member_manage_group_cn = ("" if member_manage_group_cn_raw is None else str(member_manage_group_cn_raw)).strip() or None
 
+    muted_usernames_raw = kwargs.get("muted_usernames", None)
+    muted_usernames: set[str] = set()
+    if isinstance(muted_usernames_raw, (list, set, tuple)):
+        muted_usernames = {str(u).strip() for u in muted_usernames_raw if str(u).strip()}
+
     title = ("" if title_arg is None else str(title_arg)).strip() or None
 
     group_obj: object | None = None
@@ -161,6 +166,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
             "usernames": usernames_page,
             "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
             "member_manage_group_cn": member_manage_group_cn,
+            "muted_usernames": muted_usernames,
         },
         request=http_request,
     )

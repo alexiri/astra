@@ -7,12 +7,13 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from zoneinfo import ZoneInfo
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.agreements import has_enabled_agreements, list_agreements_for_user
+from core.agreements import has_enabled_agreements, list_agreements_for_user, missing_required_agreements_for_user_in_group
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
 
 
@@ -81,9 +82,26 @@ def _profile_context_for_user(
             )
             if a.signed
         ]
-        agreements = sorted({str(a).strip() for a in agreements if str(a).strip()}, key=str.lower)
+        agreements = sorted(agreements, key=str.lower)
+
+        missing_required: dict[str, set[str]] = {}
+        for group_cn in sorted(member_groups, key=str.lower):
+            for agreement_cn in missing_required_agreements_for_user_in_group(fu.username, group_cn):
+                missing_required.setdefault(agreement_cn, set()).add(group_cn)
+
+        missing_agreements = [
+            {
+                "cn": agreement_cn,
+                "required_by": sorted(required_by, key=str.lower),
+                "settings_url": reverse("settings-agreement-detail", kwargs={"cn": agreement_cn})
+                if is_self
+                else None,
+            }
+            for agreement_cn, required_by in sorted(missing_required.items(), key=lambda kv: kv[0].lower())
+        ]
     else:
         agreements = []
+        missing_agreements = []
 
     def _as_list(value: object) -> list[str]:
         if isinstance(value, list):
@@ -117,10 +135,8 @@ def _profile_context_for_user(
         "profile_avatar_user": profile_avatar_user,
         "is_self": is_self,
         "groups": groups,
-        "groups_count": len(groups),
-        "show_agreements": show_agreements,
         "agreements": agreements,
-        "agreements_count": len(agreements),
+        "missing_agreements": missing_agreements,
         "timezone": tz_name,
         "timezone_name": tz_name,
         "current_time": now_local,

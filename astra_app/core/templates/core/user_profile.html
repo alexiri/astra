@@ -150,40 +150,55 @@
       <ul class="list-group h-100 profile-memberships">
         <li class="list-group-item profile-memberships-header text-right">
           <strong>
-            {{ groups_count }} Group(s){% if show_agreements %}, {{ agreements_count }} Agreement(s){% endif %}
+            {{ groups|length }} Group{{ groups|pluralize }}{% if agreements %}, {{ agreements|length }} Signed Agreement{{ agreements|pluralize }}{%endif%}{% if missing_agreements %}, {{ missing_agreements|length }} Missing Agreement{{ missing_agreements|pluralize }}{% endif %}
           </strong>
         </li>
 
-        {% if groups or agreements %}
-          {% if show_agreements and agreements %}
-            {% for a in agreements %}
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                  <i class="fa fa-check-circle profile-group-icon"></i>
-                  <div class="profile-group-name">{{ a }}</div>
+        {% if groups or agreements or missing_agreements %}
+          {% for a in missing_agreements %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-exclamation-triangle profile-group-icon"></i>
+                <div class="profile-group-name">
+                  {% if is_self and a.settings_url %}
+                    <a href="{{ a.settings_url }}">{{ a.cn }}</a>
+                  {% else %}
+                    {{ a.cn }}
+                  {% endif %}
+                  {% if a.required_by %}
+                    <div class="small text-muted">Required for: {{ a.required_by|join:", " }}</div>
+                  {% endif %}
                 </div>
-                <span class="badge badge-success">Signed</span>
-              </li>
-            {% endfor %}
-          {% endif %}
+              </div>
+              <span class="badge badge-danger">Required</span>
+            </li>
+          {% endfor %}
 
-          {% if groups %}
-            {% for g in groups %}
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                  <i class="fas fa-users profile-group-icon"></i>
-                  <div class="profile-group-name">
-                    <a href="{% url 'group-detail' g.cn %}">{{ g.cn }}</a>
-                  </div>
+          {% for a in agreements %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center">
+                <i class="fa fa-check-circle profile-group-icon"></i>
+                <div class="profile-group-name">{{ a }}</div>
+              </div>
+              <span class="badge badge-success">Signed</span>
+            </li>
+          {% endfor %}
+
+          {% for g in groups %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-users profile-group-icon"></i>
+                <div class="profile-group-name">
+                  <a href="{% url 'group-detail' g.cn %}">{{ g.cn }}</a>
                 </div>
-                {% if g.role == 'Sponsor' %}
-                  <span class="badge badge-primary">Sponsor</span>
-                {% else %}
-                  <span class="badge badge-secondary">Member</span>
-                {% endif %}
-              </li>
-            {% endfor %}
-          {% endif %}
+              </div>
+              {% if g.role == 'Sponsor' %}
+                <span class="badge badge-primary">Sponsor</span>
+              {% else %}
+                <span class="badge badge-secondary">Member</span>
+              {% endif %}
+            </li>
+          {% endfor %}
         {% else %}
           <li class="list-group-item text-muted text-center py-5">
             {{ fu.username }} has no group memberships
