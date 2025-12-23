@@ -1,7 +1,5 @@
+from django.db import DatabaseError, connection
 from django.http import HttpResponse
-
-from django.db import DatabaseError
-from django.db import connection
 
 
 def healthz(request):

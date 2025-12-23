@@ -49,8 +49,8 @@ def _patch_django_avatar_get_user() -> None:
     """
 
     try:
-        import avatar.utils as avatar_utils
         import avatar.templatetags.avatar_tags as avatar_tags
+        import avatar.utils as avatar_utils
     except ImportError:
         return
 

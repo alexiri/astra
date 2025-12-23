@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
-from django.contrib.contenttypes.models import ContentType
+from django.contrib.admin.models import ADDITION, LogEntry
 from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.models import IPAGroup
 
 
 class AdminIPAGroupCRUDTests(TestCase):
@@ -33,7 +31,7 @@ class AdminIPAGroupCRUDTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.create") as mock_create,
-            patch("core.backends.FreeIPAGroup.add_member") as mock_add_member,
+            patch("core.backends.FreeIPAGroup.add_member"),
         ):
             mock_create.return_value = FreeIPAGroup("testgroup", {"cn": ["testgroup"], "description": ["A test group"]})
             url = reverse("admin:auth_ipagroup_add")
@@ -94,8 +92,8 @@ class AdminIPAGroupCRUDTests(TestCase):
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(existing_group, "save") as mock_save,
-            patch.object(existing_group, "add_member") as mock_add,
-            patch.object(existing_group, "remove_member") as mock_remove,
+            patch.object(existing_group, "add_member"),
+            patch.object(existing_group, "remove_member"),
         ):
             # First, get the change form
             url = reverse("admin:auth_ipagroup_change", args=["testgroup"])
@@ -148,7 +146,7 @@ class AdminIPAGroupCRUDTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
             patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
             patch("core.backends.FreeIPAGroup.all", return_value=[target_group]),
-            patch.object(target_group, "delete") as mock_delete,
+            patch.object(target_group, "delete"),
         ):
             url = reverse("admin:auth_ipagroup_changelist")
             resp = self.client.post(
@@ -297,7 +295,7 @@ class AdminIPAGroupCRUDTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
-            patch.object(existing_group, "save") as mock_save,
+            patch.object(existing_group, "save"),
             patch("core.backends._with_freeipa_service_client_retry", side_effect=_fake_retry),
             patch.object(existing_group, "add_member"),
             patch.object(existing_group, "remove_member"),

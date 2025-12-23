@@ -3,20 +3,18 @@ from __future__ import annotations
 import logging
 from typing import override
 
+import requests
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
-
-import requests
-
 from python_freeipa import ClientMeta, exceptions
 
-from .forms_auth import ExpiredPasswordChangeForm, FreeIPAAuthenticationForm, SyncTokenForm
 from core.views_utils import _normalize_str
 
+from .forms_auth import ExpiredPasswordChangeForm, FreeIPAAuthenticationForm, SyncTokenForm
 
 logger = logging.getLogger(__name__)
 

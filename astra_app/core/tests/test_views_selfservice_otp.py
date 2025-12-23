@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pyotp
-
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -15,13 +15,13 @@ from core.views_settings_otp import OTP_KEY_LENGTH, settings_otp
 
 
 class SettingsOTPViewTests(TestCase):
-    def _add_session_and_messages(self, request):
+    def _add_session_and_messages(self, request: Any) -> Any:
         SessionMiddleware(lambda r: None).process_request(request)
         request.session.save()
         setattr(request, "_messages", FallbackStorage(request))
         return request
 
-    def _auth_user(self, username: str = "alice"):
+    def _auth_user(self, username: str = "alice") -> Any:
         return SimpleNamespace(is_authenticated=True, get_username=lambda: username)
 
     @override_settings(
@@ -36,7 +36,7 @@ class SettingsOTPViewTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
         def fake_render(req, template, context):
             captured["context"] = context
@@ -73,7 +73,7 @@ class SettingsOTPViewTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user()
 
-        captured: dict[str, object] = {}
+        captured: dict[str, Any] = {}
 
         def fake_render(req, template, context):
             captured["context"] = context

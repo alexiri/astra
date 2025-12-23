@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from django.test import TestCase
 from django.db.models import Count
+from django.test import TestCase
 
 from core.admin import _ListBackedQuerySet
 from core.models import IPAGroup
@@ -159,10 +159,10 @@ class QuerySetDocsComplianceTests(TestCase):
         self.assertTrue(all(i.description == "new" for i in self.qs))
 
     def test_earliest_and_latest(self):
-        e = self.qs.earliest("cn")
-        l = self.qs.latest("cn")
-        self.assertEqual(e.cn, "g-a")
-        self.assertEqual(l.cn, "g-c")
+        earliest = self.qs.earliest("cn")
+        latest = self.qs.latest("cn")
+        self.assertEqual(earliest.cn, "g-a")
+        self.assertEqual(latest.cn, "g-c")
 
     def test_only_and_defer(self):
         # only() should allow selecting a subset of fields; values('cn') should still work
@@ -222,12 +222,13 @@ class QuerySetDocsComplianceTests(TestCase):
     def test_iterator_and_in_bulk_none(self):
         a, b, c = self._make_groups()
         qs = _ListBackedQuerySet(IPAGroup, [a, b, c])
+        it = qs.iterator()
+        self.assertEqual(next(it).cn, "g-a")
+        all_bulk = qs.in_bulk()
+        # Keys should include pks.
+        self.assertIn("g-a", all_bulk)
+        self.assertIn("g-c", all_bulk)
 
     def _make_groups(self):
         # compatibility helper for older tests
         return tuple(self.items)
-        it = qs.iterator()
-        self.assertEqual(next(it).cn, "g-a")
-        all_bulk = qs.in_bulk()
-        # keys should include pks
-        self.assertIn("g-a", all_bulk)

@@ -24,7 +24,7 @@ class IPAUser(models.Model):
         return self.username
 
     @classmethod
-    def from_freeipa(cls, user) -> "IPAUser":
+    def from_freeipa(cls, user) -> IPAUser:
         # `user` is a core.backends.FreeIPAUser
         return cls(
             username=user.username,
@@ -56,7 +56,7 @@ class IPAGroup(models.Model):
         return self.cn
 
     @classmethod
-    def from_freeipa(cls, group) -> "IPAGroup":
+    def from_freeipa(cls, group) -> IPAGroup:
         # `group` is a core.backends.FreeIPAGroup
         return cls(
             cn=group.cn,
@@ -85,7 +85,7 @@ class IPAFASAgreement(models.Model):
         return self.cn
 
     @classmethod
-    def from_freeipa(cls, agreement) -> "IPAFASAgreement":
+    def from_freeipa(cls, agreement) -> IPAFASAgreement:
         # `agreement` is a core.backends.FreeIPAFASAgreement
         # Coerce to concrete types so the Django admin list display doesn't
         # receive MagicMock values from tests or partial stubs.

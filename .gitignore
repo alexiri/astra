@@ -1,3 +1,4 @@
 *.pyc
 __pycache__
 Alex-README.md
+.ruff_cache/

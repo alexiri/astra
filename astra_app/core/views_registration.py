@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import logging
 import datetime
+import logging
 from smtplib import SMTPRecipientsRefused
 from urllib.parse import quote
 
+import post_office.mail
 from django.conf import settings
 from django.contrib import messages
 from django.core import signing
@@ -12,16 +13,13 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-
-import post_office.mail
-
 from python_freeipa import ClientMeta, exceptions
+
+from core.views_utils import _normalize_str
 
 from .backends import FreeIPAUser
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
 from .tokens import make_signed_token, read_signed_token
-from core.views_utils import _normalize_str
-
 
 logger = logging.getLogger(__name__)
 def _stageuser_add(client, username: str, **kwargs):
@@ -55,7 +53,7 @@ def _send_registration_email(request: HttpRequest, *, username: str, email: str,
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
     # Use a stable UTC string for emails.
-    valid_until_utc = valid_until.astimezone(datetime.timezone.utc).strftime("%H:%M")
+    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
 
     post_office.mail.send(
         recipients=[email],
@@ -157,7 +155,7 @@ def confirm(request: HttpRequest) -> HttpResponse:
     except exceptions.NotFound:
         messages.warning(request, "The registration seems to have failed, please try again.")
         return redirect("register")
-    except Exception as e:
+    except Exception:
         logger.exception("Registration confirm failed username=%s", username)
         messages.error(request, "Something went wrong")
         return redirect("register")

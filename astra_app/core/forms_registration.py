@@ -4,7 +4,6 @@ from django import forms
 
 from core.views_utils import _normalize_str
 
-
 _USERNAME_RE = r"^[a-z0-9](?:[a-z0-9-]{3,30})[a-z0-9]$"  # length 5..32, no leading/trailing '-'
 
 

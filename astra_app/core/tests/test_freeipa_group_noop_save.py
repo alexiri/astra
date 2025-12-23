@@ -3,7 +3,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from django.test import TestCase
-
 from python_freeipa import exceptions
 
 from core.backends import FreeIPAGroup

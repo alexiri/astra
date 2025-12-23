@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from functools import lru_cache
 import locale
-import zoneinfo
 import re
+import zoneinfo
+from functools import lru_cache
 from urllib.parse import urlparse
 
+import pyotp
 from django import forms
 
-import pyotp
-
 from core.views_utils import _normalize_str
-
 
 # Noggin-inspired nickname validation (adapted for our simpler fields)
 _IRC_NICK_RE = re.compile(r"^[a-z_\[\]\\^{}|`-][a-z0-9_\[\]\\^{}|`-]*$", re.IGNORECASE)

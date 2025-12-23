@@ -12,7 +12,7 @@ from django.test.utils import override_settings
 )
 class PostOfficeIntegrationTests(TestCase):
     def test_send_mail_creates_queued_email(self):
-        from post_office.models import Email, STATUS
+        from post_office.models import STATUS, Email
 
         send_mail('Subject', 'Body', 'from@example.com', ['to@example.com'])
         email = Email.objects.latest('id')

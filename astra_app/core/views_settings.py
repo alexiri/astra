@@ -4,6 +4,7 @@ import datetime
 import logging
 from urllib.parse import quote
 
+import post_office.mail
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -13,16 +14,12 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.module_loading import import_string
-
-import post_office.mail
-
 from python_freeipa import ClientMeta
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.backends import FreeIPAFASAgreement, FreeIPAUser
 from core.forms_selfservice import EmailsForm, KeysForm, PasswordChangeFreeIPAForm, ProfileForm
 from core.tokens import make_signed_token, read_signed_token
-from core.views_utils import settings_context
 from core.views_utils import (
     _add_change,
     _add_change_list_setattr,
@@ -34,13 +31,13 @@ from core.views_utils import (
     _form_label_for_attr,
     _get_full_user,
     _normalize_str,
-    _split_list_field,
     _split_lines,
+    _split_list_field,
     _update_user_attrs,
     _value_to_csv,
     _value_to_text,
+    settings_context,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +55,7 @@ def _send_email_validation_email(
     ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
-    valid_until_utc = valid_until.astimezone(datetime.timezone.utc).strftime("%H:%M")
+    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
 
     post_office.mail.send(
         recipients=[address],

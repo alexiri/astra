@@ -3,12 +3,13 @@ from __future__ import annotations
 from django.contrib.admin.models import ADDITION, LogEntry
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
-from django.db import DataError
-from django.db import IntegrityError
+from django.db import DataError, IntegrityError
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
 from core.backends import FreeIPAUser
+
+
 class AdminShadowUserLogEntryTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()

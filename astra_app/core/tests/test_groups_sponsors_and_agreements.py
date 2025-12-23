@@ -6,12 +6,11 @@ from unittest.mock import MagicMock, patch
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.http import Http404, HttpResponse
+from django.http import Http404
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core import views_groups, views_settings, views_users
-from core.agreements import AgreementForUser
 from core.backends import FreeIPAOperationFailed
 
 

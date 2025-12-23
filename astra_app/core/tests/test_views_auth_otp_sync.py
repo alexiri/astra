@@ -3,10 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import requests
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
-
-import requests
 
 
 class OTPSyncViewTests(TestCase):

@@ -1,0 +1,30 @@
+# Ruff configuration for this repository.
+# Target: Python 3.14 (project policy).
+
+src = ["astra_app"]
+target-version = "py314"
+line-length = 120
+
+# Keep caches and generated files out of linting.
+extend-exclude = [
+  "**/__pycache__/",
+  "astra_app/core/migrations/",
+]
+
+[lint]
+# Start with a conservative ruleset that still catches real bugs and
+# modernizes syntax.
+select = ["E", "F", "I", "UP"]
+ignore = [
+  # Let formatting/line-wrapping be handled separately.
+  "E501",
+]
+
+[lint.isort]
+known-first-party = ["core", "config"]
+
+[lint.per-file-ignores]
+# Tests intentionally use simple fixtures/mocks that can trip some rules.
+"astra_app/core/tests/**/*.py" = [
+  "E731", # lambda assignment (common in tests)
+]

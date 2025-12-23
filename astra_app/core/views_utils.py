@@ -6,9 +6,8 @@ from typing import Any
 
 from django.conf import settings
 
-from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
 from core.agreements import has_enabled_agreements
-
+from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
 
 logger = logging.getLogger(__name__)
 

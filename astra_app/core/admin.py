@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
-from typing import override
+from typing import Any, override
 from urllib.parse import urlparse
+
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.utils import model_ngettext
-from django.contrib import messages
 from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
@@ -19,9 +18,12 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
 
+from core.agreements import missing_required_agreements_for_user_in_group
+from core.views_utils import _normalize_str
+
 from .backends import (
-    FreeIPAGroup,
     FreeIPAFASAgreement,
+    FreeIPAGroup,
     FreeIPAOperationFailed,
     FreeIPAUser,
     _invalidate_agreement_cache,
@@ -29,8 +31,6 @@ from .backends import (
 )
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import IPAFASAgreement, IPAGroup, IPAUser
-from core.agreements import missing_required_agreements_for_user_in_group
-from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
 
@@ -341,12 +341,13 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
             request,
             self.delete_selected_confirmation_template
             or [
-                "admin/%s/%s/delete_selected_confirmation.html" % (app_label, opts.model_name),
-                "admin/%s/delete_selected_confirmation.html" % app_label,
+                f"admin/{app_label}/{opts.model_name}/delete_selected_confirmation.html",
+                f"admin/{app_label}/delete_selected_confirmation.html",
                 "admin/delete_selected_confirmation.html",
             ],
             context,
         )
+
 
 def _override_post_office_log_admin():
     """Disable manual creation of django-post-office Log rows in admin.

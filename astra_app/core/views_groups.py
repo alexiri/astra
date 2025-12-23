@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import cast
 
-from django.core.paginator import Paginator
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
-from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed, FreeIPAUser
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
+from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed, FreeIPAUser
 from core.views_utils import _normalize_str
 
 

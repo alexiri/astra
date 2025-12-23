@@ -24,8 +24,6 @@ class AdminIPAUserPasswordFieldTests(TestCase):
     def test_admin_user_change_form_hides_password_field(self) -> None:
         username = "alex"
         self._login_as_freeipa_admin(username)
-
-        admin_user = FreeIPAUser(username, {"uid": [username], "memberof_group": ["admins"]})
         target_user = FreeIPAUser(
             username,
             {

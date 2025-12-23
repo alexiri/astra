@@ -26,8 +26,6 @@ class AdminIPAUserGroupMembershipFailureTests(TestCase):
 
     def test_admin_user_add_group_failure_shows_error_and_stays(self) -> None:
         username = "alex"
-        admin_user = FreeIPAUser(username, {"uid": [username], "memberof_group": ["admins"]})
-
         # The object being edited (also alex for simplicity).
         target_user = FreeIPAUser(
             username,

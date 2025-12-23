@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
 import hashlib
-from functools import lru_cache
+import logging
 import threading
 from collections.abc import Callable
-from typing import TypeVar
+from functools import lru_cache
 
 from django.conf import settings
 from django.contrib.auth.backends import BaseBackend
@@ -17,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 _service_client_local = threading.local()
 _viewer_username_local = threading.local()
-
-_T = TypeVar("_T")
 
 
 def _clean_str_list(values: object) -> list[str]:
@@ -255,7 +252,7 @@ def _get_current_viewer_username() -> str | None:
     return None
 
 
-def _with_freeipa_service_client_retry(get_client: Callable[[], ClientMeta], fn: Callable[[ClientMeta], _T]) -> _T:
+def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], fn: Callable[[ClientMeta], T]) -> T:
     """Run a service-account request, retrying once if the session expired.
 
     python-freeipa raises Unauthorized on HTTP 401, which is what we see when
@@ -611,7 +608,7 @@ class FreeIPAUser:
             if user_data is not None:
                 cache.set(cache_key, user_data)
                 return cls(username, user_data)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to get user username=%s", username)
         return None
 
@@ -661,7 +658,7 @@ class FreeIPAUser:
             # New user should appear in lists; invalidate list cache and warm this user's cache.
             _invalidate_users_list_cache()
             return cls.get(username)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to create user username=%s", username)
             raise
 
@@ -736,7 +733,7 @@ class FreeIPAUser:
             )
             _invalidate_user_cache(self.username)
             _invalidate_users_list_cache()
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to delete user username=%s", self.username)
             raise
 
@@ -952,7 +949,7 @@ class FreeIPAGroup:
                 group_data = result['result'][0]
                 cache.set(cache_key, group_data)
                 return cls(cn, group_data)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to get group cn=%s", cn)
         return None
 
@@ -976,7 +973,7 @@ class FreeIPAGroup:
             )
             _invalidate_groups_list_cache()
             return cls.get(cn)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to create group cn=%s", cn)
             raise
 
@@ -1051,7 +1048,7 @@ class FreeIPAGroup:
             )
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to delete group cn=%s", self.cn)
             raise
 
@@ -1078,7 +1075,7 @@ class FreeIPAGroup:
                     "FreeIPA group_add_member reported success but user does not show membership after refresh "
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
                 )
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to add member username=%s group=%s", username, self.cn)
             raise
 
@@ -1186,7 +1183,7 @@ class FreeIPAGroup:
                     "FreeIPA group_remove_member reported success but user still shows membership after refresh "
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
                 )
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to remove member username=%s group=%s", username, self.cn)
             raise
 
@@ -1338,7 +1335,7 @@ class FreeIPAFASAgreement:
         return client._request(method, args or [], params or {})
 
     @classmethod
-    def all(cls) -> list["FreeIPAFASAgreement"]:
+    def all(cls) -> list[FreeIPAFASAgreement]:
         cache_key = _agreements_list_cache_key()
         cached = cache.get(cache_key)
         if cached is not None:
@@ -1398,7 +1395,7 @@ class FreeIPAFASAgreement:
         return None
 
     @classmethod
-    def create(cls, cn: str, *, description: str | None = None) -> "FreeIPAFASAgreement":
+    def create(cls, cn: str, *, description: str | None = None) -> FreeIPAFASAgreement:
         desc = description.strip() if description else ""
         try:
             params: dict[str, object] = {}
@@ -1623,7 +1620,7 @@ class FreeIPAAuthBackend(BaseBackend):
             if request is not None:
                 setattr(request, "_freeipa_auth_error", "Login failed due to a FreeIPA error.")
             return None
-        except Exception as e:
+        except Exception:
             logger.exception("FreeIPA authentication error username=%s", username)
             if request is not None:
                 setattr(request, "_freeipa_auth_error", "Login failed due to an internal error.")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from zoneinfo import ZoneInfo
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -9,12 +10,13 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from zoneinfo import ZoneInfo
-
+from core.agreements import (
+    has_enabled_agreements,
+    list_agreements_for_user,
+    missing_required_agreements_for_user_in_group,
+)
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.agreements import has_enabled_agreements, list_agreements_for_user, missing_required_agreements_for_user_in_group
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
-
 
 logger = logging.getLogger(__name__)
 

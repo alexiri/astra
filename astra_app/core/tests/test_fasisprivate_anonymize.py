@@ -3,11 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import RequestFactory, TestCase
 from django.core.cache import cache
+from django.test import RequestFactory, TestCase
 
-from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
 from core import views_users
+from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
 
 
 class FASIsPrivateAnonymizeTests(TestCase):

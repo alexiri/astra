@@ -1,8 +1,8 @@
-from pathlib import Path
+import datetime
 import os
+from pathlib import Path
 
 import environ
-import datetime
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent

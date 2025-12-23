@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from django.contrib.admin.sites import AdminSite
 from django.test import TestCase
 from django.urls import reverse
 from python_freeipa.exceptions import Denied
-
-from django.contrib.admin.sites import AdminSite
 
 from core.admin import IPAFASAgreementAdmin
 from core.backends import FreeIPAUser
@@ -185,9 +184,12 @@ class AdminFASAgreementTests(TestCase):
         listed2 = MagicMock(cn="test2", description="", enabled=True)
         listed3 = MagicMock(cn="test3", description="", enabled=True)
 
-        f1 = MagicMock(); f1.delete.return_value = None
-        f2 = MagicMock(); f2.delete.return_value = None
-        f3 = MagicMock(); f3.delete.return_value = None
+        f1 = MagicMock()
+        f1.delete.return_value = None
+        f2 = MagicMock()
+        f2.delete.return_value = None
+        f3 = MagicMock()
+        f3.delete.return_value = None
 
         def _fake_get(cn: str):
             return {"test1": f1, "test2": f2, "test3": f3}.get(cn)

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger(__name__)
-
 from .backends import FreeIPAGroup
+
+logger = logging.getLogger(__name__)
 
 
 class _ListBackedQuerySet:
@@ -129,9 +129,6 @@ class _ListBackedQuerySet:
 
     def __getitem__(self, key):
         return self._items[key]
-
-    def distinct(self, *args, **kwargs):
-        return self
 
     def get(self, **kwargs):
         matches = list(self.filter(**kwargs))

@@ -2,11 +2,10 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
+from django_ses.views import SESEventWebhookView
 
 from core.views_auth import FreeIPALoginView, otp_sync, password_expired
 from core.views_health import healthz, readyz
-
-from django_ses.views import SESEventWebhookView
 
 urlpatterns = [
     path('healthz/', healthz, name='healthz'),

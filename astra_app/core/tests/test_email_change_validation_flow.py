@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.conf import settings
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware

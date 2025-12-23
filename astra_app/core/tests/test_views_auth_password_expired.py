@@ -7,7 +7,6 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
-
 from python_freeipa import exceptions
 
 from core.views_auth import password_expired

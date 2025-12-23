@@ -4,26 +4,27 @@ import base64
 import io
 import os
 from base64 import b32encode
+from typing import Any
 
+import pyotp
+import qrcode
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-
-import pyotp
-import qrcode
-
 from python_freeipa import ClientMeta, exceptions
 
 from core.backends import FreeIPAUser
 from core.forms_selfservice import OTPAddForm, OTPConfirmForm, OTPTokenActionForm, OTPTokenRenameForm
 from core.views_utils import _normalize_str, settings_context
 
-
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
 # For maximum compatibility, must be a multiple of 5.
 OTP_KEY_LENGTH = 35
+
+
+type TokenDict = dict[str, Any]
 
 
 @login_required(login_url="/login/")
@@ -38,7 +39,7 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
     add_form = OTPAddForm(request.POST if is_add else None, prefix="add")
     confirm_form = OTPConfirmForm(request.POST if is_confirm else None, prefix="confirm")
 
-    tokens: list[dict] = []
+    tokens: list[TokenDict] = []
     otp_uri: str | None = None
     otp_qr_png_b64: str | None = None
 
@@ -61,11 +62,11 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
 
     # FreeIPA commonly returns attributes as single-item lists; normalize fields
     # we render directly so templates don't display Python list reprs.
-    normalized_tokens: list[dict] = []
+    normalized_tokens: list[TokenDict] = []
     for raw in tokens:
         if not isinstance(raw, dict):
             continue
-        t = dict(raw)
+        t: TokenDict = dict(raw)
 
         description = t.get("description")
         if isinstance(description, list):
@@ -74,7 +75,12 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
 
         token_id = t.get("ipatokenuniqueid")
         if isinstance(token_id, list):
-            t["ipatokenuniqueid"] = [str(v).strip() for v in token_id if str(v).strip()]
+            out: list[str] = []
+            for v in token_id:
+                s = str(v).strip()
+                if s:
+                    out.append(s)
+            t["ipatokenuniqueid"] = out
         elif token_id:
             t["ipatokenuniqueid"] = [str(token_id).strip()]
         else:
@@ -84,7 +90,7 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
 
     tokens = normalized_tokens
 
-    tokens.sort(key=lambda t: (str(t.get("description") or "")).lower())
+    tokens.sort(key=lambda t: str(t.get("description") or "").casefold())
 
     secret: str | None = None
 
