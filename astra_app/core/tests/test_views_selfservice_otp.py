@@ -43,22 +43,58 @@ class SettingsOTPViewTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_settings_otp.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
-                mocked_client.login.return_value = None
-                mocked_client.otptoken_find.return_value = {
-                    "result": [
-                        {"ipatokenuniqueid": ["t2"], "description": "b"},
-                        {"ipatokenuniqueid": ["t1"], "description": "a"},
-                    ]
-                }
+            with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
+                with patch("core.views_settings_otp.ClientMeta", autospec=True) as mocked_client_cls:
+                    mocked_client = mocked_client_cls.return_value
+                    mocked_client.login.return_value = None
+                    mocked_client.otptoken_find.return_value = {
+                        "result": [
+                            {"ipatokenuniqueid": ["t2"], "description": "b"},
+                            {"ipatokenuniqueid": ["t1"], "description": "a"},
+                        ]
+                    }
 
-                response = settings_otp(request)
+                    response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
         tokens = captured["context"]["tokens"]
         self.assertEqual(len(tokens), 2)
         self.assertEqual(tokens[0]["ipatokenuniqueid"][0], "t1")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_get_normalizes_list_description_to_string(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/otp/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user()
+
+        captured: dict[str, object] = {}
+
+        def fake_render(req, template, context):
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
+            with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
+                with patch("core.views_settings_otp.ClientMeta", autospec=True) as mocked_client_cls:
+                    mocked_client = mocked_client_cls.return_value
+                    mocked_client.login.return_value = None
+                    mocked_client.otptoken_find.return_value = {
+                        "result": [
+                            {"ipatokenuniqueid": ["t1"], "description": ["bitwarden alma members test"]},
+                        ]
+                    }
+
+                    response = settings_otp(request)
+
+        self.assertEqual(response.status_code, 200)
+        tokens = captured["context"]["tokens"]
+        self.assertEqual(tokens[0]["description"], "bitwarden alma members test")
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
@@ -94,9 +130,10 @@ class SettingsOTPViewTests(TestCase):
         user_client = SimpleNamespace(login=lambda *a, **k: None)
 
         with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, user_client]):
-                with patch("core.views_settings_otp.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
-                    response = settings_otp(request)
+            with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
+                with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, user_client]):
+                    with patch("core.views_settings_otp.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
+                        response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))
@@ -131,8 +168,9 @@ class SettingsOTPViewTests(TestCase):
         )
 
         # Only service client is required for confirm.
-        with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
-            response = settings_otp(request)
+        with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
+            with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
+                response = settings_otp(request)
 
         self.assertEqual(response.status_code, 302)
         msgs = [m.message for m in get_messages(request)]
@@ -178,8 +216,9 @@ class SettingsOTPViewTests(TestCase):
         )
 
         with patch("core.views_settings_otp.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
-                response = settings_otp(request)
+            with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
+                with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
+                    response = settings_otp(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))

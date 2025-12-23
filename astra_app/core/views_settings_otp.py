@@ -59,10 +59,32 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
     except Exception:
         tokens = []
 
-    try:
-        tokens.sort(key=lambda t: (t.get("description") or "").lower())
-    except Exception:
-        pass
+    # FreeIPA commonly returns attributes as single-item lists; normalize fields
+    # we render directly so templates don't display Python list reprs.
+    normalized_tokens: list[dict] = []
+    for raw in tokens:
+        if not isinstance(raw, dict):
+            continue
+        t = dict(raw)
+
+        description = t.get("description")
+        if isinstance(description, list):
+            description = description[0] if description else ""
+        t["description"] = str(description).strip() if description else ""
+
+        token_id = t.get("ipatokenuniqueid")
+        if isinstance(token_id, list):
+            t["ipatokenuniqueid"] = [str(v).strip() for v in token_id if str(v).strip()]
+        elif token_id:
+            t["ipatokenuniqueid"] = [str(token_id).strip()]
+        else:
+            t["ipatokenuniqueid"] = []
+
+        normalized_tokens.append(t)
+
+    tokens = normalized_tokens
+
+    tokens.sort(key=lambda t: (str(t.get("description") or "")).lower())
 
     secret: str | None = None
 
