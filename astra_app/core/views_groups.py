@@ -35,6 +35,21 @@ def groups(request: HttpRequest) -> HttpResponse:
     groups_filtered = [g for g in groups_list if g.fas_group and _matches_query(g, q)]
     groups_sorted = sorted(groups_filtered, key=_sort_key)
 
+    for g in groups_sorted:
+        member_count = 0
+        if hasattr(g, "member_count_recursive"):
+            try:
+                fn = getattr(g, "member_count_recursive")
+                member_count = int(fn() if callable(fn) else fn)
+            except Exception:
+                member_count = 0
+        else:
+            try:
+                member_count = len(getattr(g, "members", []) or [])
+            except Exception:
+                member_count = 0
+        setattr(g, "member_count", member_count)
+
     paginator = Paginator(groups_sorted, 30)
     page_obj = paginator.get_page(page_number)
 
@@ -79,12 +94,33 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     q = _normalize_str(request.GET.get("q"))
 
+    member_count = 0
+    if hasattr(group, "member_count_recursive"):
+        try:
+            fn = getattr(group, "member_count_recursive")
+            member_count = int(fn() if callable(fn) else fn)
+        except Exception:
+            member_count = 0
+    else:
+        try:
+            member_count = len(getattr(group, "members", []) or [])
+        except Exception:
+            member_count = 0
+
     username = _normalize_str(request.user.get_username())
     sponsors = set(group.sponsors)
+    sponsor_groups = set(getattr(group, "sponsor_groups", []) or [])
     members = set(group.members)
-    is_sponsor = username in sponsors
+    user_groups: set[str] = set()
+    if isinstance(request.user, FreeIPAUser):
+        user_groups = set(request.user.groups_list)
+
+    sponsor_groups_lower = {g.lower() for g in sponsor_groups}
+    user_groups_lower = {g.lower() for g in user_groups}
+    is_sponsor = (username in sponsors) or bool(sponsor_groups_lower & user_groups_lower)
     is_member = username in members
 
+    sponsor_groups_list = sorted(sponsor_groups, key=lambda s: s.lower())
     sponsors_list = sorted(sponsors, key=lambda s: s.lower())
 
     required_agreement_cns = required_agreements_for_group(cn)
@@ -185,10 +221,12 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
         "core/group_detail.html",
         {
             "group": group,
+            "member_count": member_count,
             "q": q,
             "is_member": is_member,
             "is_sponsor": is_sponsor,
             "sponsors_list": sponsors_list,
+            "sponsor_groups_list": sponsor_groups_list,
             "required_agreements": required_agreements,
             "unsigned_usernames": sorted(unsigned_usernames, key=lambda s: s.lower()),
         },

@@ -8,6 +8,7 @@ class IPAUser(models.Model):
     username = models.CharField(max_length=255, primary_key=True)
     first_name = models.CharField(max_length=255, blank=True, default="")
     last_name = models.CharField(max_length=255, blank=True, default="")
+    displayname = models.CharField(max_length=255, blank=True, default="", verbose_name="Display name")
     email = models.EmailField(blank=True, default="")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -29,6 +30,7 @@ class IPAUser(models.Model):
             username=user.username,
             first_name=user.first_name or "",
             last_name=user.last_name or "",
+            displayname=user.displayname or "",
             email=user.email or "",
             is_active=bool(getattr(user, "is_active", True)),
             is_staff=bool(getattr(user, "is_staff", False)),

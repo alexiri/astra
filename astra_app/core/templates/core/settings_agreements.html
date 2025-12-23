@@ -17,12 +17,6 @@
         {% if forloop.first %}
           <div class="table-responsive">
             <table class="table table-sm table-hover mb-0">
-              <thead>
-                <tr>
-                  <th>Agreement</th>
-                  <th class="text-right" style="width: 1%;">Actions</th>
-                </tr>
-              </thead>
               <tbody>
         {% endif %}
 
@@ -33,6 +27,8 @@
                 <strong>{{ a.cn }}</strong>
                 {% if not a.signed and a.groups %}
                   <span class="badge badge-danger ml-2">Not signed</span>
+                {% elif a.signed %}
+                  <span class="badge badge-success ml-2">Signed</span>
                 {% endif %}
               </div>
 

@@ -18,6 +18,8 @@
           <h3 class="h5 mb-1">{{ agreement.cn }}</h3>
           {% if not signed and agreement.groups %}
             <span class="badge badge-danger">Not signed</span>
+          {% elif signed %}
+            <span class="badge badge-success">Signed</span>
           {% endif %}
 
           {% if not signed and agreement.groups %}

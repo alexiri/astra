@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from functools import lru_cache
 import threading
 from collections.abc import Callable
@@ -312,7 +313,12 @@ def _invalidate_group_cache(cn: str) -> None:
 
 
 def _agreement_cache_key(cn: str) -> str:
-    return f"freeipa_fasagreement_{cn}"
+    # Agreement CNs can contain spaces and other characters that are invalid for
+    # some cache backends (notably memcached). Use a stable hash so keys are
+    # always safe and short.
+    normalized = cn.strip()
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+    return f"freeipa_fasagreement_{digest}"
 
 
 def _invalidate_agreement_cache(cn: str) -> None:
@@ -394,6 +400,11 @@ class FreeIPAUser:
         # Map FreeIPA attributes to Django attributes
         self.first_name = _first('givenname') or ""
         self.last_name = _first('sn') or ""
+        # Noggin precedence for display name:
+        # displayname > gecos > cn (common name)
+        self.commonname = _first("cn") or ""
+        self.displayname = _first("displayname") or ""
+        self.gecos = _first("gecos") or ""
         # Some upstream template tags (e.g. django-avatar gravatar provider)
         # assume the email attribute is always a string and call .encode().
         # FreeIPA users may not have a mail attribute, so normalize to "".
@@ -419,7 +430,9 @@ class FreeIPAUser:
         self.is_active = not bool(nsaccountlock)
 
         # Permissions/Groups logic
-        self.groups_list = _clean_str_list(self._user_data.get('memberof_group', []))
+        self.direct_groups_list = _clean_str_list(self._user_data.get("memberof_group", []))
+        self.indirect_groups_list = _clean_str_list(self._user_data.get("memberofindirect_group", []))
+        self.groups_list = _clean_str_list(self.direct_groups_list + self.indirect_groups_list)
 
         # Simple mapping for staff/superuser based on groups
         # Configure these group names in settings
@@ -458,6 +471,18 @@ class FreeIPAUser:
         return self.username
 
     def get_full_name(self):
+        displayname = str(self.displayname or "").strip()
+        if displayname:
+            return displayname
+
+        gecos = str(self.gecos or "").strip()
+        if gecos:
+            return gecos
+
+        commonname = str(self.commonname or "").strip()
+        if commonname:
+            return commonname
+
         full_name = f"{self.first_name or ''} {self.last_name or ''}".strip()
         return full_name or self.username
 
@@ -479,6 +504,9 @@ class FreeIPAUser:
 
         self.first_name = ""
         self.last_name = ""
+        self.displayname = ""
+        self.gecos = ""
+        self.commonname = ""
 
         self._user_data = {
             "uid": [self.username],
@@ -599,11 +627,18 @@ class FreeIPAUser:
             if not givenname or not sn:
                 raise ValueError('FreeIPA user creation requires givenname/first_name and sn/last_name')
 
-            cn = kwargs.pop('cn', None) or kwargs.pop('displayname', None)
-            if not cn:
-                cn = f"{givenname} {sn}".strip() or username
+            # Keep cn/displayname/gecos in sync. Intentionally do not allow
+            # per-field overrides (admin UX treats display name as derived).
+            cn = f"{givenname or ''} {sn or ''}"
+
+            initials = f"{(str(givenname).strip()[:1] or '').upper()}{(str(sn).strip()[:1] or '').upper()}"
 
             ipa_kwargs = {}
+
+            ipa_kwargs["o_displayname"] = cn
+            ipa_kwargs["o_gecos"] = cn
+            if initials:
+                ipa_kwargs["o_initials"] = initials
 
             mail = kwargs.pop('mail', None) or kwargs.pop('email', None)
             if mail:
@@ -657,9 +692,15 @@ class FreeIPAUser:
         if hasattr(self, 'is_active'):
             updates['o_nsaccountlock'] = (not bool(self.is_active))
 
-        cn = f"{self.first_name or ''} {self.last_name or ''}".strip()
-        if cn:
-            updates['o_cn'] = cn
+        # Always keep cn/displayname/gecos in sync.
+        desired_name = f"{self.first_name or ''} {self.last_name or ''}"
+        updates["o_cn"] = desired_name
+        updates["o_gecos"] = desired_name
+        updates["o_displayname"] = desired_name
+
+        initials = f"{(str(self.first_name).strip()[:1] or '').upper()}{(str(self.last_name).strip()[:1] or '').upper()}"
+        if initials:
+            updates["o_initials"] = initials
 
         try:
             if updates:
@@ -806,12 +847,18 @@ class FreeIPAGroup:
 
         self.members = _clean_str_list(self._group_data.get('member_user', []))
 
+        # Nested groups.
+        self.member_groups = _clean_str_list(self._group_data.get('member_group', []))
+
         sponsors = None
         for key in ("membermanager_user", "membermanager", "membermanageruser_user"):
             if key in self._group_data:
                 sponsors = self._group_data.get(key)
                 break
         self.sponsors = _clean_str_list(sponsors)
+
+        # Nested sponsor groups.
+        self.sponsor_groups = _clean_str_list(self._group_data.get("membermanager_group", []))
 
         # FAS extension attributes
         fas_url = self._group_data.get('fasurl', None)
@@ -989,6 +1036,13 @@ class FreeIPAGroup:
                 # Invalidate caches for affected users
                 for username in self.members:
                     _invalidate_user_cache(username)
+
+            if self.member_groups:
+                res = _with_freeipa_service_client_retry(
+                    self.get_client,
+                    lambda client: client.group_remove_member(self.cn, o_group=self.member_groups),
+                )
+                _raise_if_freeipa_failed(res, action="group_remove_member", subject=f"group={self.cn}")
             
             # Now delete the group
             _with_freeipa_service_client_retry(
@@ -1068,6 +1122,48 @@ class FreeIPAGroup:
             logger.exception("Failed to remove sponsor username=%s group=%s", username, self.cn)
             raise
 
+    def add_sponsor_group(self, group_cn: str) -> None:
+        group_cn = str(group_cn).strip()
+        if not group_cn:
+            return
+        try:
+            def _do(client: ClientMeta):
+                return self._rpc(client, "group_add_member_manager", [self.cn], {"group": [group_cn]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(
+                res,
+                action="group_add_member_manager",
+                subject=f"group={self.cn} sponsor_group={group_cn}",
+            )
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+        except Exception:
+            logger.exception("Failed to add sponsor group parent=%s sponsor_group=%s", self.cn, group_cn)
+            raise
+
+    def remove_sponsor_group(self, group_cn: str) -> None:
+        group_cn = str(group_cn).strip()
+        if not group_cn:
+            return
+        try:
+            def _do(client: ClientMeta):
+                return self._rpc(client, "group_remove_member_manager", [self.cn], {"group": [group_cn]})
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(
+                res,
+                action="group_remove_member_manager",
+                subject=f"group={self.cn} sponsor_group={group_cn}",
+            )
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+        except Exception:
+            logger.exception("Failed to remove sponsor group parent=%s sponsor_group=%s", self.cn, group_cn)
+            raise
+
     def remove_member(self, username):
         try:
             res = _with_freeipa_service_client_retry(
@@ -1093,6 +1189,83 @@ class FreeIPAGroup:
         except Exception as e:
             logger.exception("Failed to remove member username=%s group=%s", username, self.cn)
             raise
+
+    def add_member_group(self, group_cn: str) -> None:
+        group_cn = str(group_cn).strip()
+        if not group_cn:
+            return
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return client.group_add_member(self.cn, o_group=[group_cn])
+                except TypeError:
+                    return client.group_add_member(self.cn, group=[group_cn])
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="group_add_member", subject=f"group={self.cn} group_member={group_cn}")
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+            self._recursive_member_usernames_cache = None
+        except Exception:
+            logger.exception("Failed to add member group parent=%s child=%s", self.cn, group_cn)
+            raise
+
+    def remove_member_group(self, group_cn: str) -> None:
+        group_cn = str(group_cn).strip()
+        if not group_cn:
+            return
+        try:
+            def _do(client: ClientMeta):
+                try:
+                    return client.group_remove_member(self.cn, o_group=[group_cn])
+                except TypeError:
+                    return client.group_remove_member(self.cn, group=[group_cn])
+
+            res = _with_freeipa_service_client_retry(self.get_client, _do)
+            _raise_if_freeipa_failed(res, action="group_remove_member", subject=f"group={self.cn} group_member={group_cn}")
+            _invalidate_group_cache(self.cn)
+            _invalidate_groups_list_cache()
+            FreeIPAGroup.get(self.cn)
+            self._recursive_member_usernames_cache = None
+        except Exception:
+            logger.exception("Failed to remove member group parent=%s child=%s", self.cn, group_cn)
+            raise
+
+    def member_usernames_recursive(self) -> set[str]:
+        cached = getattr(self, "_recursive_member_usernames_cache", None)
+        if isinstance(cached, set):
+            return set(cached)
+        users = self._member_usernames_recursive(visited=set())
+        self._recursive_member_usernames_cache = set(users)
+        return users
+
+    def _member_usernames_recursive(self, *, visited: set[str]) -> set[str]:
+        cn = str(self.cn or "").strip()
+        key = cn.lower()
+        if key and key in visited:
+            return set()
+        if key:
+            visited.add(key)
+
+        users: set[str] = set(self.members)
+        for child_cn in sorted(set(self.member_groups), key=str.lower):
+            child = FreeIPAGroup.get(child_cn)
+            if child is None:
+                continue
+            try:
+                users |= child._member_usernames_recursive(visited=visited)
+            except Exception:
+                # Best-effort: ignore broken nested groups.
+                logger.exception("Failed to expand nested group members parent=%s child=%s", self.cn, child_cn)
+                continue
+        return users
+
+    def member_count_recursive(self) -> int:
+        cached = getattr(self, "_recursive_member_usernames_cache", None)
+        if isinstance(cached, set):
+            return len(cached)
+        return len(self.member_usernames_recursive())
 
 
 class FreeIPAFASAgreement:

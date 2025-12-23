@@ -62,6 +62,10 @@ def _normalize_members(members_raw: object) -> list[str]:
     return [str(members_raw).strip()] if str(members_raw).strip() else []
 
 
+def _normalize_groups(groups_raw: object) -> list[str]:
+    return _normalize_members(groups_raw)
+
+
 @register.simple_tag(takes_context=True, name="user_grid")
 def user_grid(context: Context, **kwargs: Any) -> str:
     request = context.get("request")
@@ -108,17 +112,28 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
     usernames_page: list[str] | None = None
     users_page: list[object] | None = None
+    items_page: list[dict[str, str]] | None = None
 
     if group_obj is not None:
-        members = _normalize_members(group_obj.members)
+        member_groups_raw = cast(Any, group_obj).member_groups if hasattr(group_obj, "member_groups") else []
+        member_groups = _normalize_groups(member_groups_raw)
+        members = _normalize_members(cast(Any, group_obj).members)
+
         if q:
             q_lower = q.lower()
+            member_groups = [g for g in member_groups if q_lower in g.lower()]
             members = [m for m in members if q_lower in m.lower()]
-        members_sorted = sorted(members, key=lambda s: s.lower())
 
-        paginator = Paginator(members_sorted, per_page)
+        groups_sorted = sorted(member_groups, key=lambda s: s.lower())
+        users_sorted = sorted(members, key=lambda s: s.lower())
+
+        items_all: list[dict[str, str]] = [
+            {"kind": "group", "cn": cn} for cn in groups_sorted
+        ] + [{"kind": "user", "username": u} for u in users_sorted]
+
+        paginator = Paginator(items_all, per_page)
         page_obj = paginator.get_page(page_number)
-        usernames_page = cast(list[str], page_obj.object_list)
+        items_page = cast(list[dict[str, str]], page_obj.object_list)
 
         empty_label = "No members found."
     else:
@@ -150,25 +165,26 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
     page_numbers, show_first, show_last = _pagination_window(paginator, page_obj.number)
 
-    html = render_to_string(
-        "core/_user_grid.html",
-        {
-            "title": title,
-            "empty_label": empty_label,
-            "base_query": base_query,
-            "page_url_prefix": page_url_prefix,
-            "paginator": paginator,
-            "page_obj": page_obj,
-            "is_paginated": paginator.num_pages > 1,
-            "page_numbers": page_numbers,
-            "show_first": show_first,
-            "show_last": show_last,
-            "users": users_page,
-            "usernames": usernames_page,
-            "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
-            "member_manage_group_cn": member_manage_group_cn,
-            "muted_usernames": muted_usernames,
-        },
-        request=http_request,
-    )
+    template_name = "core/_user_grid.html" if group_obj is None else "core/_member_grid.html"
+    template_context: dict[str, object] = {
+        "title": title,
+        "empty_label": empty_label,
+        "base_query": base_query,
+        "page_url_prefix": page_url_prefix,
+        "paginator": paginator,
+        "page_obj": page_obj,
+        "is_paginated": paginator.num_pages > 1,
+        "page_numbers": page_numbers,
+        "show_first": show_first,
+        "show_last": show_last,
+        "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
+        "member_manage_group_cn": member_manage_group_cn,
+        "muted_usernames": muted_usernames,
+    }
+    if group_obj is None:
+        template_context.update({"users": users_page, "usernames": usernames_page})
+    else:
+        template_context.update({"items": items_page})
+
+    html = render_to_string(template_name, template_context, request=http_request)
     return mark_safe(html)

@@ -51,7 +51,7 @@
             <td><a href="{% url 'group-detail' g.cn %}">{{ g.cn }}</a></td>
             <td class="text-muted">{% if g.description %}{{ g.description }}{% endif %}</td>
             <td class="text-right">
-              <span class="badge badge-secondary">{{ g.members|length }}</span>
+              <span class="badge badge-secondary">{{ g.member_count }}</span>
             </td>
           </tr>
         {% empty %}

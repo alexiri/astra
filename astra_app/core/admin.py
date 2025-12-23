@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 from typing import override
+from urllib.parse import urlparse
 from django import forms
 from django.contrib import admin
 from django.contrib.admin import helpers
@@ -432,12 +433,7 @@ def _override_django_ses_admin():
 _override_django_ses_admin()
 
 
-class IPAUserForm(forms.ModelForm):
-    password = forms.CharField(
-        required=False,
-        widget=forms.PasswordInput(render_value=False),
-        help_text="Set only when creating a user.",
-    )
+class IPAUserBaseForm(forms.ModelForm):
     groups = forms.MultipleChoiceField(
         required=False,
         widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 12}),
@@ -470,7 +466,7 @@ class IPAUserForm(forms.ModelForm):
                 self.initial.setdefault("last_name", freeipa.last_name or "")
                 self.initial.setdefault("email", freeipa.email or "")
                 self.initial.setdefault("is_active", freeipa.is_active)
-                current = sorted(freeipa.groups_list)
+                current = sorted(freeipa.direct_groups_list)
                 # If the server returns groups outside our enumerated list,
                 # keep them selectable so we don't drop memberships on save.
                 missing = [g for g in current if g not in dict(self.fields["groups"].choices)]
@@ -484,6 +480,18 @@ class IPAUserForm(forms.ModelForm):
         return
 
 
+class IPAUserAddForm(IPAUserBaseForm):
+    password = forms.CharField(
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Set only when creating a user.",
+    )
+
+
+class IPAUserChangeForm(IPAUserBaseForm):
+    pass
+
+
 class IPAGroupForm(forms.ModelForm):
     members = forms.MultipleChoiceField(
         required=False,
@@ -495,26 +503,41 @@ class IPAGroupForm(forms.ModelForm):
         widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
         help_text="Select the users that should be sponsors (memberManager) of this group.",
     )
+    member_groups = forms.MultipleChoiceField(
+        required=False,
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        help_text="Select the groups that should be nested members of this group.",
+        label="Member groups",
+    )
+    sponsor_groups = forms.MultipleChoiceField(
+        required=False,
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        help_text="Select the groups that should be sponsors (memberManager) of this group.",
+        label="Sponsor groups",
+    )
     fas_url = forms.CharField(
         required=False,
         label="FAS URL",
         help_text="Fedora Account System URL for this group",
+        widget=forms.URLInput(attrs={"placeholder": "https://…"}),
     )
     fas_mailing_list = forms.CharField(
         required=False,
         label="FAS Mailing List",
         help_text="Fedora Account System mailing list for this group",
+        widget=forms.EmailInput(attrs={"placeholder": "group@lists.example.org"}),
     )
     fas_irc_channels = forms.CharField(
         required=False,
         widget=forms.Textarea(attrs={"rows": 3}),
-        help_text="One IRC channel per line",
+        help_text="One per line (or comma-separated).",
         label="FAS IRC Channels",
     )
     fas_discussion_url = forms.CharField(
         required=False,
         label="FAS Discussion URL",
         help_text="Fedora Account System discussion URL for this group",
+        widget=forms.URLInput(attrs={"placeholder": "https://…"}),
     )
 
     fas_group = forms.BooleanField(
@@ -538,6 +561,11 @@ class IPAGroupForm(forms.ModelForm):
         self.fields["members"].choices = [(u, u) for u in usernames]
         self.fields["sponsors"].choices = [(u, u) for u in usernames]
 
+        groups = FreeIPAGroup.all()
+        group_names = sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
+        self.fields["member_groups"].choices = [(g, g) for g in group_names]
+        self.fields["sponsor_groups"].choices = [(g, g) for g in group_names]
+
         # Group name is immutable in FreeIPA.
         if self.instance and getattr(self.instance, "cn", None):
             self.fields["cn"].disabled = True
@@ -559,6 +587,18 @@ class IPAGroupForm(forms.ModelForm):
                 if missing_sponsors:
                     self.fields["sponsors"].choices = [(u, u) for u in (usernames + missing_sponsors)]
                 self.initial.setdefault("sponsors", current_sponsors)
+
+                current_member_groups = sorted(getattr(freeipa, "member_groups", []) or [])
+                missing_groups = [g for g in current_member_groups if g not in dict(self.fields["member_groups"].choices)]
+                if missing_groups:
+                    self.fields["member_groups"].choices = [(g, g) for g in (group_names + missing_groups)]
+                self.initial.setdefault("member_groups", current_member_groups)
+
+                current_sponsor_groups = sorted(getattr(freeipa, "sponsor_groups", []) or [])
+                missing_sponsor_groups = [g for g in current_sponsor_groups if g not in dict(self.fields["sponsor_groups"].choices)]
+                if missing_sponsor_groups:
+                    self.fields["sponsor_groups"].choices = [(g, g) for g in (group_names + missing_sponsor_groups)]
+                self.initial.setdefault("sponsor_groups", current_sponsor_groups)
                 self.initial.setdefault("fas_url", freeipa.fas_url or "")
                 self.initial.setdefault("fas_mailing_list", freeipa.fas_mailing_list or "")
                 self.initial.setdefault("fas_irc_channels", "\n".join(sorted(freeipa.fas_irc_channels)))
@@ -571,6 +611,65 @@ class IPAGroupForm(forms.ModelForm):
     def validate_unique(self):
         # No DB; uniqueness is enforced by FreeIPA.
         return
+
+    @staticmethod
+    def _split_list_field(value: str) -> list[str]:
+        out: list[str] = []
+        for raw_line in (value or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            for part in line.split(","):
+                p = part.strip()
+                if p:
+                    out.append(p)
+        return out
+
+    @staticmethod
+    def _validate_http_url(value: str, *, field_label: str) -> str:
+        v = (value or "").strip()
+        if not v:
+            return ""
+        if len(v) > 255:
+            raise forms.ValidationError(f"Invalid {field_label}: must be at most 255 characters")
+
+        parsed = urlparse(v)
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in {"http", "https"}:
+            raise forms.ValidationError(f"Invalid {field_label}: URL must start with http:// or https://")
+        if not parsed.netloc:
+            raise forms.ValidationError(f"Invalid {field_label}: empty host name")
+        return v
+
+    def clean_fas_url(self) -> str:
+        return self._validate_http_url(self.cleaned_data.get("fas_url", ""), field_label="FAS URL")
+
+    def clean_fas_discussion_url(self) -> str:
+        return self._validate_http_url(
+            self.cleaned_data.get("fas_discussion_url", ""),
+            field_label="FAS Discussion URL",
+        )
+
+    def clean_fas_mailing_list(self) -> str:
+        v = (self.cleaned_data.get("fas_mailing_list") or "").strip()
+        if not v:
+            return ""
+
+        return forms.EmailField(required=False).clean(v)
+
+    def clean_fas_irc_channels(self) -> str:
+        raw = self.cleaned_data.get("fas_irc_channels") or ""
+        channels = []
+        for ch in self._split_list_field(raw):
+            if len(ch) > 64:
+                raise forms.ValidationError("Invalid FAS IRC Channels: each channel must be at most 64 characters")
+            if not ch.startswith("#"):
+                raise forms.ValidationError("Invalid FAS IRC Channels: channels must start with '#'")
+            channels.append(ch)
+
+        # Keep stable ordering for diffs.
+        deduped = sorted(set(channels), key=str.lower)
+        return "\n".join(deduped)
 
 
 class IPAFASAgreementForm(forms.ModelForm):
@@ -648,12 +747,18 @@ class IPAFASAgreementForm(forms.ModelForm):
 
 @admin.register(IPAUser)
 class IPAUserAdmin(FreeIPAModelAdmin):
-    form = IPAUserForm
+    form = IPAUserChangeForm
     freeipa_backend = FreeIPAUser
-    list_display = ("username", "first_name", "last_name", "email", "is_active", "is_staff")
+    list_display = ("username", "displayname", "email", "is_active", "is_staff")
     ordering = ("username",)
-    search_fields = ("username", "first_name", "last_name", "email")
+    search_fields = ("username", "displayname", "first_name", "last_name", "email")
     readonly_fields = ()
+
+    @override
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        defaults: dict[str, Any] = {"form": IPAUserChangeForm if obj else IPAUserAddForm}
+        defaults.update(kwargs)
+        return super().get_form(request, obj=obj, change=change, **defaults)
 
     @override
     def save_model(self, request, obj, form, change):
@@ -682,7 +787,7 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             freeipa.is_active = bool(form.cleaned_data.get("is_active"))
             freeipa.save()
 
-        current_groups = set(freeipa.groups_list)
+        current_groups = set(freeipa.direct_groups_list)
         for g in sorted(desired_groups - current_groups):
             missing = missing_required_agreements_for_user_in_group(username, g)
             if missing:
@@ -709,6 +814,8 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
 
         desired_members = set(form.cleaned_data.get("members") or [])
         desired_sponsors = set(form.cleaned_data.get("sponsors") or [])
+        desired_member_groups = set(form.cleaned_data.get("member_groups") or [])
+        desired_sponsor_groups = set(form.cleaned_data.get("sponsor_groups") or [])
         description = form.cleaned_data.get("description") or ""
         fas_url = form.cleaned_data.get("fas_url") or ""
         fas_mailing_list = form.cleaned_data.get("fas_mailing_list") or ""
@@ -785,6 +892,18 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
             freeipa.add_sponsor(u)
         for u in sorted(current_sponsors - desired_sponsors):
             freeipa.remove_sponsor(u)
+
+        current_sponsor_groups = set(getattr(freeipa, "sponsor_groups", []) or [])
+        for group_cn in sorted(desired_sponsor_groups - current_sponsor_groups):
+            freeipa.add_sponsor_group(group_cn)
+        for group_cn in sorted(current_sponsor_groups - desired_sponsor_groups):
+            freeipa.remove_sponsor_group(group_cn)
+
+        current_member_groups = set(getattr(freeipa, "member_groups", []) or [])
+        for group_cn in sorted(desired_member_groups - current_member_groups):
+            freeipa.add_member_group(group_cn)
+        for group_cn in sorted(current_member_groups - desired_member_groups):
+            freeipa.remove_member_group(group_cn)
 
 @admin.register(IPAFASAgreement)
 class IPAFASAgreementAdmin(FreeIPAModelAdmin):

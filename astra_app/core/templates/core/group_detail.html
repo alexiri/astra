@@ -2,6 +2,7 @@
 
 {% load core_user_grid %}
 {% load core_user_widget %}
+{% load core_group_widget %}
 
 {% block title %}Group {{ group.cn }}{% endblock %}
 
@@ -9,7 +10,7 @@
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h1 class="m-0">
       Group: {{ group.cn }}
-      <small class="text-muted">({{ group.members|length }} members)</small>
+      <small class="text-muted">({{ member_count }} members)</small>
     </h1>
 
     {% if is_member %}
@@ -31,77 +32,68 @@
         <div class="card-header">
           <h3 class="card-title">Group info</h3>
         </div>
-        <div class="card-body p-0">
-          <table class="table">
-            <tbody>
-              <tr>
-                <th style="width: 180px;">Description</th>
-                <td>{% if group.description %}{{ group.description }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-              </tr>
-              <tr>
-                <th>URL</th>
-                <td>
-                  {% if group.fas_url %}
-                    <a href="{{ group.fas_url }}" rel="noopener" target="_blank">{{ group.fas_url }}</a>
-                  {% else %}
-                    <span class="text-muted">—</span>
-                  {% endif %}
-                </td>
-              </tr>
-              <tr>
-                <th>Mailing list</th>
-                <td>
-                  {% if group.fas_mailing_list %}
-                    <a href="mailto:{{ group.fas_mailing_list }}">{{ group.fas_mailing_list }}</a>
-                  {% else %}
-                    <span class="text-muted">—</span>
-                  {% endif %}
-                </td>
-              </tr>
-              <tr>
-                <th>IRC channels</th>
-                <td>
-                  {% for ch in group.fas_irc_channels %}
-                    <span class="badge badge-secondary">{{ ch }}</span>
-                  {% empty %}
-                    <span class="text-muted">—</span>
-                  {% endfor %}
-                </td>
-              </tr>
-              <tr>
-                <th>Discussion URL</th>
-                <td>
-                  {% if group.fas_discussion_url %}
-                    <a href="{{ group.fas_discussion_url }}" rel="noopener" target="_blank">{{ group.fas_discussion_url }}</a>
-                  {% else %}
-                    <span class="text-muted">—</span>
-                  {% endif %}
-                </td>
-              </tr>
+        <ul class="list-group list-group-flush">
+          {% if group.description %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Description"><i class="fas fa-align-left"></i> Description</strong>
+              <div class="profile-attr-value text-end">{{ group.description }}</div>
+            </li>
+          {% endif %}
 
-              <tr>
-                <th>Required agreements</th>
-                <td>
-                  {% for a in required_agreements %}
-                    {% if a.signed %}
-                      <span class="badge badge-success">{{ a.cn }} (Signed)</span>
-                    {% else %}
-                      <a class="badge badge-warning" href="{{ a.detail_url }}">{{ a.cn }} (Unsigned)</a>
-                    {% endif %}
+          {% if group.fas_url %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="URL"><i class="fas fa-link"></i> URL</strong>
+              <div class="profile-attr-value text-end"><a href="{{ group.fas_url }}" rel="noopener" target="_blank">{{ group.fas_url }}</a></div>
+            </li>
+          {% endif %}
 
-                    {% if forloop.last %}
-                      <div class="small text-muted mt-1">
-                        Sign agreements in <a href="{% url 'settings-agreements' %}">Settings → Agreements</a>.
-                      </div>
-                    {% endif %}
-                  {% empty %}
-                    <span class="text-muted">—</span>
-                  {% endfor %}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+          {% if group.fas_mailing_list %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Mailing list"><i class="fas fa-envelope"></i> Mailing list</strong>
+              <div class="profile-attr-value text-end"><a href="mailto:{{ group.fas_mailing_list }}">{{ group.fas_mailing_list }}</a></div>
+            </li>
+          {% endif %}
+
+          {% if group.fas_irc_channels %}
+            <li class="list-group-item d-flex justify-content-between">
+              <strong class="profile-attr-label" title="IRC channels"><i class="fas fa-comments"></i> IRC channels</strong>
+              <div class="profile-attr-value text-end">
+                {% for ch in group.fas_irc_channels %}
+                  <div class="mb-0 text-monospace"><span class="badge badge-secondary">{{ ch }}</span></div>
+                {% endfor %}
+              </div>
+            </li>
+          {% endif %}
+
+          {% if group.fas_discussion_url %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Discussion URL"><i class="far fa-comment-dots"></i> Discussion</strong>
+              <div class="profile-attr-value text-end"><a href="{{ group.fas_discussion_url }}" rel="noopener" target="_blank">{{ group.fas_discussion_url }}</a></div>
+            </li>
+          {% endif %}
+
+          {% if required_agreements %}
+            <li class="list-group-item d-flex justify-content-between">
+              <strong class="profile-attr-label" title="Required agreements"><i class="fas fa-file-signature"></i> Agreements</strong>
+              <div class="profile-attr-value text-end">
+                {% for a in required_agreements %}
+                  {% if a.signed %}
+                    <div class="mb-1"><span class="badge badge-success">{{ a.cn }} (Signed)</span></div>
+                  {% else %}
+                    <div class="mb-1"><a class="badge badge-warning" href="{{ a.detail_url }}">{{ a.cn }} (Unsigned)</a></div>
+                  {% endif %}
+                {% endfor %}
+                <div class="small text-muted mt-1">
+                  Sign agreements in <a href="{% url 'settings-agreements' %}">Settings → Agreements</a>.
+                </div>
+              </div>
+            </li>
+          {% endif %}
+
+          {% if not group.description and not group.fas_url and not group.fas_mailing_list and not group.fas_irc_channels and not group.fas_discussion_url and not required_agreements %}
+            <li class="list-group-item text-muted text-center py-4">No group info available.</li>
+          {% endif %}
+        </ul>
       </div>
     </div>
 
@@ -146,26 +138,32 @@
     {% endif %}
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title">Sponsors</h3>
-    </div>
-    <div class="card-body">
-      {% for username in sponsors_list %}
-        {% if forloop.first %}<div class="row">{% endif %}
-        <div class="col-12 col-md-6 col-lg-4 col-xl-3">
-          {% if unsigned_usernames and username in unsigned_usernames %}
-            {% user username class="text-muted" style="opacity:0.55;" %}
-          {% else %}
-            {% user username %}
-          {% endif %}
+  {% if sponsor_groups_list or sponsors_list %}
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Sponsors</h3>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for cn in sponsor_groups_list %}
+            <div class="col-12 col-md-6 col-lg-4 col-xl-3">
+              {% group cn %}
+            </div>
+          {% endfor %}
+
+          {% for username in sponsors_list %}
+            <div class="col-12 col-md-6 col-lg-4 col-xl-3">
+              {% if unsigned_usernames and username in unsigned_usernames %}
+                {% user username class="text-muted" style="opacity:0.55;" %}
+              {% else %}
+                {% user username %}
+              {% endif %}
+            </div>
+          {% endfor %}
         </div>
-        {% if forloop.last %}</div>{% endif %}
-      {% empty %}
-        <div class="text-muted">No sponsors found.</div>
-      {% endfor %}
+      </div>
     </div>
-  </div>
+  {% endif %}
 
   <div class="card">
     <div class="card-header">

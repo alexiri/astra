@@ -95,6 +95,24 @@ def _update_user_attrs(
     setattrs = list(setattrs or [])
     delattrs = list(delattrs or [])
 
+    # Keep FreeIPA's name-related fields synchronized whenever profile updates
+    # touch givenname/sn. Self-service settings use `user_mod` directly (not
+    # FreeIPAUser.save), so this is the central enforcement point.
+    if "o_givenname" in direct_updates or "o_sn" in direct_updates:
+        existing = FreeIPAUser.get(username)
+        current_first = existing.first_name if existing is not None else ""
+        current_last = existing.last_name if existing is not None else ""
+        new_first = str(direct_updates.get("o_givenname", current_first) or "")
+        new_last = str(direct_updates.get("o_sn", current_last) or "")
+        derived = f"{new_first or ''} {new_last or ''}"
+        direct_updates["o_cn"] = derived
+        direct_updates["o_gecos"] = derived
+        direct_updates["o_displayname"] = derived
+
+        initials = f"{(new_first.strip()[:1] or '').upper()}{(new_last.strip()[:1] or '').upper()}"
+        if initials:
+            direct_updates["o_initials"] = initials
+
     def _attr_names_from_setattrs(values: list[str]) -> list[str]:
         names: list[str] = []
         for item in values:
