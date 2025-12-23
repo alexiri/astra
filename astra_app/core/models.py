@@ -94,3 +94,19 @@ class IPAFASAgreement(models.Model):
             description=str(getattr(agreement, "description", "") or ""),
             enabled=bool(getattr(agreement, "enabled", True)),
         )
+
+
+class MembershipType(models.Model):
+    code = models.CharField(max_length=64, primary_key=True)
+    name = models.CharField(max_length=255)
+    group_cn = models.CharField(max_length=255, blank=True, default="", verbose_name="Group")
+    isIndividual = models.BooleanField(default=False)
+    isOrganization = models.BooleanField(default=False)
+    sort_order = models.IntegerField(default=0)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("sort_order", "code")
+
+    def __str__(self) -> str:
+        return f"{self.name}"

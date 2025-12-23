@@ -30,7 +30,7 @@ from .backends import (
     _invalidate_agreements_list_cache,
 )
 from .listbacked_queryset import _ListBackedQuerySet
-from .models import IPAFASAgreement, IPAGroup, IPAUser
+from .models import IPAFASAgreement, IPAGroup, IPAUser, MembershipType
 
 logger = logging.getLogger(__name__)
 
@@ -960,6 +960,57 @@ class IPAFASAgreementAdmin(FreeIPAModelAdmin):
         except Exception as e:
             logger.exception("Failed to save FAS agreement cn=%s", getattr(obj, "cn", None) or form.cleaned_data.get("cn"))
             raise FreeIPAOperationFailed(str(e))
+
+
+@admin.register(MembershipType)
+class MembershipTypeAdmin(admin.ModelAdmin):
+    class MembershipTypeAdminForm(forms.ModelForm):
+        group_cn = forms.ChoiceField(
+            required=False,
+            label="Group",
+            help_text="Optional: associate this membership type with a FreeIPA group.",
+        )
+
+        class Meta:
+            model = MembershipType
+            fields = "__all__"
+
+        @override
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            groups = FreeIPAGroup.all()
+            group_names = sorted({g.cn for g in groups if g.cn})
+
+            current = (self.initial.get("group_cn") or "").strip()
+            if not current and self.instance and self.instance.group_cn:
+                current = str(self.instance.group_cn or "").strip()
+            if current and current not in group_names:
+                group_names.append(current)
+
+            self.fields["group_cn"].choices = [("", "---------"), *[(name, name) for name in group_names]]
+
+    form = MembershipTypeAdminForm
+
+    list_display = (
+        "code",
+        "name",
+        "group_cn",
+        "isIndividual",
+        "isOrganization",
+        "sort_order",
+        "enabled",
+    )
+    list_filter = ("enabled", "isIndividual", "isOrganization")
+    ordering = ("sort_order", "code")
+    search_fields = ("code", "name")
+
+    @override
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj=obj))
+        if obj is not None and "code" not in readonly:
+            readonly.append("code")
+        return tuple(readonly)
 
 # Replace DB-backed auth models in admin with FreeIPA-backed listings.
 try:
