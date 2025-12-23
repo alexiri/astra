@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views_groups, views_search, views_settings, views_settings_otp, views_users
+from core import views_groups, views_organizations, views_search, views_settings, views_settings_otp, views_users
 
 urlpatterns = [
     path("", views_users.home, name="home"),
@@ -8,6 +8,10 @@ urlpatterns = [
     path("user/<str:username>/", views_users.user_profile, name="user-profile"),
     path("groups/", views_groups.groups, name="groups"),
     path("group/<str:name>/", views_groups.group_detail, name="group-detail"),
+
+    path("organizations/", views_organizations.organizations, name="organizations"),
+    path("organization/<str:code>/", views_organizations.organization_detail, name="organization-detail"),
+    path("organization/<str:code>/edit/", views_organizations.organization_edit, name="organization-edit"),
 
     path("search/", views_search.global_search, name="global-search"),
 

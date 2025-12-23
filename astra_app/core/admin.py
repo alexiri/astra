@@ -30,7 +30,7 @@ from .backends import (
     _invalidate_agreements_list_cache,
 )
 from .listbacked_queryset import _ListBackedQuerySet
-from .models import IPAFASAgreement, IPAGroup, IPAUser, MembershipType
+from .models import IPAFASAgreement, IPAGroup, IPAUser, MembershipType, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -1004,6 +1004,59 @@ class MembershipTypeAdmin(admin.ModelAdmin):
     list_filter = ("enabled", "isIndividual", "isOrganization")
     ordering = ("sort_order", "code")
     search_fields = ("code", "name")
+
+    @override
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj=obj))
+        if obj is not None and "code" not in readonly:
+            readonly.append("code")
+        return tuple(readonly)
+
+
+@admin.register(Organization)
+class OrganizationAdmin(admin.ModelAdmin):
+    class OrganizationAdminForm(forms.ModelForm):
+        representatives = forms.MultipleChoiceField(
+            required=False,
+            widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 12}),
+            help_text="Select the FreeIPA users who can view this organization on the user site.",
+        )
+
+        class Meta:
+            model = Organization
+            fields = "__all__"
+
+        @override
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            users = FreeIPAUser.all()
+            usernames = sorted({u.username for u in users if u.username})
+
+            current: list[str] = []
+            initial = self.initial.get("representatives")
+            if isinstance(initial, list):
+                current = [str(u).strip() for u in initial if str(u).strip()]
+            if not current and self.instance and isinstance(self.instance.representatives, list):
+                current = [str(u).strip() for u in self.instance.representatives if str(u).strip()]
+
+            missing = [u for u in current if u not in usernames]
+            if missing:
+                usernames.extend(missing)
+
+            self.fields["representatives"].choices = [(u, u) for u in sorted(set(usernames), key=str.lower)]
+
+        def clean_representatives(self) -> list[str]:
+            raw = self.cleaned_data.get("representatives") or []
+            cleaned = [str(u).strip() for u in raw if str(u).strip()]
+            # Keep stable ordering and remove duplicates.
+            return sorted(set(cleaned), key=str.lower)
+
+    form = OrganizationAdminForm
+
+    list_display = ("code", "name", "contact", "website")
+    search_fields = ("code", "name", "contact")
+    ordering = ("name", "code")
 
     @override
     def get_readonly_fields(self, request, obj=None):

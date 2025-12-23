@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+from io import BytesIO
+from typing import override
+
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import UploadedFile
 from django.db import models
+from PIL import Image
+
+
+def organization_logo_upload_to(instance: Organization, filename: str) -> str:
+    # Always store organizations' logos with a deterministic name.
+    # Access control (bucket policy / auth) must be the security boundary.
+    return f"organizations/logos/{instance.code}.png"
 
 
 class IPAUser(models.Model):
@@ -110,3 +122,52 @@ class MembershipType(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name}"
+
+
+class Organization(models.Model):
+    code = models.CharField(max_length=64, primary_key=True)
+    name = models.CharField(max_length=255)
+    logo = models.ImageField(upload_to=organization_logo_upload_to, blank=True, null=True)
+    contact = models.EmailField(blank=True, default="")
+    website = models.URLField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    representatives = models.JSONField(blank=True, default=list)
+
+    class Meta:
+        ordering = ("name", "code")
+
+    def __str__(self) -> str:
+        return f"{self.name}"
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self._convert_new_logo_upload_to_png()
+        super().save(*args, **kwargs)
+
+    def _convert_new_logo_upload_to_png(self) -> None:
+        if not self.logo:
+            return
+
+        # Only convert when a new file is uploaded in this save.
+        # For existing stored files, avoid implicitly downloading/re-uploading.
+        if not hasattr(self.logo, "_file") or self.logo._file is None:
+            return
+        if not isinstance(self.logo._file, UploadedFile):
+            return
+
+        uploaded = self.logo._file
+        uploaded.seek(0)
+        img = Image.open(uploaded)
+        img.load()
+
+        # Normalize to PNG. Preserve alpha when possible.
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+
+        buf = BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        content = ContentFile(buf.getvalue())
+
+        # The upload_to callable ignores the provided filename and always
+        # generates organizations/logos/{code}.png.
+        self.logo.save(f"{self.code}.png", content, save=False)

@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'storages',
     'logentry_admin',
     'post_office',
     'django_ses',
@@ -219,6 +220,31 @@ STATIC_URL = '/static/'
 
 # Production collectstatic target.
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Uploaded media (e.g. Organization.logo)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# S3-backed storage for uploaded media.
+STORAGES = {
+    "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="") or None
+
+# Optional: separate the URL used in rendered pages from the internal API endpoint.
+# This is useful in docker-compose where Django must reach MinIO via the service
+# name (e.g. http://minio:9000) but browsers reach it via localhost port mapping.
+AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default="") or None
+AWS_S3_URL_PROTOCOL = env("AWS_S3_URL_PROTOCOL", default="https:")
+
+# MinIO compatibility and predictable URLs.
+AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="path")
+AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH", default=False)
+AWS_DEFAULT_ACL = None
 
 # Profile chat link formatting (Noggin-style).
 CHAT_NETWORKS = {

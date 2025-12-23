@@ -1,0 +1,24 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Organizations{% endblock %}
+
+{% block header %}
+  <h1 class="h3">Organizations</h1>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <ul class="list-unstyled mb-0">
+        {% for org in organizations %}
+          <li class="mb-2">
+            <a href="{% url 'organization-detail' org.code %}">
+              <strong>{{ org.name }}</strong>
+            </a>
+            <div class="text-muted small">{{ org.code }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+{% endblock %}

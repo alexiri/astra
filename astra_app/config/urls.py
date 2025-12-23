@@ -22,8 +22,12 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    from django.conf.urls.static import static
+
     from core.debug_views import cache_debug_view
 
     urlpatterns += [
         path('__debug__/cache/', cache_debug_view, name='cache-debug'),
     ]
+
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
