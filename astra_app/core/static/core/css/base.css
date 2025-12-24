@@ -43,7 +43,9 @@ body {
   flex: 0 0 auto;
 }
 
-.wrapper {
+/* Only the legacy top-nav/public layout uses a flex wrapper.
+   AdminLTE sidebar layout expects the default wrapper behavior. */
+body.layout-top-nav .wrapper {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -54,17 +56,12 @@ body {
   color: var(--alx-ink) !important;
 }
 
-.content-wrapper {
+body.layout-top-nav .content-wrapper {
   flex: 1 0 auto;
 }
 
-.main-footer {
+body.layout-top-nav .main-footer {
   flex-shrink: 0;
-}
-
-.main-header.navbar {
-  background: var(--alx-navy) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .navbar-user-avatar img {
