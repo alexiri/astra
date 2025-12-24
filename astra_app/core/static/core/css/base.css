@@ -139,6 +139,11 @@ a:hover {
   }
 }
 
+.user-panel > .image > .img-circle,
+.widget-user > div > div > .img-circle {
+  border: 1px solid darkgray;
+}
+
 /* Profile page enhancements (kept here to reduce CSS includes; selectors are scoped). */
 .profile-page {
   max-width: 1080px;
