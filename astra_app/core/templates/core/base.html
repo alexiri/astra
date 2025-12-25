@@ -157,12 +157,14 @@
               </a>
             </li>
 
-            <li class="nav-item">
-              <a href="{% url 'organizations' %}" class="nav-link {% if current_url_name == 'organizations' or current_url_name == 'organization-detail' or current_url_name == 'organization-edit' %}active{% endif %}">
-                <i class="nav-icon fas fa-building"></i>
-                <p>Organizations</p>
-              </a>
-            </li>
+            {% if has_organizations %}
+              <li class="nav-item">
+                <a href="{% url 'organizations' %}" class="nav-link {% if current_url_name == 'organizations' or current_url_name == 'organization-detail' or current_url_name == 'organization-edit' %}active{% endif %}">
+                  <i class="nav-icon fas fa-building"></i>
+                  <p>Organizations</p>
+                </a>
+              </li>
+            {% endif %}
 
             {% if is_membership_committee %}
               <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}menu-open{% endif %}">

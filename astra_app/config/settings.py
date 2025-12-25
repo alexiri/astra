@@ -95,6 +95,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.membership_review',
+                'core.context_processors.organization_nav',
             ],
         },
     },
