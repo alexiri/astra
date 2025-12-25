@@ -407,6 +407,12 @@ class FreeIPAUser:
         # FreeIPA users may not have a mail attribute, so normalize to "".
         self.email = _first('mail') or ""
 
+        # Used for password-reset token invalidation (Noggin-style): if the
+        # password changes after issuing a token, that token should no longer
+        # be usable.
+        krb_last_pwd_change = _first_attr_ci(self._user_data, "krbLastPwdChange", None)
+        self.last_password_change = str(krb_last_pwd_change).strip() if krb_last_pwd_change else ""
+
         # Privacy flag is commonly exposed as `fasisprivate` (Noggin/FAS), but
         # some clients/plugins surface it as `fasIsPrivate`.
         fas_is_private_raw = _first_attr_ci(self._user_data, "fasIsPrivate", None)
@@ -611,6 +617,38 @@ class FreeIPAUser:
         except Exception:
             logger.exception("Failed to get user username=%s", username)
         return None
+
+    @classmethod
+    def find_by_email(cls, email: str) -> FreeIPAUser | None:
+        email = (email or "").strip().lower()
+        if not email:
+            return None
+
+        def _do(client: ClientMeta):
+            return client.user_find(o_mail=email, o_all=True, o_no_members=False)
+
+        try:
+            res = _with_freeipa_service_client_retry(cls.get_client, _do)
+            if not isinstance(res, dict) or res.get("count", 0) <= 0:
+                return None
+
+            first = (res.get("result") or [None])[0]
+            if not isinstance(first, dict):
+                return None
+
+            uid = first.get("uid")
+            if isinstance(uid, list):
+                username = (uid[0] if uid else "") or ""
+            else:
+                username = uid or ""
+            username = str(username).strip()
+            if not username:
+                return None
+
+            return cls(username, first)
+        except Exception:
+            logger.exception("Failed to find user by email email=%s", email)
+            return None
 
     @classmethod
     def create(cls, username, **kwargs):

@@ -71,3 +71,60 @@ class SyncTokenForm(forms.Form):
         self.fields["second_code"].widget.attrs.setdefault("autocomplete", "off")
         self.fields["token"].help_text = "Optional. Leave empty to sync the default token." 
 
+
+class PasswordResetRequestForm(forms.Form):
+    username_or_email = forms.CharField(
+        label="Username or email",
+        required=True,
+        max_length=255,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean_username_or_email(self) -> str:
+        return _normalize_str(self.cleaned_data.get("username_or_email"))
+
+
+class PasswordResetSetForm(forms.Form):
+    password = forms.CharField(
+        label="New password",
+        widget=forms.PasswordInput,
+        required=True,
+        min_length=6,
+        max_length=122,
+    )
+    password_confirm = forms.CharField(
+        label="Confirm new password",
+        widget=forms.PasswordInput,
+        required=True,
+        min_length=6,
+        max_length=122,
+    )
+    otp = forms.CharField(
+        label="One-Time Password",
+        required=False,
+    )
+
+    def __init__(self, *args, require_otp: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+        self.fields["otp"].widget.attrs.setdefault("autocomplete", "off")
+        if require_otp:
+            self.fields["otp"].required = True
+            self.fields["otp"].help_text = "Required for accounts with two-factor authentication enabled."
+        else:
+            self.fields["otp"].help_text = "Only required if your account has two-factor authentication enabled."
+
+    def clean(self):
+        cleaned = super().clean()
+        pw = cleaned.get("password")
+        pw2 = cleaned.get("password_confirm")
+        if pw and pw2 and pw != pw2:
+            raise forms.ValidationError("Passwords must match")
+        return cleaned
+

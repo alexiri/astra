@@ -119,5 +119,5 @@ Pre-change checklist (must answer mentally before finishing):
 - This is python, you don't need to compile the code.
 - You can smoke-test Django with: `podman-compose exec -T web python manage.py check`
 - You can run more tests with: `podman-compose exec -T web python manage.py test`
-- Add ruff after you're done making changes: `podman-compose exec -T web ruff check /app/astra_app`
+- Add ruff after you're done making changes: `podman-compose exec -T web ruff check --fix /app/astra_app`
 - Stop and restart everything: `podman-compose down && podman-compose up -d --build`. NEVER RUN `podman-compose down -v` as that will delete your database!

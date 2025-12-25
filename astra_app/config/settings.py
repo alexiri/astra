@@ -156,6 +156,16 @@ MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME = env(
     default="membership-request-rejected",
 )
 
+PASSWORD_RESET_TOKEN_TTL_SECONDS = env.int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
+PASSWORD_RESET_EMAIL_TEMPLATE_NAME = env(
+    "PASSWORD_RESET_EMAIL_TEMPLATE_NAME",
+    default="password-reset",
+)
+PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME = env(
+    "PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME",
+    default="password-reset-success",
+)
+
 # Queue all Django mail through django-post_office.
 EMAIL_BACKEND = 'post_office.EmailBackend'
 

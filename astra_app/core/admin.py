@@ -17,6 +17,7 @@ from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
+from python_freeipa import exceptions
 
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.views_utils import _normalize_str
@@ -754,6 +755,161 @@ class IPAUserAdmin(FreeIPAModelAdmin):
     ordering = ("username",)
     search_fields = ("username", "displayname", "first_name", "last_name", "email")
     readonly_fields = ()
+    change_form_template = "admin/core/ipauser/change_form.html"
+
+    @override
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None) -> Any:
+        extra_context = dict(extra_context or {})
+
+        has_otp_tokens = False
+        has_email = False
+        if object_id is not None:
+            obj = self.get_object(request, object_id)
+            if obj is not None:
+                username = _normalize_str(obj.username)
+                has_email = bool(_normalize_str(obj.email))
+                if username:
+                    try:
+                        client = FreeIPAUser.get_client()
+                        res = client.otptoken_find(o_ipatokenowner=username, o_all=True)
+                        tokens = res.get("result", []) if isinstance(res, dict) else []
+                        has_otp_tokens = bool(tokens)
+                    except exceptions.NotFound:
+                        has_otp_tokens = False
+                    except AttributeError:
+                        # Some client versions/environments may not expose the OTP API.
+                        has_otp_tokens = False
+                    except Exception:
+                        logger.debug("Admin OTP token lookup failed username=%s", username, exc_info=True)
+                        has_otp_tokens = False
+
+        extra_context["has_otp_tokens"] = has_otp_tokens
+        extra_context["has_email"] = has_email
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<path:object_id>/send-password-reset/",
+                self.admin_site.admin_view(self.send_password_reset_email_view),
+                name="auth_ipauser_send_password_reset",
+            ),
+            path(
+                "<path:object_id>/disable-otp-tokens/",
+                self.admin_site.admin_view(self.disable_otp_tokens_view),
+                name="auth_ipauser_disable_otp_tokens",
+            ),
+        ]
+        return custom + urls
+
+    def send_password_reset_email_view(self, request, object_id: str):
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            raise PermissionDenied
+        if not self.has_change_permission(request, obj=obj):
+            raise PermissionDenied
+
+        email = _normalize_str(getattr(obj, "email", ""))
+        username = _normalize_str(getattr(obj, "username", ""))
+
+        if request.method != "POST" or not request.POST.get("post"):
+            return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
+
+        if not email:
+            self.message_user(
+                request,
+                "User has no email address; cannot send password reset.",
+                level=messages.ERROR,
+            )
+            return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
+
+        from core.password_reset import send_password_reset_email
+
+        try:
+            freeipa = FreeIPAUser.get(username)
+            last_password_change = _normalize_str(freeipa.last_password_change) if freeipa else ""
+            send_password_reset_email(
+                request=request,
+                username=username,
+                email=email,
+                last_password_change=last_password_change,
+            )
+        except Exception as e:
+            logger.exception("Admin password reset email send failed username=%s", username)
+            self.message_user(request, f"Failed to send password reset email: {e}", level=messages.ERROR)
+        else:
+            self.message_user(request, "Password reset email queued.", level=messages.SUCCESS)
+
+        return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
+
+    def disable_otp_tokens_view(self, request, object_id: str):
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            raise PermissionDenied
+        if not self.has_change_permission(request, obj=obj):
+            raise PermissionDenied
+
+        username = _normalize_str(obj.username)
+        if not username:
+            raise PermissionDenied
+
+        def _token_id(token: object) -> str:
+            if not isinstance(token, dict):
+                return ""
+            token_id = token.get("ipatokenuniqueid")
+            if isinstance(token_id, list):
+                return _normalize_str(token_id[0]) if token_id else ""
+            return _normalize_str(token_id)
+
+        def _token_disabled(token: object) -> bool:
+            if not isinstance(token, dict):
+                return False
+            raw = token.get("ipatokendisabled")
+            if isinstance(raw, list) and raw:
+                return bool(raw[0])
+            return bool(raw)
+
+        if request.method != "POST" or not request.POST.get("post"):
+            return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
+
+        try:
+            client = FreeIPAUser.get_client()
+            res = client.otptoken_find(o_ipatokenowner=username, o_all=True)
+            raw_tokens = res.get("result", []) if isinstance(res, dict) else []
+            tokens = [
+                {
+                    "id": _token_id(t),
+                    "disabled": _token_disabled(t),
+                }
+                for t in raw_tokens
+                if _token_id(t)
+            ]
+        except Exception as e:
+            logger.exception("Admin OTP token lookup failed username=%s", username)
+            self.message_user(request, f"Failed to look up OTP tokens: {e}", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
+
+        if not tokens:
+            self.message_user(request, f"No OTP tokens found for {username}.", level=messages.INFO)
+            return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
+
+        try:
+            client = FreeIPAUser.get_client()
+            for token in tokens:
+                client.otptoken_mod(a_ipatokenuniqueid=token["id"], o_ipatokendisabled=True)
+        except Exception as e:
+            logger.exception("Admin OTP disable failed username=%s", username)
+            self.message_user(request, f"Failed to disable OTP tokens: {e}", level=messages.ERROR)
+        else:
+            self.message_user(
+                request,
+                f"Disabled {len(tokens)} OTP token(s) for {username}.",
+                level=messages.SUCCESS,
+            )
+
+        return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
 
     @override
     def get_form(self, request, obj=None, change=False, **kwargs):

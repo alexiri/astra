@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import datetime
+import logging
+from urllib.parse import quote
+
+import post_office.mail
+from django.conf import settings
+from django.core import signing
+from django.http import HttpRequest
+from django.urls import reverse
+from django.utils import timezone
+
+from core.backends import FreeIPAUser
+from core.tokens import make_signed_token, read_signed_token
+from core.views_utils import _normalize_str
+
+logger = logging.getLogger(__name__)
+
+PASSWORD_RESET_TOKEN_PURPOSE = "password-reset"
+
+def read_password_reset_token(token: str) -> dict[str, object]:
+    payload = read_signed_token(token, max_age_seconds=settings.PASSWORD_RESET_TOKEN_TTL_SECONDS)
+    if _normalize_str(payload.get("p")) != PASSWORD_RESET_TOKEN_PURPOSE:
+        raise signing.BadSignature("Wrong token purpose")
+    return payload
+
+
+def password_reset_confirm_url(*, request: HttpRequest, token: str) -> str:
+    return request.build_absolute_uri(reverse("password-reset-confirm")) + f"?token={quote(token)}"
+
+
+def password_reset_login_url(*, request: HttpRequest) -> str:
+    return request.build_absolute_uri(reverse("login"))
+
+
+def send_password_reset_email(*, request: HttpRequest, username: str, email: str, last_password_change: str) -> None:
+    token = make_signed_token(
+        {
+            "p": PASSWORD_RESET_TOKEN_PURPOSE,
+            "u": username,
+            "e": email,
+            "lpc": last_password_change,
+        }
+    )
+    reset_url = password_reset_confirm_url(request=request, token=token)
+
+    ttl_seconds = settings.PASSWORD_RESET_TOKEN_TTL_SECONDS
+    ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
+    valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
+    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
+
+    post_office.mail.send(
+        recipients=[email],
+        sender=settings.DEFAULT_FROM_EMAIL,
+        template=settings.PASSWORD_RESET_EMAIL_TEMPLATE_NAME,
+        context={
+            "username": username,
+            "email": email,
+            "reset_url": reset_url,
+            "ttl_minutes": ttl_minutes,
+            "valid_until_utc": valid_until_utc,
+        },
+        render_on_delivery=True,
+    )
+
+
+def send_password_reset_success_email(*, request: HttpRequest, username: str, email: str) -> None:
+    post_office.mail.send(
+        recipients=[email],
+        sender=settings.DEFAULT_FROM_EMAIL,
+        template=settings.PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME,
+        context={
+            "username": username,
+            "email": email,
+            "login_url": password_reset_login_url(request=request),
+        },
+        render_on_delivery=True,
+    )
+
+
+def find_user_for_password_reset(identifier: str) -> FreeIPAUser | None:
+    value = _normalize_str(identifier)
+    if not value:
+        return None
+
+    if "@" in value:
+        try:
+            return FreeIPAUser.find_by_email(value)
+        except Exception:
+            logger.exception("Password reset lookup by email failed")
+            return None
+
+    try:
+        return FreeIPAUser.get(value)
+    except Exception:
+        logger.exception("Password reset lookup by username failed")
+        return None
+
+
+def set_freeipa_password(*, username: str, new_password: str) -> None:
+    client = FreeIPAUser.get_client()
+    try:
+        client.user_mod(username, o_userpassword=new_password)
+    except TypeError:
+        client.user_mod(a_uid=username, o_userpassword=new_password)

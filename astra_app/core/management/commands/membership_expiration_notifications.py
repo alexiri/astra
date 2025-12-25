@@ -34,7 +34,7 @@ class Command(BaseCommand):
         schedule_days = [
             math.floor(settings.MEMBERSHIP_EXPIRING_SOON_DAYS / divisor)
             for divisor in schedule_divisors
-        ] + [0]
+        ] + [0, -1]
 
         logs: Iterable[MembershipLog] = (
             MembershipLog.objects.select_related("membership_type")
@@ -72,7 +72,7 @@ class Command(BaseCommand):
             if days_until not in schedule_days:
                 continue
 
-            if days_until == 0:
+            if days_until < 0:
                 template = settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME
             else:
                 template = settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
