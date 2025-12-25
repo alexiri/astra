@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.models import MembershipLog, MembershipType
+from core.models import Membership, MembershipLog, MembershipType
 
 
 class MembershipExpirationNotificationsCommandTests(TestCase):
@@ -62,7 +62,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             ).exists()
         )
 
-    def test_command_sends_expired_email_for_memberships_expired_yesterday(self) -> None:
+    def test_command_does_not_send_expired_email_for_expired_memberships(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -103,6 +103,9 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         from post_office.models import Email
 
         self.assertTrue(
+            Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
+        )
+        self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
                 template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,

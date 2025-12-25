@@ -156,33 +156,31 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
 
         now = timezone.now()
-        MembershipLog.objects.bulk_create(
-            [
-                MembershipLog(
-                    actor_username="reviewer",
-                    target_username="alice",
-                    membership_type_id="individual",
-                    requested_group_cn="almalinux-individual",
-                    action=MembershipLog.Action.approved,
-                    created_at=now - datetime.timedelta(days=2),
-                    expires_at=now + datetime.timedelta(days=200),
-                ),
-                MembershipLog(
-                    actor_username="reviewer",
-                    target_username="alice",
-                    membership_type_id="individual",
-                    requested_group_cn="almalinux-individual",
-                    action=MembershipLog.Action.terminated,
-                    created_at=now - datetime.timedelta(days=1),
-                    expires_at=now,
-                ),
-            ]
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.approved,
+            expires_at=now + datetime.timedelta(days=200),
+        )
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.terminated,
+            expires_at=now,
         )
 
         valid = get_valid_memberships_for_username("alice")
         self.assertEqual(valid, [])
 
     def test_user_cannot_request_membership_type_if_already_valid(self) -> None:
+        import datetime
+
+        from django.utils import timezone
+
         from core.models import MembershipLog, MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -309,7 +307,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                     )
 
         self.assertEqual(resp.status_code, 302)
-        remove_mock.assert_called_once()
+        remove_mock.assert_not_called()
         self.assertTrue(
             MembershipLog.objects.filter(
                 actor_username="reviewer",
@@ -319,18 +317,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             ).exists()
         )
 
-        send_mock.assert_called_once()
-        _, kwargs = send_mock.call_args
-        self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["sender"], settings.DEFAULT_FROM_EMAIL)
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME)
-        self.assertEqual(kwargs["context"]["username"], "alice")
-        self.assertEqual(kwargs["context"]["membership_type"], "Individual")
-        self.assertEqual(kwargs["context"]["membership_type_code"], "individual")
-        self.assertEqual(
-            kwargs["context"]["extend_url"],
-            "http://testserver/membership/request/?membership_type=individual",
-        )
+        send_mock.assert_not_called()
 
     def test_committee_can_change_membership_expiration_date_and_it_is_logged(self) -> None:
         from core.models import MembershipLog, MembershipType
@@ -678,7 +665,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        expires_at_utc = datetime.datetime.now() + datetime.timedelta(days=2)
+        expires_at_utc = timezone.now() + datetime.timedelta(days=2)
         MembershipLog.objects.create(
             actor_username="reviewer",
             target_username="alice",

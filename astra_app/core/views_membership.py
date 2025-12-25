@@ -18,7 +18,7 @@ from core.backends import FreeIPAUser
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username, is_membership_committee_user
 from core.membership_notifications import send_membership_notification
-from core.models import MembershipLog, MembershipRequest, MembershipType
+from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
 from core.views_utils import _first, _normalize_str
 
 logger = logging.getLogger(__name__)
@@ -60,28 +60,14 @@ def _pagination_context(*, paginator: Paginator, page_obj, page_url_prefix: str)
 def _previous_expires_at_for_extension(*, username: str, membership_type: MembershipType) -> datetime.datetime | None:
     """Return the previous expires_at to extend from, or None if approval should start now.
 
-    We only consider the most recent state-changing log.
-    If the latest action is termination, we do not extend from older expirations.
+    Membership expiration is sourced from the canonical membership state table.
+    If the membership was terminated, the state row will be absent.
     """
 
-    latest = (
-        MembershipLog.objects.filter(
-            target_username=username,
-            membership_type=membership_type,
-            action__in=[
-                MembershipLog.Action.approved,
-                MembershipLog.Action.expiry_changed,
-                MembershipLog.Action.terminated,
-            ],
-        )
-        .order_by("-created_at")
-        .first()
-    )
-    if latest is None:
+    current = Membership.objects.filter(target_username=username, membership_type=membership_type).first()
+    if current is None:
         return None
-    if latest.action == MembershipLog.Action.terminated:
-        return None
-    return latest.expires_at
+    return current.expires_at
 
 
 @login_required(login_url="/login/")
@@ -535,9 +521,12 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
         tz_name = "UTC"
         ZoneInfo("UTC")
 
-    valid_logs = get_valid_memberships_for_username(username)
-    current_log = next((log for log in valid_logs if log.membership_type_id == membership_type.code), None)
-    if current_log is None:
+    valid_memberships = get_valid_memberships_for_username(username)
+    current_membership = next(
+        (m for m in valid_memberships if m.membership_type_id == membership_type.code),
+        None,
+    )
+    if current_membership is None:
         messages.error(request, "That user does not currently have an active membership of that type.")
         return redirect("user-profile", username=username)
 
@@ -559,7 +548,11 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
             messages.success(request, "Membership expiration updated.")
             return redirect("user-profile", username=username)
     else:
-        initial_date = current_log.expires_at.astimezone(datetime.UTC).date() if current_log.expires_at else None
+        initial_date = (
+            current_membership.expires_at.astimezone(datetime.UTC).date()
+            if current_membership.expires_at
+            else None
+        )
         form = MembershipUpdateExpiryForm(initial={"expires_on": initial_date})
 
     return render(
@@ -568,7 +561,8 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
         {
             "target_username": username,
             "membership_type": membership_type,
-            "current_log": current_log,
+            # Template expects `current_log.expires_at`; a Membership has the same field.
+            "current_log": current_membership,
             "target_timezone_name": tz_name,
             "form": form,
         },
@@ -595,37 +589,20 @@ def membership_terminate(request: HttpRequest, username: str, membership_type_co
         messages.error(request, "Unable to load the requested user from FreeIPA.")
         return redirect("user-profile", username=username)
 
-    valid_logs = get_valid_memberships_for_username(username)
-    current_log = next((log for log in valid_logs if log.membership_type_id == membership_type.code), None)
-    if current_log is None:
+    valid_memberships = get_valid_memberships_for_username(username)
+    current_membership = next(
+        (m for m in valid_memberships if m.membership_type_id == membership_type.code),
+        None,
+    )
+    if current_membership is None:
         messages.error(request, "That user does not currently have an active membership of that type.")
         return redirect("user-profile", username=username)
-
-    if membership_type.group_cn:
-        try:
-            target.remove_from_group(group_name=membership_type.group_cn)
-        except Exception:
-            logger.exception("Failed to remove user from membership group")
-            messages.error(request, "Failed to remove the user from the group.")
-            return redirect("user-profile", username=username)
 
     MembershipLog.create_for_termination(
         actor_username=request.user.get_username(),
         target_username=username,
         membership_type=membership_type,
     )
-
-    if target.email:
-        tz_name = str(_first(target._user_data, "fasTimezone", "") or "").strip() or "UTC"
-        send_membership_notification(
-            recipient_email=target.email,
-            username=username,
-            membership_type=membership_type,
-            template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
-            expires_at=datetime.datetime.now(tz=datetime.UTC),
-            base_url=request.build_absolute_uri("/"),
-            tz_name=tz_name,
-        )
 
     messages.success(request, "Membership terminated.")
     return redirect("user-profile", username=username)

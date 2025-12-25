@@ -122,21 +122,21 @@ def _profile_context_for_user(
     profile_avatar_user: object = fu
 
     membership_request_url = reverse("membership-request")
-    valid_membership_logs = get_valid_memberships_for_username(fu.username)
+    valid_memberships = get_valid_memberships_for_username(fu.username)
     valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
     now = timezone.now()
     expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
 
     memberships: list[dict[str, object]] = []
-    for log in valid_membership_logs:
-        expires_at = log.expires_at
+    for membership in valid_memberships:
+        expires_at = membership.expires_at
         is_expiring_soon = bool(expires_at and expires_at <= expiring_soon_by)
         memberships.append(
             {
-                "membership_type": log.membership_type,
+                "membership_type": membership.membership_type,
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
-                "extend_url": f"{membership_request_url}?membership_type={log.membership_type.code}",
+                "extend_url": f"{membership_request_url}?membership_type={membership.membership_type.code}",
             }
         )
 

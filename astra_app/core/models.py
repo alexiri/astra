@@ -197,6 +197,30 @@ class MembershipRequest(models.Model):
         return f"{self.requested_username} → {self.membership_type_id}"
 
 
+class Membership(models.Model):
+    target_username = models.CharField(max_length=255)
+    membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
+    expires_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["target_username", "membership_type"],
+                name="uniq_membership_target_username_type",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["target_username"], name="m_tgt"),
+            models.Index(fields=["expires_at"], name="m_exp_at"),
+        ]
+        ordering = ("target_username", "membership_type_id")
+
+    def __str__(self) -> str:
+        return f"{self.target_username} ({self.membership_type_id})"
+
+
 class MembershipLog(models.Model):
     class Action(models.TextChoices):
         requested = "requested", "Requested"
@@ -222,6 +246,27 @@ class MembershipLog(models.Model):
             models.Index(fields=["expires_at"], name="ml_exp_at"),
         ]
         ordering = ("-created_at",)
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        super().save(*args, **kwargs)
+
+        if self.action not in {
+            self.Action.approved,
+            self.Action.expiry_changed,
+            self.Action.terminated,
+        }:
+            return
+
+        # Membership is the current-state table for a user+membership_type.
+        # Rows may be expired until the cleanup cron deletes them.
+        Membership.objects.update_or_create(
+            target_username=self.target_username,
+            membership_type=self.membership_type,
+            defaults={
+                "expires_at": self.expires_at,
+            },
+        )
 
     def __str__(self) -> str:
         return f"{self.action}: {self.target_username} ({self.membership_type_id})"

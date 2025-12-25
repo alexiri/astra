@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.models import MembershipLog
+from core.models import Membership
 
 
 def is_membership_committee_user(user: object) -> bool:
@@ -22,8 +22,8 @@ def is_membership_committee_user(user: object) -> bool:
     return any(str(g or "").lower() == committee_key for g in user.groups_list)
 
 
-def get_valid_memberships_for_username(username: str) -> list[MembershipLog]:
-    """Return the latest unexpired approved membership per membership type.
+def get_valid_memberships_for_username(username: str) -> list[Membership]:
+    """Return the current unexpired active memberships.
 
     This is used to:
     - show current memberships on a user's profile
@@ -32,43 +32,16 @@ def get_valid_memberships_for_username(username: str) -> list[MembershipLog]:
 
     now = timezone.now()
 
-    logs: Iterable[MembershipLog] = (
-        MembershipLog.objects.select_related("membership_type")
+    memberships: Iterable[Membership] = (
+        Membership.objects.select_related("membership_type")
         .filter(
             target_username=username,
-            action__in=[
-                MembershipLog.Action.approved,
-                MembershipLog.Action.expiry_changed,
-                MembershipLog.Action.terminated,
-            ],
+            expires_at__gt=now,
         )
-        .order_by("-created_at")
+        .order_by("membership_type__sort_order", "membership_type__code")
     )
 
-    by_type_code: dict[str, MembershipLog] = {}
-    seen_type_codes: set[str] = set()
-
-    for log in logs:
-        # `membership_type_id` is the MembershipType.code (FK to_field_name is PK).
-        type_code = log.membership_type_id
-        if type_code in seen_type_codes:
-            continue
-        seen_type_codes.add(type_code)
-
-        # A termination is a state change that should block any earlier approvals.
-        if log.action == MembershipLog.Action.terminated:
-            continue
-
-        expires_at = log.expires_at
-        if not expires_at or expires_at <= now:
-            continue
-
-        by_type_code[type_code] = log
-
-    return sorted(
-        by_type_code.values(),
-        key=lambda log: (log.membership_type.sort_order, log.membership_type.code),
-    )
+    return list(memberships)
 
 
 def get_valid_membership_type_codes_for_username(username: str) -> set[str]:

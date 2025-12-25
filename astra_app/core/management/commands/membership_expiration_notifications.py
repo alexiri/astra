@@ -10,12 +10,12 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.membership_notifications import send_membership_notification
-from core.models import MembershipLog
+from core.models import Membership
 from core.views_utils import _first
 
 
 class Command(BaseCommand):
-    help = "Send membership expiration warning/expired emails via django-post-office."
+    help = "Send membership expiration warning emails via django-post-office."
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
@@ -34,50 +34,32 @@ class Command(BaseCommand):
         schedule_days = [
             math.floor(settings.MEMBERSHIP_EXPIRING_SOON_DAYS / divisor)
             for divisor in schedule_divisors
-        ] + [0, -1]
+        ]
 
-        logs: Iterable[MembershipLog] = (
-            MembershipLog.objects.select_related("membership_type")
-            .filter(
-                action__in=[
-                    MembershipLog.Action.approved,
-                    MembershipLog.Action.expiry_changed,
-                    MembershipLog.Action.terminated,
-                ]
-            )
-            .order_by("target_username", "membership_type_id", "-created_at")
+        memberships: Iterable[Membership] = (
+            Membership.objects.select_related("membership_type")
+            .order_by("target_username", "membership_type_id")
         )
-
-        seen: set[tuple[str, str]] = set()
 
         queued = 0
         skipped = 0
 
-        for log in logs:
-            key = (log.target_username, log.membership_type_id)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            # Terminations are handled immediately when they happen.
-            if log.action == MembershipLog.Action.terminated:
+        for membership in memberships:
+            if not membership.expires_at:
                 continue
 
-            if not log.expires_at:
+            if membership.expires_at <= now:
                 continue
 
-            expires_on_utc = log.expires_at.astimezone(datetime.UTC).date()
+            expires_on_utc = membership.expires_at.astimezone(datetime.UTC).date()
             days_until = (expires_on_utc - today_utc).days
 
             if days_until not in schedule_days:
                 continue
 
-            if days_until < 0:
-                template = settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME
-            else:
-                template = settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
+            template = settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
-            fu = FreeIPAUser.get(log.target_username)
+            fu = FreeIPAUser.get(membership.target_username)
             if fu is None or not fu.email:
                 continue
 
@@ -85,10 +67,10 @@ class Command(BaseCommand):
 
             did_queue = send_membership_notification(
                 recipient_email=fu.email,
-                username=log.target_username,
-                membership_type=log.membership_type,
+                username=membership.target_username,
+                membership_type=membership.membership_type,
                 template_name=template,
-                expires_at=log.expires_at,
+                expires_at=membership.expires_at,
                 days=days_until,
                 force=force,
                 tz_name=tz_name,
