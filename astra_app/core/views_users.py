@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import datetime
 import logging
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
@@ -16,6 +18,8 @@ from core.agreements import (
     missing_required_agreements_for_user_in_group,
 )
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.membership import get_valid_membership_type_codes_for_username, get_valid_memberships_for_username
+from core.models import MembershipRequest, MembershipType
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
 
 logger = logging.getLogger(__name__)
@@ -117,14 +121,46 @@ def _profile_context_for_user(
 
     profile_avatar_user: object = fu
 
+    membership_request_url = reverse("membership-request")
+    valid_membership_logs = get_valid_memberships_for_username(fu.username)
+    valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
+    now = timezone.now()
+    expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
+
+    memberships: list[dict[str, object]] = []
+    for log in valid_membership_logs:
+        expires_at = log.expires_at
+        is_expiring_soon = bool(expires_at and expires_at <= expiring_soon_by)
+        memberships.append(
+            {
+                "membership_type": log.membership_type,
+                "expires_at": expires_at,
+                "is_expiring_soon": is_expiring_soon,
+                "extend_url": f"{membership_request_url}?membership_type={log.membership_type.code}",
+            }
+        )
+
+    pending_request = (
+        MembershipRequest.objects.select_related("membership_type")
+        .filter(requested_username=fu.username)
+        .first()
+    )
+
+    membership_can_request_any = MembershipType.objects.filter(enabled=True, isIndividual=True).exclude(
+        code__in=valid_membership_type_codes
+    ).exclude(group_cn="").exists()
+
     return {
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
         "is_self": is_self,
+        "membership_request_url": membership_request_url,
+        "membership_can_request_any": membership_can_request_any,
+        "memberships": memberships,
+        "membership_pending_request": pending_request,
         "groups": groups,
         "agreements": agreements,
         "missing_agreements": missing_agreements,
-        "timezone": tz_name,
         "timezone_name": tz_name,
         "current_time": now_local,
         "pronouns": _value_to_text(_data_get(data, "fasPronoun", "")),

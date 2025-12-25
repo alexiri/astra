@@ -1,0 +1,113 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Membership Audit Log{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Membership Audit Log{% if filter_username %}: {{ filter_username }}{% endif %}</h1>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-tools">
+        <form method="get" class="input-group input-group-sm" style="width: 260px;">
+          {% if filter_username_param %}
+            <input type="hidden" name="username" value="{{ filter_username_param }}">
+          {% endif %}
+          <input
+            type="text"
+            name="q"
+            class="form-control float-right"
+            placeholder="Search"
+            value="{{ q }}"
+            aria-label="Search membership audit log"
+          >
+          <div class="input-group-append">
+            {% if q %}
+              <button
+                type="button"
+                class="btn btn-default"
+                aria-label="Clear search"
+                onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            {% endif %}
+            <button type="submit" class="btn btn-default" aria-label="Search">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card-body p-0">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Actor</th>
+            <th>User</th>
+            <th>Membership</th>
+            <th>Action</th>
+            <th>Expires</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in logs %}
+            <tr>
+              <td class="text-muted">{{ l.created_at|date:"r" }}</td>
+              <td>{{ l.actor_username }}</td>
+              <td>
+                <a href="{% url 'user-profile' l.target_username %}">{{ l.target_username }}</a>
+              </td>
+              <td>{{ l.membership_type.name }}</td>
+              <td>{{ l.get_action_display }}</td>
+              <td class="text-muted">{% if l.expires_at %}{{ l.expires_at|date:"M j, Y" }}{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" class="p-3 text-muted">No audit log entries.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-footer clearfix">
+      <div class="float-left text-muted small">
+        {% if paginator.count %}
+          Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ paginator.count }}
+        {% endif %}
+      </div>
+
+      {% if is_paginated %}
+        <ul class="pagination pagination-sm m-0 float-right">
+          <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+            <a class="page-link" href="{% if page_obj.has_previous %}{{ page_url_prefix }}{{ page_obj.previous_page_number }}{% else %}#{% endif %}" aria-label="Previous">&laquo;</a>
+          </li>
+
+          {% if show_first %}
+            <li class="page-item"><a class="page-link" href="{{ page_url_prefix }}1">1</a></li>
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+          {% endif %}
+
+          {% for page_number in page_numbers %}
+            <li class="page-item {% if page_number == page_obj.number %}active{% endif %}">
+              <a class="page-link" href="{{ page_url_prefix }}{{ page_number }}">{{ page_number }}</a>
+            </li>
+          {% endfor %}
+
+          {% if show_last %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            <li class="page-item"><a class="page-link" href="{{ page_url_prefix }}{{ paginator.num_pages }}">{{ paginator.num_pages }}</a></li>
+          {% endif %}
+
+          <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+            <a class="page-link" href="{% if page_obj.has_next %}{{ page_url_prefix }}{{ page_obj.next_page_number }}{% else %}#{% endif %}" aria-label="Next">&raquo;</a>
+          </li>
+        </ul>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

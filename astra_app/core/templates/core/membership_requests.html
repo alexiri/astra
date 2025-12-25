@@ -1,0 +1,138 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Membership Requests{% endblock %}
+
+{% block header %}
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1 class="m-0">Membership Requests</h1>
+    <div class="text-muted">Pending: {{ requests|length }}</div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
+        <form id="bulk-action-form" method="post" action="{% url 'membership-requests-bulk' %}" class="form-inline">
+          {% csrf_token %}
+          <div class="input-group input-group-sm">
+            <select name="bulk_action" class="custom-select" aria-label="Bulk action">
+              <option value="">Bulk action…</option>
+              <option value="approve">Accept</option>
+              <option value="reject">Reject</option>
+              <option value="ignore">Ignore</option>
+            </select>
+            <div class="input-group-append">
+              <button type="submit" class="btn btn-default" id="bulk-apply" disabled>Apply</button>
+            </div>
+          </div>
+        </form>
+
+        <div class="text-muted">Pending: {{ requests|length }}</div>
+      </div>
+    </div>
+
+    <div class="card-body p-0">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th style="width: 40px;" class="text-center">
+              <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
+            </th>
+            <th>User</th>
+            <th>Type</th>
+            <th>Requested</th>
+            <th style="width: 280px" class="text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in request_rows %}
+            {% with r=row.r %}
+            <tr>
+              <td class="text-center align-middle">
+                <input
+                  type="checkbox"
+                  class="request-checkbox"
+                  name="selected"
+                  value="{{ r.pk }}"
+                  form="bulk-action-form"
+                  aria-label="Select request for {{ r.requested_username }}"
+                >
+              </td>
+              <td>
+                <div>
+                  <a href="{% url 'user-profile' r.requested_username %}">{{ r.requested_username }}</a>
+                </div>
+                {% if row.full_name %}
+                  <div class="text-muted small">{{ row.full_name }}</div>
+                {% endif %}
+              </td>
+              <td>{{ r.membership_type.name }}</td>
+              <td class="text-muted">{{ r.requested_at }}</td>
+              <td class="text-right">
+                <form method="post" action="{% url 'membership-request-approve' r.pk %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Approve this request?');">Approve</button>
+                </form>
+
+                <a href="{% url 'membership-request-reject' r.pk %}" class="btn btn-sm btn-warning">Reject</a>
+
+                <form method="post" action="{% url 'membership-request-ignore' r.pk %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Ignore this request?');">Ignore</button>
+                </form>
+              </td>
+            </tr>
+            {% endwith %}
+          {% empty %}
+            <tr>
+              <td colspan="5" class="p-3 text-muted">No pending requests.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const selectAll = document.getElementById('select-all-requests');
+      const applyBtn = document.getElementById('bulk-apply');
+      const form = document.getElementById('bulk-action-form');
+      if (!selectAll || !applyBtn || !form) return;
+
+      function getCheckboxes() {
+        return Array.from(document.querySelectorAll('.request-checkbox'));
+      }
+
+      function updateApply() {
+        const anyChecked = getCheckboxes().some(cb => cb.checked);
+        const action = (form.querySelector('select[name="bulk_action"]') || {}).value || '';
+        applyBtn.disabled = !(anyChecked && action);
+      }
+
+      selectAll.addEventListener('change', function () {
+        for (const cb of getCheckboxes()) {
+          cb.checked = selectAll.checked;
+        }
+        updateApply();
+      });
+
+      document.addEventListener('change', function (evt) {
+        const target = evt.target;
+        if (!target) return;
+        if (target.classList && target.classList.contains('request-checkbox')) {
+          const boxes = getCheckboxes();
+          selectAll.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
+          updateApply();
+          return;
+        }
+        if (target.name === 'bulk_action') {
+          updateApply();
+        }
+      });
+
+      updateApply();
+    })();
+  </script>
+{% endblock %}

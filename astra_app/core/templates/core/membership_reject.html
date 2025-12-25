@@ -1,0 +1,22 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Reject Membership Request{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Reject Membership Request</h1>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <p class="text-muted mb-3">Reject request for <strong>{{ req.requested_username }}</strong> ({{ req.membership_type.name }}).</p>
+
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn btn-danger">Reject</button>
+        <a href="{% url 'membership-requests' %}" class="btn btn-outline-secondary">Cancel</a>
+      </form>
+    </div>
+  </div>
+{% endblock %}

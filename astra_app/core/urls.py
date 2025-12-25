@@ -1,6 +1,14 @@
 from django.urls import path
 
-from core import views_groups, views_organizations, views_search, views_settings, views_settings_otp, views_users
+from core import (
+    views_groups,
+    views_membership,
+    views_organizations,
+    views_search,
+    views_settings,
+    views_settings_otp,
+    views_users,
+)
 
 urlpatterns = [
     path("", views_users.home, name="home"),
@@ -14,6 +22,47 @@ urlpatterns = [
     path("organization/<str:code>/edit/", views_organizations.organization_edit, name="organization-edit"),
 
     path("search/", views_search.global_search, name="global-search"),
+
+    path("membership/request/", views_membership.membership_request, name="membership-request"),
+    path("membership/requests/", views_membership.membership_requests, name="membership-requests"),
+    path(
+        "membership/requests/bulk/",
+        views_membership.membership_requests_bulk,
+        name="membership-requests-bulk",
+    ),
+    path(
+        "membership/requests/<int:pk>/approve/",
+        views_membership.membership_request_approve,
+        name="membership-request-approve",
+    ),
+    path(
+        "membership/requests/<int:pk>/reject/",
+        views_membership.membership_request_reject,
+        name="membership-request-reject",
+    ),
+    path(
+        "membership/requests/<int:pk>/ignore/",
+        views_membership.membership_request_ignore,
+        name="membership-request-ignore",
+    ),
+
+    path("membership/log/", views_membership.membership_audit_log, name="membership-audit-log"),
+    path(
+        "membership/log/<str:username>/",
+        views_membership.membership_audit_log_user,
+        name="membership-audit-log-user",
+    ),
+
+    path(
+        "membership/manage/<str:username>/<str:membership_type_code>/expiry/",
+        views_membership.membership_set_expiry,
+        name="membership-set-expiry",
+    ),
+    path(
+        "membership/manage/<str:username>/<str:membership_type_code>/terminate/",
+        views_membership.membership_terminate,
+        name="membership-terminate",
+    ),
 
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),
 

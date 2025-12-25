@@ -1,6 +1,7 @@
 import datetime
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
@@ -93,6 +94,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.context_processors.membership_review',
             ],
         },
     },
@@ -123,6 +125,35 @@ if EMAIL_CONFIG:
     globals().update(EMAIL_CONFIG)
 
 DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
+
+# Public base URL used for absolute links in email (cron jobs don't have a request
+# context). Example: https://accounts.almalinux.org
+PUBLIC_BASE_URL = env("PUBLIC_BASE_URL", default="http://localhost:8000")
+
+# Membership workflow
+MEMBERSHIP_COMMITTEE_GROUP_CN = env("MEMBERSHIP_COMMITTEE_GROUP_CN", default="membership-committee")
+MEMBERSHIP_EXPIRING_SOON_DAYS = env.int("MEMBERSHIP_EXPIRING_SOON_DAYS", default=60)
+MEMBERSHIP_VALIDITY_DAYS = env.int("MEMBERSHIP_VALIDITY_DAYS", default=365)
+MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = env(
+    "MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
+    default="membership-expiring-soon",
+)
+MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = env(
+    "MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
+    default="membership-expired",
+)
+MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME = env(
+    "MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME",
+    default="membership-request-submitted",
+)
+MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME = env(
+    "MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME",
+    default="membership-request-approved",
+)
+MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME = env(
+    "MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME",
+    default="membership-request-rejected",
+)
 
 # Queue all Django mail through django-post_office.
 EMAIL_BACKEND = 'post_office.EmailBackend'
@@ -238,8 +269,17 @@ AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="") or None
 # Optional: separate the URL used in rendered pages from the internal API endpoint.
 # This is useful in docker-compose where Django must reach MinIO via the service
 # name (e.g. http://minio:9000) but browsers reach it via localhost port mapping.
-AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default="") or None
-AWS_S3_URL_PROTOCOL = env("AWS_S3_URL_PROTOCOL", default="https:")
+#
+# Historically we used AWS_S3_URL_PROTOCOL + AWS_S3_CUSTOM_DOMAIN for this, but
+# those settings have been replaced by PUBLIC_BASE_URL + AWS_STORAGE_BUCKET_NAME.
+_public_base_url_raw = str(PUBLIC_BASE_URL or "").strip()
+if "://" not in _public_base_url_raw:
+    _public_base_url_raw = f"https://{_public_base_url_raw}"
+
+_public_base_url = urlsplit(_public_base_url_raw)
+AWS_S3_URL_PROTOCOL = f"{_public_base_url.scheme}:" if _public_base_url.scheme else "https:"
+_public_base_domain = (_public_base_url.netloc + _public_base_url.path.rstrip("/")).strip("/")
+AWS_S3_CUSTOM_DOMAIN = f"{_public_base_domain}/{AWS_STORAGE_BUCKET_NAME}" if _public_base_domain else None
 
 # MinIO compatibility and predictable URLs.
 AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="path")

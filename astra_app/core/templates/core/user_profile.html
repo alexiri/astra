@@ -2,6 +2,7 @@
 
 {% load avatar_tags %}
 {% load core_chatnickname %}
+{% load tz %}
 
 {% block title %}Profile{% endblock %}
 
@@ -151,6 +152,91 @@
     </div>
 
     <div class="col-md-8">
+      <ul class="list-group mb-3">
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <strong>Membership</strong>
+          <div class="d-flex align-items-center" style="gap: .5rem;">
+            {% if is_membership_committee %}
+              <a href="{% url 'membership-audit-log-user' fu.username %}" class="btn btn-sm btn-outline-secondary">History</a>
+            {% endif %}
+            {% if is_self %}
+              {% if membership_can_request_any %}
+                <a href="{{ membership_request_url }}" class="btn btn-sm btn-outline-primary">Request</a>
+              {% else %}
+                <a href="#" class="btn btn-sm btn-outline-primary disabled" aria-disabled="true" tabindex="-1" title="No additional membership types available">Request</a>
+              {% endif %}
+            {% endif %}
+          </div>
+        </li>
+
+        {% for m in memberships %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <div class="font-weight-bold">{{ m.membership_type.name }}</div>
+              {% if m.is_expiring_soon %}
+                <div class="text-danger small">
+                  <i class="fas fa-exclamation-triangle mr-1"></i>
+                  {% with tz=timezone_name|default:"UTC" %}
+                    {% timezone tz %}
+                      Expires {{ m.expires_at|date:"M j, Y H:i" }} ({{ tz }})
+                    {% endtimezone %}
+                  {% endwith %}
+                </div>
+              {% else %}
+                <div class="text-muted small">
+                  {% with tz=timezone_name|default:"UTC" %}
+                    {% timezone tz %}
+                      Expires {{ m.expires_at|date:"M j, Y" }}
+                    {% endtimezone %}
+                  {% endwith %}
+                </div>
+              {% endif %}
+            </div>
+            <div>
+              {% if is_self and m.is_expiring_soon %}
+                <a href="{{ m.extend_url }}" class="btn btn-sm btn-primary">Extend</a>
+              {% else %}
+                <span class="badge badge-success">Active</span>
+              {% endif %}
+
+              {% if is_membership_committee %}
+                <a
+                  href="{% url 'membership-set-expiry' fu.username m.membership_type.code %}"
+                  class="btn btn-sm btn-outline-secondary ml-2"
+                >Edit expiry</a>
+                <form
+                  method="post"
+                  action="{% url 'membership-terminate' fu.username m.membership_type.code %}"
+                  class="d-inline"
+                  onsubmit="return confirm('Terminate this membership early?');"
+                >
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger ml-1">Terminate</button>
+                </form>
+              {% endif %}
+            </div>
+          </li>
+        {% empty %}
+          {% if not membership_pending_request %}
+            <li class="list-group-item text-muted">
+              No memberships yet.
+              {% if is_self and membership_can_request_any %}
+                <a href="{{ membership_request_url }}">Request membership</a>
+              {% endif %}
+            </li>
+          {% endif %}
+        {% endfor %}
+
+        {% if membership_pending_request %}
+          <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+            <div>
+              <div class="font-weight-bold">{{ membership_pending_request.membership_type.name }}</div>
+            </div>
+            <span class="badge badge-secondary">Pending</span>
+          </li>
+        {% endif %}
+      </ul>
+
       <ul class="list-group h-100 profile-memberships">
         <li class="list-group-item profile-memberships-header text-right">
           <strong>
