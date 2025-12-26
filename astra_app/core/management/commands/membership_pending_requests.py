@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import post_office.mail
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError

@@ -382,6 +382,53 @@ def _override_post_office_log_admin():
 _override_post_office_log_admin()
 
 
+def _override_post_office_email_admin() -> None:
+    """Make django-post-office Email change view resilient to SMTP issues.
+
+    django-post-office's EmailAdmin.get_fieldsets() eagerly renders the email
+    preview by calling obj.email_message(), which opens an SMTP connection.
+    In dev we intentionally allow flaky SMTP (MailHog jim-*), so the admin
+    page should not 500 if SMTP disconnects.
+    """
+
+    try:
+        from django.contrib.admin.sites import NotRegistered
+        from post_office.admin import EmailAdmin as PostOfficeEmailAdmin
+        from post_office.models import Email
+    except Exception:
+        return
+
+    class SafeEmailAdmin(PostOfficeEmailAdmin):
+        @override
+        def get_fieldsets(self, request, obj=None):
+            try:
+                return super().get_fieldsets(request, obj=obj)
+            except Exception as e:
+                messages.warning(request, f"Unable to render email preview: {e}")
+
+                fields: list[object] = [
+                    "from_email",
+                    "to",
+                    "cc",
+                    "bcc",
+                    "priority",
+                    ("status", "scheduled_time"),
+                ]
+                if obj is not None and obj.message_id:
+                    fields.insert(0, "message_id")
+                return [(None, {"fields": fields})]
+
+    try:
+        admin.site.unregister(Email)
+    except NotRegistered:
+        pass
+
+    admin.site.register(Email, SafeEmailAdmin)
+
+
+_override_post_office_email_admin()
+
+
 def _split_lines(value: str) -> list[str]:
     return [line.strip() for line in (value or "").splitlines() if line.strip()]
 

@@ -21,11 +21,11 @@ services:
     image: mailhog/mailhog
     container_name: almalinux_mailhog
     command:
-      - -jim-accept=0.1
-      - -jim-disconnect=0.1
-      - -jim-reject-sender=0.1
-      - -jim-reject-recipient=0.1
-      - -jim-reject-auth=0.1
+      - -jim-accept=0.25
+      - -jim-disconnect=0.25
+      - -jim-reject-sender=0.25
+      - -jim-reject-recipient=0.25
+      - -jim-reject-auth=0.25
     ports:
       - "8025:8025"
       - "1025:1025"

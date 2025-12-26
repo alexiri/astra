@@ -44,7 +44,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
             with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-                call_command("membership_expiration_notifications")
+                call_command("membership_pending_requests")
 
         from post_office.models import Email
 
@@ -69,7 +69,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
             with patch("core.backends.FreeIPAUser.get", return_value=alice):
-                call_command("membership_expiration_notifications")
+                call_command("membership_pending_requests")
 
         from post_office.models import Email
 
@@ -93,9 +93,9 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
             with patch("core.backends.FreeIPAUser.get", return_value=alice):
-                call_command("membership_expiration_notifications")
+                call_command("membership_pending_requests")
                 first = Email.objects.count()
-                call_command("membership_expiration_notifications")
+                call_command("membership_pending_requests")
                 second = Email.objects.count()
 
         self.assertEqual(first, second)
@@ -114,9 +114,9 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
             with patch("core.backends.FreeIPAUser.get", return_value=alice):
-                call_command("membership_expiration_notifications")
+                call_command("membership_pending_requests")
                 first = Email.objects.count()
-                call_command("membership_expiration_notifications", "--force")
+                call_command("membership_pending_requests", "--force")
                 second = Email.objects.count()
 
         self.assertEqual(first + 1, second)
