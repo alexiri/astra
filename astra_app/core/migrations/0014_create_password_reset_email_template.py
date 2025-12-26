@@ -39,12 +39,14 @@ def create_password_reset_email_templates(apps, schema_editor) -> None:
                 "<p>If you did not do this, please contact support immediately.</p>\n"
                 "<p>You can log in here:</p>\n"
                 "<p><a href=\"{{ login_url }}\">Log in</a></p>\n"
+                "<p><em>The AlmaLinux Team</em></p>"
             ),
             "content": (
                 "Hello {{ username }},\n\n"
                 "Your AlmaLinux account password has been reset successfully.\n\n"
                 "If you did not do this, please contact support immediately.\n\n"
-                "Log in: {{ login_url }}\n"
+                "Log in: {{ login_url }}\n\n"
+                "-- The AlmaLinux Team\n"
             ),
         },
     )

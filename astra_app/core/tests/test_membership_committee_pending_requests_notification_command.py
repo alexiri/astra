@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from django.conf import settings
+from django.core.management import call_command
+from django.test import TestCase
+
+from core.backends import FreeIPAGroup, FreeIPAUser
+from core.models import MembershipRequest, MembershipType
+
+
+class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
+    def _create_membership_type(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+    def test_command_sends_single_email_to_committee_when_pending_exists(self) -> None:
+        self._create_membership_type()
+        MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+
+        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice", "bob"]})
+
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []},
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"alice": alice, "bob": bob}.get(username)
+
+        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+                call_command("membership_expiration_notifications")
+
+        from post_office.models import Email
+
+        emails = Email.objects.filter(
+            template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+        )
+        self.assertEqual(emails.count(), 1)
+        msg = emails.first()
+        assert msg is not None
+        self.assertIn("alice@example.com", msg.to)
+        self.assertIn("bob@example.com", msg.to)
+        self.assertIn("/membership/requests/", str(msg.context))
+
+    def test_command_does_not_send_when_no_pending(self) -> None:
+        self._create_membership_type()
+
+        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+            ).exists()
+        )
+
+    def test_command_dedupes_same_day_without_force(self) -> None:
+        self._create_membership_type()
+        MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+
+        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        from post_office.models import Email
+
+        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+                first = Email.objects.count()
+                call_command("membership_expiration_notifications")
+                second = Email.objects.count()
+
+        self.assertEqual(first, second)
+
+    def test_force_sends_even_if_already_sent_today(self) -> None:
+        self._create_membership_type()
+        MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+
+        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        from post_office.models import Email
+
+        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+                first = Email.objects.count()
+                call_command("membership_expiration_notifications", "--force")
+                second = Email.objects.count()
+
+        self.assertEqual(first + 1, second)
