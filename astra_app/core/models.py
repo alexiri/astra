@@ -399,3 +399,44 @@ class MembershipLog(models.Model):
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.ignored,
         )
+
+
+class FreeIPAPermissionGrant(models.Model):
+    """Grant an arbitrary Django permission string to a FreeIPA user or group.
+
+    This intentionally does not use Django's auth.Permission model because:
+    - Our users and groups are backed by FreeIPA, not Django DB rows.
+    - We want grants like "astra.add_membership" without needing a model.
+    """
+
+    class PrincipalType(models.TextChoices):
+        user = "user", "User"
+        group = "group", "Group"
+
+    permission = models.CharField(max_length=150, db_index=True)
+    principal_type = models.CharField(max_length=10, choices=PrincipalType.choices, db_index=True)
+    principal_name = models.CharField(max_length=255, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Permission Grant"
+        verbose_name_plural = "Permission Grants"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["permission", "principal_type", "principal_name"],
+                name="uniq_freeipa_permission_grant",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["principal_type", "principal_name"], name="idx_perm_grant_principal"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.permission} -> {self.principal_type}:{self.principal_name}"
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        # Normalize for stable matching (FreeIPA names are case-insensitive in practice).
+        self.permission = str(self.permission or "").strip().lower()
+        self.principal_name = str(self.principal_name or "").strip().lower()
+        super().save(*args, **kwargs)

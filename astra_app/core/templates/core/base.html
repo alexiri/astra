@@ -58,7 +58,7 @@
       </form>
 
       <ul class="navbar-nav ml-auto navbar-no-expand align-items-center">
-        {% if is_membership_committee %}
+        {% if membership_can_add %}
           <li class="nav-item dropdown">
             <a class="nav-link" data-toggle="dropdown" href="#" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
               <i class="far fa-bell"></i>
@@ -166,7 +166,7 @@
               </li>
             {% endif %}
 
-            {% if is_membership_committee %}
+            {% if membership_can_add or membership_can_view %}
               <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}menu-open{% endif %}">
                 <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}active{% endif %}">
                   <i class="nav-icon fas fa-users-gear mt-1"></i>
@@ -177,24 +177,28 @@
                 </a>
 
                 <ul class="nav nav-treeview" {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}style="display: block;"{% endif %}>
-                  <li class="nav-item">
-                    <a href="{% url 'membership-requests' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' %}active{% endif %}">
-                      <i class="nav-icon fas fa-user-check mt-1"></i>
-                      <p class="mb-0 ml-2 d-flex align-items-start justify-content-between flex-grow-1">
-                        <span class="mr-2">Requests</span>
-                        <span class="badge {% if membership_requests_pending_count %}badge-danger{% else %}badge-success{% endif %} ml-2 align-self-start">
-                          {{ membership_requests_pending_count }}
-                        </span>
-                      </p>
-                    </a>
-                  </li>
+                  {% if membership_can_add %}
+                    <li class="nav-item">
+                      <a href="{% url 'membership-requests' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' %}active{% endif %}">
+                        <i class="nav-icon fas fa-user-check mt-1"></i>
+                        <p class="mb-0 ml-2 d-flex align-items-start justify-content-between flex-grow-1">
+                          <span class="mr-2">Requests</span>
+                          <span class="badge {% if membership_requests_pending_count %}badge-danger{% else %}badge-success{% endif %} ml-2 align-self-start">
+                            {{ membership_requests_pending_count }}
+                          </span>
+                        </p>
+                      </a>
+                    </li>
+                  {% endif %}
 
-                  <li class="nav-item">
-                    <a href="{% url 'membership-audit-log' %}" class="nav-link {% if current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}active{% endif %}">
-                      <i class="nav-icon fas fa-clipboard-list"></i>
-                      <p>Audit Log</p>
-                    </a>
-                  </li>
+                  {% if membership_can_view %}
+                    <li class="nav-item">
+                      <a href="{% url 'membership-audit-log' %}" class="nav-link {% if current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}active{% endif %}">
+                        <i class="nav-icon fas fa-clipboard-list"></i>
+                        <p>Audit Log</p>
+                      </a>
+                    </li>
+                  {% endif %}
                 </ul>
               </li>
             {% endif %}

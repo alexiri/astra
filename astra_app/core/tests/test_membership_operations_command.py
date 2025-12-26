@@ -16,8 +16,8 @@ class MembershipOperationsCommandTests(TestCase):
         self.assertEqual(
             cc.mock_calls,
             [
-                call("membership_expiration_notifications", force=False),
                 call("membership_expired_cleanup", force=False),
+                call("membership_expiration_notifications", force=False),
                 call("membership_pending_requests", force=False),
             ],
         )
@@ -31,8 +31,8 @@ class MembershipOperationsCommandTests(TestCase):
         self.assertEqual(
             cc.mock_calls,
             [
-                call("membership_expiration_notifications", force=True),
                 call("membership_expired_cleanup", force=True),
+                call("membership_expiration_notifications", force=True),
                 call("membership_pending_requests", force=True),
             ],
         )

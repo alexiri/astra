@@ -156,7 +156,7 @@
         <li class="list-group-item d-flex justify-content-between align-items-center">
           <strong>Membership</strong>
           <div class="d-flex align-items-center" style="gap: .5rem;">
-            {% if is_membership_committee %}
+            {% if membership_can_view %}
               <a href="{% url 'membership-audit-log-user' fu.username %}" class="btn btn-sm btn-outline-secondary">History</a>
             {% endif %}
             {% if is_self %}
@@ -199,20 +199,23 @@
                 <span class="badge badge-success">Active</span>
               {% endif %}
 
-              {% if is_membership_committee %}
-                <a
-                  href="{% url 'membership-set-expiry' fu.username m.membership_type.code %}"
-                  class="btn btn-sm btn-outline-secondary ml-2"
-                >Edit expiry</a>
-                <form
-                  method="post"
-                  action="{% url 'membership-terminate' fu.username m.membership_type.code %}"
-                  class="d-inline"
-                  onsubmit="return confirm('Terminate this membership early?');"
-                >
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-danger ml-1">Terminate</button>
-                </form>
+              {% if membership_can_change %}
+              <a
+                href="{% url 'membership-set-expiry' fu.username m.membership_type.code %}"
+                class="btn btn-sm btn-outline-secondary ml-2"
+              >Edit expiry</a>
+              {% endif %}
+
+              {% if membership_can_delete %}
+              <form
+                method="post"
+                action="{% url 'membership-terminate' fu.username m.membership_type.code %}"
+                class="d-inline"
+                onsubmit="return confirm('Terminate this membership early?');"
+              >
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger ml-1">Terminate</button>
+              </form>
               {% endif %}
             </div>
           </li>

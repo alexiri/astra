@@ -777,13 +777,39 @@ class FreeIPAUser:
 
 
     def get_all_permissions(self, obj=None):
-        return self.get_group_permissions(obj)
+        if obj is not None:
+            return set()
+        return self.get_group_permissions(obj) | self.get_user_permissions(obj)
+
+    def get_user_permissions(self, obj=None):
+        if obj is not None:
+            return set()
+
+        try:
+            from core.models import FreeIPAPermissionGrant
+        except Exception:
+            # Avoid hard-failing early during app startup / migrations.
+            return set()
+
+        username = str(self.username or "").strip().lower()
+        if not username:
+            return set()
+
+        return set(
+            FreeIPAPermissionGrant.objects.filter(
+                principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+                principal_name=username,
+            ).values_list("permission", flat=True)
+        )
 
     def has_perm(self, perm, obj=None):
         # Check if user has permission
         if self.is_active and self.is_superuser:
             return True
         return perm in self.get_all_permissions(obj)
+
+    def has_perms(self, perm_list, obj=None):
+        return all(self.has_perm(perm, obj) for perm in perm_list)
 
     def has_module_perms(self, app_label):
         if self.is_active and self.is_superuser:
@@ -800,6 +826,22 @@ class FreeIPAUser:
         for group in self.groups_list:
             if group in group_permissions_map:
                 perms.update(group_permissions_map[group])
+
+        try:
+            from core.models import FreeIPAPermissionGrant
+        except Exception:
+            return perms
+
+        groups = [str(g or "").strip().lower() for g in self.groups_list if str(g or "").strip()]
+        if not groups:
+            return perms
+
+        perms.update(
+            FreeIPAPermissionGrant.objects.filter(
+                principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+                principal_name__in=groups,
+            ).values_list("permission", flat=True)
+        )
 
         return perms
 

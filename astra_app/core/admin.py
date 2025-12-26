@@ -13,7 +13,7 @@ from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, JsonResponse
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
@@ -31,7 +31,7 @@ from .backends import (
     _invalidate_agreements_list_cache,
 )
 from .listbacked_queryset import _ListBackedQuerySet
-from .models import IPAFASAgreement, IPAGroup, IPAUser, MembershipType, Organization
+from .models import FreeIPAPermissionGrant, IPAFASAgreement, IPAGroup, IPAUser, MembershipType, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -1267,6 +1267,93 @@ class OrganizationAdmin(admin.ModelAdmin):
         if obj is not None and "code" not in readonly:
             readonly.append("code")
         return tuple(readonly)
+
+
+@admin.register(FreeIPAPermissionGrant)
+class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
+    class FreeIPAPermissionGrantAdminForm(forms.ModelForm):
+        principal_type = forms.ChoiceField(
+            label="Principal Type",
+            choices=FreeIPAPermissionGrant.PrincipalType.choices,
+            help_text="Grant to either a FreeIPA User or FreeIPA Group.",
+        )
+
+        principal_name = forms.ChoiceField(
+            label="Principal Name",
+            help_text="Select the FreeIPA principal (user or group) to grant this permission to.",
+        )
+
+        class Meta:
+            model = FreeIPAPermissionGrant
+            fields = "__all__"
+
+        @override
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            raw_selected_type = self.data.get("principal_type")
+            selected_type = (
+                str(raw_selected_type).strip()
+                if raw_selected_type is not None
+                else str(self.initial.get("principal_type") or self.instance.principal_type or "").strip()
+            )
+            if not selected_type:
+                selected_type = FreeIPAPermissionGrant.PrincipalType.user
+
+            current = str(self.initial.get("principal_name") or "").strip()
+            if not current and self.instance and self.instance.principal_name:
+                current = str(self.instance.principal_name or "").strip()
+
+            if selected_type == FreeIPAPermissionGrant.PrincipalType.group:
+                principals = [g.cn for g in FreeIPAGroup.all() if g.cn]
+            else:
+                principals = [u.username for u in FreeIPAUser.all() if u.username]
+
+            principal_names = sorted(set(principals), key=str.lower)
+            if current and current not in principal_names:
+                principal_names.append(current)
+                principal_names = sorted(set(principal_names), key=str.lower)
+
+            self.fields["principal_name"].choices = [("", "---------"), *[(n, n) for n in principal_names]]
+
+    class Media:
+        js = (
+            "core/js/admin_permission_grants_principal_dropdown.js",
+        )
+
+    form = FreeIPAPermissionGrantAdminForm
+
+    list_display = ("permission", "principal_type", "principal_name", "created_at")
+    list_filter = ("principal_type",)
+    search_fields = ("permission", "principal_name")
+    ordering = ("permission", "principal_type", "principal_name")
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+
+        custom = [
+            path(
+                "principals/",
+                self.admin_site.admin_view(self.principals_view),
+                name="core_freeipapermissiongrant_principals",
+            ),
+        ]
+
+        return custom + urls
+
+    def principals_view(self, request):
+        raw = request.GET.get("principal_type")
+        principal_type = str(raw or "").strip()
+
+        if principal_type == FreeIPAPermissionGrant.PrincipalType.group:
+            names = [g.cn for g in FreeIPAGroup.all() if g.cn]
+        else:
+            # Default to user if unspecified/invalid.
+            names = [u.username for u in FreeIPAUser.all() if u.username]
+
+        names = sorted(set(names), key=str.lower)
+        return JsonResponse({"principal_type": principal_type or FreeIPAPermissionGrant.PrincipalType.user, "principals": names})
 
 # Replace DB-backed auth models in admin with FreeIPA-backed listings.
 try:

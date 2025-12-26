@@ -7,9 +7,26 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
+from core.models import FreeIPAPermissionGrant
+from core.permissions import (
+    ASTRA_ADD_MEMBERSHIP,
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_DELETE_MEMBERSHIP,
+    ASTRA_VIEW_MEMBERSHIP,
+)
 
 
 class MembershipRequestsFlowTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+
+        for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP):
+            FreeIPAPermissionGrant.objects.get_or_create(
+                permission=perm,
+                principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+                principal_name="membership-committee",
+            )
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -84,7 +101,7 @@ class MembershipRequestsFlowTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -156,7 +173,7 @@ class MembershipRequestsFlowTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -226,7 +243,7 @@ class MembershipRequestsFlowTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -289,7 +306,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -354,7 +371,7 @@ class MembershipRequestsFlowTests(TestCase):
         MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         MembershipRequest.objects.create(requested_username="bob", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -428,7 +445,7 @@ class MembershipRequestsFlowTests(TestCase):
         req1 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         req2 = MembershipRequest.objects.create(requested_username="bob", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -518,7 +535,7 @@ class MembershipRequestsFlowTests(TestCase):
         req1 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         req2 = MembershipRequest.objects.create(requested_username="bob", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -565,7 +582,7 @@ class MembershipRequestsFlowTests(TestCase):
         req1 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         req2 = MembershipRequest.objects.create(requested_username="bob", membership_type_id="individual")
 
-        committee_cn = settings.MEMBERSHIP_COMMITTEE_GROUP_CN
+        committee_cn = "membership-committee"
         reviewer = FreeIPAUser(
             "reviewer",
             {

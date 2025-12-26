@@ -42,12 +42,14 @@
         </form>
       </div>
 
-      <div class="card-footer">
-        <form method="post" action="{% url 'membership-terminate' target_username membership_type.code %}" onsubmit="return confirm('Terminate this membership early?');" class="m-0">
-          {% csrf_token %}
-          <button type="submit" class="btn btn-outline-danger">Terminate membership</button>
-        </form>
-      </div>
+      {% if membership_can_delete %}
+        <div class="card-footer">
+          <form method="post" action="{% url 'membership-terminate' target_username membership_type.code %}" onsubmit="return confirm('Terminate this membership early?');" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-danger">Terminate membership</button>
+          </form>
+        </div>
+      {% endif %}
     </div>
   </div>
 </div>

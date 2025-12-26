@@ -7,10 +7,19 @@ from django.core.management import call_command
 from django.test import TestCase
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.models import MembershipRequest, MembershipType
+from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
+from core.permissions import ASTRA_ADD_MEMBERSHIP
 
 
 class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name="membership-committee",
+        )
+
     def _create_membership_type(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -28,7 +37,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         self._create_membership_type()
         MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
 
-        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice", "bob"]})
+        committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice", "bob"]})
 
         alice = FreeIPAUser(
             "alice",
@@ -61,7 +70,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
     def test_command_does_not_send_when_no_pending(self) -> None:
         self._create_membership_type()
 
-        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice"]})
+        committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice"]})
         alice = FreeIPAUser(
             "alice",
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
@@ -83,7 +92,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         self._create_membership_type()
         MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
 
-        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice"]})
+        committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice"]})
         alice = FreeIPAUser(
             "alice",
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
@@ -104,7 +113,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         self._create_membership_type()
         MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
 
-        committee_group = FreeIPAGroup(settings.MEMBERSHIP_COMMITTEE_GROUP_CN, {"member_user": ["alice"]})
+        committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice"]})
         alice = FreeIPAUser(
             "alice",
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},

@@ -9,6 +9,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.models import FreeIPAPermissionGrant
 from core.models import MembershipRequest
 
 
@@ -38,19 +40,29 @@ class Command(BaseCommand):
             self.stdout.write("No pending membership requests.")
             return
 
-        committee_cn = str(settings.MEMBERSHIP_COMMITTEE_GROUP_CN or "").strip()
-        if not committee_cn:
-            raise CommandError("MEMBERSHIP_COMMITTEE_GROUP_CN is not configured")
+        grants = list(FreeIPAPermissionGrant.objects.filter(permission=ASTRA_ADD_MEMBERSHIP))
+        if not grants:
+            raise CommandError(f"No FreeIPA grants exist for permission: {ASTRA_ADD_MEMBERSHIP}")
 
-        committee_group = FreeIPAGroup.get(committee_cn)
-        if committee_group is None:
-            raise CommandError(f"Unable to load committee group from FreeIPA: {committee_cn}")
+        direct_usernames: list[str] = []
+        group_names: list[str] = []
+        for grant in grants:
+            if grant.principal_type == FreeIPAPermissionGrant.PrincipalType.user:
+                direct_usernames.append(grant.principal_name)
+            elif grant.principal_type == FreeIPAPermissionGrant.PrincipalType.group:
+                group_names.append(grant.principal_name)
 
         recipients: list[str] = []
         seen: set[str] = set()
-        members: Iterable[str] = committee_group.members
 
-        for username in members:
+        expanded_usernames: list[str] = [*direct_usernames]
+        for group_name in group_names:
+            group = FreeIPAGroup.get(group_name)
+            if group is None:
+                raise CommandError(f"Unable to load FreeIPA group referenced by permission grant: {group_name}")
+            expanded_usernames.extend(list(group.members))
+
+        for username in expanded_usernames:
             user = FreeIPAUser.get(username)
             if user is None or not user.email:
                 continue
@@ -61,7 +73,7 @@ class Command(BaseCommand):
             recipients.append(addr)
 
         if not recipients:
-            raise CommandError(f"No email addresses found for committee group members: {committee_cn}")
+            raise CommandError(f"No email addresses found for any principals with {ASTRA_ADD_MEMBERSHIP}")
 
         if not force:
             from post_office.models import Email

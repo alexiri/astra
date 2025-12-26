@@ -6,20 +6,7 @@ from collections.abc import Iterable
 from django.conf import settings
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.models import Membership
-
-
-def is_membership_committee_user(user: object) -> bool:
-    if not isinstance(user, FreeIPAUser):
-        return False
-
-    committee_cn = str(settings.MEMBERSHIP_COMMITTEE_GROUP_CN or "").strip()
-    if not committee_cn:
-        return False
-
-    committee_key = committee_cn.lower()
-    return any(str(g or "").lower() == committee_key for g in user.groups_list)
 
 
 def get_valid_memberships_for_username(username: str) -> list[Membership]:
