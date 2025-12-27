@@ -11,9 +11,76 @@
     <div class="card-body">
       <form method="post">
         {% csrf_token %}
-        {{ form.as_p }}
+
+        <div class="mb-3">
+          {{ form.membership_type.label_tag }}
+          <div class="mt-1">{{ form.membership_type }}</div>
+          {% if form.membership_type.errors %}
+            <div class="text-danger small">{{ form.membership_type.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div id="questions-individual" class="mt-3">
+          <h5>Individual</h5>
+          <div class="mb-3">
+            {{ form.q_contributions.label_tag }}
+            <div class="mt-1">{{ form.q_contributions }}</div>
+            {% if form.q_contributions.errors %}
+              <div class="text-danger small">{{ form.q_contributions.errors }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div id="questions-mirror" class="mt-3">
+          <h5>Mirror</h5>
+          <div class="mb-3">
+            {{ form.q_domain.label_tag }}
+            <div class="mt-1">{{ form.q_domain }}</div>
+            {% if form.q_domain.errors %}
+              <div class="text-danger small">{{ form.q_domain.errors }}</div>
+            {% endif %}
+          </div>
+          <div class="mb-3">
+            {{ form.q_pull_request.label_tag }}
+            <div class="mt-1">{{ form.q_pull_request }}</div>
+            {% if form.q_pull_request.errors %}
+              <div class="text-danger small">{{ form.q_pull_request.errors }}</div>
+            {% endif %}
+          </div>
+          <div class="mb-3">
+            {{ form.q_additional_info.label_tag }}
+            <div class="mt-1">{{ form.q_additional_info }}</div>
+            {% if form.q_additional_info.errors %}
+              <div class="text-danger small">{{ form.q_additional_info.errors }}</div>
+            {% endif %}
+          </div>
+        </div>
+
         <button type="submit" class="btn btn-primary">Submit request</button>
       </form>
     </div>
   </div>
+
+  <script>
+    (function () {
+      const select = document.getElementById('id_membership_type');
+      const individual = document.getElementById('questions-individual');
+      const mirror = document.getElementById('questions-mirror');
+      if (!select || !individual || !mirror) return;
+
+      function update() {
+        const code = select.value || '';
+        if (code === 'mirror') {
+          individual.style.display = 'none';
+          mirror.style.display = '';
+        } else {
+          individual.style.display = '';
+          mirror.style.display = 'none';
+        }
+      }
+
+      select.addEventListener('change', update);
+      update();
+    })();
+  </script>
 {% endblock %}

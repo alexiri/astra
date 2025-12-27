@@ -9,6 +9,7 @@ from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
 from django.utils import timezone
+from django.db.models import Q
 from PIL import Image
 
 
@@ -179,19 +180,32 @@ class Organization(models.Model):
 
 
 class MembershipRequest(models.Model):
+    class Status(models.TextChoices):
+        pending = "pending", "Pending"
+        approved = "approved", "Approved"
+        rejected = "rejected", "Rejected"
+        ignored = "ignored", "Ignored"
+
     requested_username = models.CharField(max_length=255)
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     requested_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.pending, db_index=True)
+    decided_at = models.DateTimeField(blank=True, null=True)
+    decided_by_username = models.CharField(max_length=255, blank=True, default="")
+    responses = models.JSONField(blank=True, default=list)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["requested_username"],
-                name="uniq_membershiprequest_requested_username",
+                fields=["requested_username", "membership_type"],
+                condition=Q(status="pending"),
+                name="uniq_membershiprequest_open_user_type",
             ),
         ]
         indexes = [
             models.Index(fields=["requested_at"], name="mr_req_at"),
+            models.Index(fields=["status", "requested_at"], name="mr_status_at"),
+            models.Index(fields=["requested_username", "status"], name="mr_user_status"),
         ]
         ordering = ("-requested_at",)
 
@@ -235,6 +249,13 @@ class MembershipLog(models.Model):
     actor_username = models.CharField(max_length=255)
     target_username = models.CharField(max_length=255)
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
+    membership_request = models.ForeignKey(
+        MembershipRequest,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="logs",
+    )
     requested_group_cn = models.CharField(max_length=255, blank=True, default="")
     action = models.CharField(max_length=32, choices=Action.choices)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -304,11 +325,13 @@ class MembershipLog(models.Model):
         actor_username: str,
         target_username: str,
         membership_type: MembershipType,
+        membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
             membership_type=membership_type,
+            membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.requested,
         )
@@ -321,12 +344,14 @@ class MembershipLog(models.Model):
         target_username: str,
         membership_type: MembershipType,
         previous_expires_at: datetime.datetime | None = None,
+        membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         approved_at = timezone.now()
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
             membership_type=membership_type,
+            membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.approved,
             expires_at=cls.expiry_for_approval_at(approved_at=approved_at, previous_expires_at=previous_expires_at),
@@ -340,11 +365,13 @@ class MembershipLog(models.Model):
         target_username: str,
         membership_type: MembershipType,
         expires_at: datetime.datetime,
+        membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
             membership_type=membership_type,
+            membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.expiry_changed,
             expires_at=expires_at,
@@ -357,12 +384,14 @@ class MembershipLog(models.Model):
         actor_username: str,
         target_username: str,
         membership_type: MembershipType,
+        membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         terminated_at = timezone.now()
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
             membership_type=membership_type,
+            membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.terminated,
             expires_at=terminated_at,
@@ -376,11 +405,13 @@ class MembershipLog(models.Model):
         target_username: str,
         membership_type: MembershipType,
         rejection_reason: str,
+        membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
             membership_type=membership_type,
+            membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.rejected,
             rejection_reason=rejection_reason,
@@ -393,11 +424,13 @@ class MembershipLog(models.Model):
         actor_username: str,
         target_username: str,
         membership_type: MembershipType,
+        membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
             membership_type=membership_type,
+            membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.ignored,
         )

@@ -61,14 +61,17 @@ class MembershipRequestsFlowTests(TestCase):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request"),
-                    data={"membership_type": "individual"},
+                    data={
+                        "membership_type": "individual",
+                        "q_contributions": "I contributed docs and CI improvements.",
+                    },
                     follow=False,
                 )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertTrue(
-            MembershipRequest.objects.filter(requested_username="alice", membership_type_id="individual").exists()
-        )
+        req = MembershipRequest.objects.get(requested_username="alice", membership_type_id="individual")
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        self.assertEqual(req.responses, [{"Contributions": "I contributed docs and CI improvements."}])
         self.assertTrue(
             MembershipLog.objects.filter(
                 target_username="alice",
@@ -84,6 +87,55 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
         self.assertEqual(kwargs["context"]["username"], "alice")
         self.assertEqual(kwargs["context"]["membership_type"], "Individual")
+
+    def test_membership_request_form_hides_membership_types_with_pending_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.forms_membership.get_valid_membership_type_codes_for_username", return_value=set()),
+            patch("core.forms_membership.get_extendable_membership_type_codes_for_username", return_value=set()),
+        ):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="individual"')
+        self.assertContains(resp, 'value="mirror"')
 
     def test_committee_can_approve_request_adds_user_to_group_logs_and_emails(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
@@ -138,7 +190,8 @@ class MembershipRequestsFlowTests(TestCase):
                     )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(MembershipRequest.objects.filter(pk=req.pk).exists())
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
         add_mock.assert_called_once()
         _, call_kwargs = add_mock.call_args
         self.assertEqual(call_kwargs["group_name"], "almalinux-individual")
@@ -210,7 +263,8 @@ class MembershipRequestsFlowTests(TestCase):
                 )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(MembershipRequest.objects.filter(pk=req.pk).exists())
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.rejected)
         self.assertTrue(
             MembershipLog.objects.filter(
                 actor_username="reviewer",
@@ -263,7 +317,8 @@ class MembershipRequestsFlowTests(TestCase):
                 )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(MembershipRequest.objects.filter(pk=req.pk).exists())
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.ignored)
         self.assertTrue(
             MembershipLog.objects.filter(
                 actor_username="reviewer",
@@ -494,8 +549,10 @@ class MembershipRequestsFlowTests(TestCase):
                     )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(MembershipRequest.objects.filter(pk=req1.pk).exists())
-        self.assertFalse(MembershipRequest.objects.filter(pk=req2.pk).exists())
+        req1.refresh_from_db()
+        req2.refresh_from_db()
+        self.assertEqual(req1.status, MembershipRequest.Status.approved)
+        self.assertEqual(req2.status, MembershipRequest.Status.approved)
         self.assertEqual(add_mock.call_count, 2)
         send_mock.assert_called()
         self.assertEqual(send_mock.call_count, 2)
@@ -558,8 +615,10 @@ class MembershipRequestsFlowTests(TestCase):
                 )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(MembershipRequest.objects.filter(pk=req1.pk).exists())
-        self.assertFalse(MembershipRequest.objects.filter(pk=req2.pk).exists())
+        req1.refresh_from_db()
+        req2.refresh_from_db()
+        self.assertEqual(req1.status, MembershipRequest.Status.ignored)
+        self.assertEqual(req2.status, MembershipRequest.Status.ignored)
         send_mock.assert_not_called()
         self.assertTrue(MembershipLog.objects.filter(target_username="alice", action=MembershipLog.Action.ignored).exists())
         self.assertTrue(MembershipLog.objects.filter(target_username="bob", action=MembershipLog.Action.ignored).exists())
@@ -630,8 +689,10 @@ class MembershipRequestsFlowTests(TestCase):
                 )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(MembershipRequest.objects.filter(pk=req1.pk).exists())
-        self.assertFalse(MembershipRequest.objects.filter(pk=req2.pk).exists())
+        req1.refresh_from_db()
+        req2.refresh_from_db()
+        self.assertEqual(req1.status, MembershipRequest.Status.rejected)
+        self.assertEqual(req2.status, MembershipRequest.Status.rejected)
         self.assertEqual(send_mock.call_count, 2)
         self.assertTrue(MembershipLog.objects.filter(target_username="alice", action=MembershipLog.Action.rejected).exists())
         self.assertTrue(MembershipLog.objects.filter(target_username="bob", action=MembershipLog.Action.rejected).exists())

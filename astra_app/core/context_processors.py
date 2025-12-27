@@ -29,7 +29,9 @@ def membership_review(request) -> dict[str, object]:
     membership_can_view = bool(has_has_perm and user.has_perm(ASTRA_VIEW_MEMBERSHIP))
 
     # Requests UI + approve/reject/ignore is guarded by "add".
-    pending_count = MembershipRequest.objects.count() if membership_can_add else 0
+    pending_count = (
+        MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count() if membership_can_add else 0
+    )
 
     return {
         "membership_can_add": membership_can_add,

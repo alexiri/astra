@@ -16,6 +16,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
+from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
@@ -90,19 +91,37 @@ def membership_request(request: HttpRequest) -> HttpResponse:
             membership_type: MembershipType = form.cleaned_data["membership_type"]
             if not membership_type.enabled:
                 form.add_error("membership_type", "That membership type is not available.")
-            elif not membership_type.isIndividual:
+            elif not membership_type.isIndividual and membership_type.code != "mirror":
                 form.add_error("membership_type", "That membership type is not available.")
             elif not membership_type.group_cn:
                 form.add_error("membership_type", "That membership type is not currently linked to a group.")
             else:
-                MembershipRequest.objects.update_or_create(
+                existing = (
+                    MembershipRequest.objects.filter(
+                        requested_username=username,
+                        membership_type=membership_type,
+                        status=MembershipRequest.Status.pending,
+                    )
+                    .order_by("-requested_at")
+                    .first()
+                )
+                if existing is not None:
+                    messages.info(request, "You already have a pending request of that type.")
+                    return redirect("user-profile", username=username)
+
+                responses = form.responses()
+
+                mr = MembershipRequest.objects.create(
                     requested_username=username,
-                    defaults={"membership_type": membership_type},
+                    membership_type=membership_type,
+                    status=MembershipRequest.Status.pending,
+                    responses=responses,
                 )
                 MembershipLog.create_for_request(
                     actor_username=username,
                     target_username=username,
                     membership_type=membership_type,
+                    membership_request=mr,
                 )
 
                 if fu.email:
@@ -138,7 +157,11 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
     username = _normalize_str(request.GET.get("username"))
     page_number = _normalize_str(request.GET.get("page")) or None
 
-    logs = MembershipLog.objects.select_related("membership_type").all()
+    logs = MembershipLog.objects.select_related(
+        "membership_type",
+        "membership_request",
+        "membership_request__membership_type",
+    ).all()
     if username:
         logs = logs.filter(target_username=username)
     if q:
@@ -182,7 +205,11 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
     page_number = _normalize_str(request.GET.get("page")) or None
 
     logs = (
-        MembershipLog.objects.select_related("membership_type")
+        MembershipLog.objects.select_related(
+            "membership_type",
+            "membership_request",
+            "membership_request__membership_type",
+        )
         .filter(target_username=username)
         .order_by("-created_at")
     )
@@ -218,7 +245,11 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
 @login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
-    requests = MembershipRequest.objects.select_related("membership_type").all()
+    requests = (
+        MembershipRequest.objects.select_related("membership_type")
+        .filter(status=MembershipRequest.Status.pending)
+        .order_by("requested_at")
+    )
 
     request_rows: list[dict[str, object]] = []
     for r in requests:
@@ -337,8 +368,12 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                     username=req.requested_username,
                     membership_type=membership_type,
                 ),
+                membership_request=req,
             )
-            req.delete()
+            req.status = MembershipRequest.Status.approved
+            req.decided_at = timezone.now()
+            req.decided_by_username = actor_username
+            req.save(update_fields=["status", "decided_at", "decided_by_username"])
             approved += 1
 
             if target.email:
@@ -362,8 +397,12 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                 target_username=req.requested_username,
                 membership_type=membership_type,
                 rejection_reason=reason,
+                membership_request=req,
             )
-            req.delete()
+            req.status = MembershipRequest.Status.rejected
+            req.decided_at = timezone.now()
+            req.decided_by_username = actor_username
+            req.save(update_fields=["status", "decided_at", "decided_by_username"])
             rejected += 1
 
             if target is not None and target.email:
@@ -384,8 +423,12 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                 actor_username=actor_username,
                 target_username=req.requested_username,
                 membership_type=membership_type,
+                membership_request=req,
             )
-            req.delete()
+            req.status = MembershipRequest.Status.ignored
+            req.decided_at = timezone.now()
+            req.decided_by_username = actor_username
+            req.save(update_fields=["status", "decided_at", "decided_by_username"])
             ignored += 1
 
     if approved:
@@ -432,9 +475,13 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
             username=req.requested_username,
             membership_type=membership_type,
         ),
+        membership_request=req,
     )
 
-    req.delete()
+    req.status = MembershipRequest.Status.approved
+    req.decided_at = timezone.now()
+    req.decided_by_username = request.user.get_username()
+    req.save(update_fields=["status", "decided_at", "decided_by_username"])
 
     if target.email:
         post_office.mail.send(
@@ -470,9 +517,13 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
                 target_username=req.requested_username,
                 membership_type=membership_type,
                 rejection_reason=reason,
+                membership_request=req,
             )
 
-            req.delete()
+            req.status = MembershipRequest.Status.rejected
+            req.decided_at = timezone.now()
+            req.decided_by_username = request.user.get_username()
+            req.save(update_fields=["status", "decided_at", "decided_by_username"])
 
             if target is not None and target.email:
                 post_office.mail.send(
@@ -513,8 +564,13 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
         actor_username=request.user.get_username(),
         target_username=req.requested_username,
         membership_type=req.membership_type,
+        membership_request=req,
     )
-    req.delete()
+
+    req.status = MembershipRequest.Status.ignored
+    req.decided_at = timezone.now()
+    req.decided_by_username = request.user.get_username()
+    req.save(update_fields=["status", "decided_at", "decided_by_username"])
 
     messages.success(request, f"Ignored membership request for {req.requested_username}.")
     return redirect("membership-requests")

@@ -140,10 +140,10 @@ def _profile_context_for_user(
             }
         )
 
-    pending_request = (
+    pending_requests = list(
         MembershipRequest.objects.select_related("membership_type")
-        .filter(requested_username=fu.username)
-        .first()
+        .filter(requested_username=fu.username, status=MembershipRequest.Status.pending)
+        .order_by("requested_at")
     )
 
     membership_can_request_any = MembershipType.objects.filter(enabled=True, isIndividual=True).exclude(
@@ -157,7 +157,7 @@ def _profile_context_for_user(
         "membership_request_url": membership_request_url,
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,
-        "membership_pending_request": pending_request,
+        "membership_pending_requests": pending_requests,
         "groups": groups,
         "agreements": agreements,
         "missing_agreements": missing_agreements,

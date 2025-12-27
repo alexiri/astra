@@ -220,7 +220,7 @@
             </div>
           </li>
         {% empty %}
-          {% if not membership_pending_request %}
+          {% if not membership_pending_requests %}
             <li class="list-group-item text-muted">
               No memberships yet.
               {% if is_self and membership_can_request_any %}
@@ -230,14 +230,14 @@
           {% endif %}
         {% endfor %}
 
-        {% if membership_pending_request %}
+        {% for req in membership_pending_requests %}
           <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
             <div>
-              <div class="font-weight-bold">{{ membership_pending_request.membership_type.name }}</div>
+              <div class="font-weight-bold">{{ req.membership_type.name }}</div>
             </div>
             <span class="badge badge-secondary">Pending</span>
           </li>
-        {% endif %}
+        {% endfor %}
 
         {% if membership_can_view %}
           <li class="list-group-item">

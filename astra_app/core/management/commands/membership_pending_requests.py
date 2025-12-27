@@ -35,7 +35,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options) -> None:
         force: bool = bool(options.get("force"))
 
-        pending_count = MembershipRequest.objects.count()
+        pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
         if pending_count <= 0:
             self.stdout.write("No pending membership requests.")
             return

@@ -62,7 +62,28 @@
                 <a href="{% url 'user-profile' l.target_username %}">{{ l.target_username }}</a>
               </td>
               <td>{{ l.membership_type.name }}</td>
-              <td>{{ l.get_action_display }}</td>
+              <td>
+                {{ l.get_action_display }}
+                {% if l.membership_request and l.membership_request.responses %}
+                  <details class="mt-1">
+                    <summary class="small text-muted">Request responses</summary>
+                    <div class="mt-2">
+                      <div class="small text-muted">
+                        Request #{{ l.membership_request.pk }}
+                        &middot; {{ l.membership_request.requested_at|date:"r" }}
+                      </div>
+                      <div class="mt-2">
+                        {% for item in l.membership_request.responses %}
+                          {% for k,v in item.items %}
+                            <div class="small text-muted font-weight-bold">{{ k }}</div>
+                            <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+                          {% endfor %}
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </details>
+                {% endif %}
+              </td>
               <td class="text-muted">{% if l.expires_at %}{{ l.expires_at|date:"M j, Y" }}{% endif %}</td>
             </tr>
           {% empty %}

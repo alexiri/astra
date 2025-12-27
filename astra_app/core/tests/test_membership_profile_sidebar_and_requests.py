@@ -109,6 +109,49 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "Pending")
         self.assertContains(resp, "Individual")
 
+    def test_profile_shows_all_pending_membership_requests(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        MembershipRequest.objects.create(requested_username="alice", membership_type_id="mirror")
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.views_users._get_full_user", return_value=alice):
+                with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                    with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Pending")
+        self.assertContains(resp, "Individual")
+        self.assertContains(resp, "Mirror")
+
     def test_profile_shows_extend_button_when_membership_expires_soon(self) -> None:
         from core.models import MembershipLog, MembershipType
 
@@ -236,7 +279,12 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             )
 
         self.assertEqual(resp_post.status_code, 200)
-        self.assertFalse(MembershipRequest.objects.filter(requested_username="alice").exists())
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_username="alice",
+                status=MembershipRequest.Status.pending,
+            ).exists()
+        )
 
     def test_profile_disables_request_button_when_no_membership_types_available(self) -> None:
         from core.models import MembershipLog, MembershipType
@@ -594,6 +642,47 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "Membership Committee Notes")
         self.assertContains(resp, "Request note")
 
+    def test_requests_list_shows_request_responses_in_collapsible_section(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[{"Contributions": "I did docs and CI."}],
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = self._make_user("alice", full_name="Alice User")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Request responses")
+        self.assertContains(resp, "Contributions")
+        self.assertContains(resp, "I did docs and CI.")
+
     def test_membership_status_note_update_calls_backend(self) -> None:
         committee_cn = "membership-committee"
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
@@ -613,7 +702,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         set_note.assert_called_once_with("alice", "Updated")
 
-    def test_membership_request_only_allows_individual_membership_types(self) -> None:
+    def test_membership_request_allows_individual_and_mirror_membership_types(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -647,16 +736,47 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp_get.status_code, 200)
         self.assertContains(resp_get, 'value="individual"')
-        self.assertNotContains(resp_get, 'value="mirror"')
+        self.assertContains(resp_get, 'value="mirror"')
 
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            resp_post = self.client.post(
+            resp_post_invalid = self.client.post(
                 reverse("membership-request"),
                 data={"membership_type": "mirror"},
             )
 
-        self.assertEqual(resp_post.status_code, 200)
-        self.assertFalse(MembershipRequest.objects.filter(requested_username="alice").exists())
+        self.assertEqual(resp_post_invalid.status_code, 200)
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_username="alice",
+                status=MembershipRequest.Status.pending,
+            ).exists()
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp_post_valid = self.client.post(
+                reverse("membership-request"),
+                data={
+                    "membership_type": "mirror",
+                    "q_domain": "example.com",
+                    "q_pull_request": "https://github.com/example/repo/pull/123",
+                    "q_additional_info": "Extra details",
+                },
+            )
+
+        self.assertEqual(resp_post_valid.status_code, 302)
+        req = MembershipRequest.objects.get(
+            requested_username="alice",
+            status=MembershipRequest.Status.pending,
+        )
+        self.assertEqual(req.membership_type_id, "mirror")
+        self.assertEqual(
+            req.responses,
+            [
+                {"Domain": "example.com"},
+                {"Pull request": "https://github.com/example/repo/pull/123"},
+                {"Additional info": "Extra details"},
+            ],
+        )
 
     def test_membership_audit_log_is_paginated_50_per_page(self) -> None:
         import datetime
@@ -743,6 +863,46 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp_user.status_code, 200)
         self.assertContains(resp_user, "Membership Audit Log")
         self.assertContains(resp_user, "alice")
+
+    def test_membership_audit_log_shows_linked_request_responses(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[{"Contributions": "Patch submissions"}],
+        )
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.requested,
+            membership_request=req,
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-audit-log"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Request responses")
+        self.assertContains(resp, "Contributions")
+        self.assertContains(resp, "Patch submissions")
 
     def test_membership_management_menu_stays_open_on_child_pages(self) -> None:
         committee_cn = "membership-committee"
