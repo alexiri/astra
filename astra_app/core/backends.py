@@ -413,6 +413,11 @@ class FreeIPAUser:
         krb_last_pwd_change = _first_attr_ci(self._user_data, "krbLastPwdChange", None)
         self.last_password_change = str(krb_last_pwd_change).strip() if krb_last_pwd_change else ""
 
+        # FreeIPA field (Fedora/FAS extension) used as a general status note.
+        # Stored in FreeIPA as a text field, usually returned as a list.
+        fas_status_note = _first_attr_ci(self._user_data, "fasstatusnote", None)
+        self.fasstatusnote = str(fas_status_note).strip() if fas_status_note else ""
+
         # Privacy flag is commonly exposed as `fasisprivate` (Noggin/FAS), but
         # some clients/plugins surface it as `fasIsPrivate`.
         fas_is_private_raw = _first_attr_ci(self._user_data, "fasIsPrivate", None)
@@ -699,6 +704,47 @@ class FreeIPAUser:
         except Exception:
             logger.exception("Failed to create user username=%s", username)
             raise
+
+    @classmethod
+    def set_status_note(cls, username: str, note: str) -> None:
+        """Update a user's FreeIPA fasstatusnote without touching other fields."""
+
+        normalized_username = str(username or "").strip()
+        if not normalized_username:
+            raise ValueError("username is required")
+
+        # FreeIPA's RPC layer does not expose custom attributes as dedicated
+        # keyword arguments. Use the standard setattr/delattr mechanism.
+        normalized_note = str(note or "")
+
+        setattrs: list[str] = []
+        delattrs: list[str] = []
+        if normalized_note:
+            setattrs.append(f"fasstatusnote={normalized_note}")
+        else:
+            delattrs.append("fasstatusnote")
+
+        def _do(client: ClientMeta):
+            try:
+                return client.user_mod(
+                    normalized_username,
+                    o_setattr=setattrs or None,
+                    o_delattr=delattrs or None,
+                )
+            except TypeError:
+                # Signature mismatch across python-freeipa versions.
+                return client.user_mod(
+                    a_uid=normalized_username,
+                    o_setattr=setattrs or None,
+                    o_delattr=delattrs or None,
+                )
+
+        _with_freeipa_service_client_retry(cls.get_client, _do)
+
+        _invalidate_user_cache(normalized_username)
+        _invalidate_users_list_cache()
+        # Warm fresh data for subsequent reads.
+        cls.get(normalized_username)
 
     def save(self, *args, **kwargs):
         """Persist changes.

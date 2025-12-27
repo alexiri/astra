@@ -486,6 +486,133 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, reverse("user-profile", kwargs={"username": req.requested_username}))
         self.assertContains(resp, "Alice User")
 
+    def test_profile_shows_status_note_to_membership_viewer(self) -> None:
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "fasstatusnote": ["Needs manual review"],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_users._get_full_user", return_value=alice),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, "Needs manual review")
+
+    def test_profile_hides_status_note_without_membership_view_perm(self) -> None:
+        viewer = self._make_user("viewer", full_name="Viewer Person", groups=[])
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "fasstatusnote": ["Hidden note"],
+            },
+        )
+
+        self._login_as_freeipa_user("viewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=viewer),
+            patch("core.views_users._get_full_user", return_value=alice),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Membership Committee Notes")
+        self.assertNotContains(resp, "Hidden note")
+
+    def test_requests_list_includes_collapsible_status_note(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "fasstatusnote": ["Request note"],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, "Request note")
+
+    def test_membership_status_note_update_calls_backend(self) -> None:
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAUser.set_status_note", autospec=True) as set_note,
+        ):
+            resp = self.client.post(
+                reverse("membership-status-note-update", kwargs={"username": "alice"}),
+                data={"fasstatusnote": "Updated"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        set_note.assert_called_once_with("alice", "Updated")
+
     def test_membership_request_only_allows_individual_membership_types(self) -> None:
         from core.models import MembershipRequest, MembershipType
 

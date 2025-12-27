@@ -64,6 +64,12 @@ urlpatterns = [
         name="membership-terminate",
     ),
 
+    path(
+        "membership/manage/<str:username>/status-note/",
+        views_membership.membership_status_note_update,
+        name="membership-status-note-update",
+    ),
+
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),
 
     path("settings/profile/", views_settings.settings_profile, name="settings-profile"),

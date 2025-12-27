@@ -25,6 +25,7 @@ class IPAUser(models.Model):
     last_name = models.CharField(max_length=255, blank=True, default="")
     displayname = models.CharField(max_length=255, blank=True, default="", verbose_name="Display name")
     email = models.EmailField(blank=True, default="")
+    fasstatusnote = models.TextField(blank=True, default="", verbose_name="Note")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
@@ -47,6 +48,7 @@ class IPAUser(models.Model):
             last_name=user.last_name or "",
             displayname=user.displayname or "",
             email=user.email or "",
+            fasstatusnote=user.fasstatusnote or "",
             is_active=bool(getattr(user, "is_active", True)),
             is_staff=bool(getattr(user, "is_staff", False)),
         )

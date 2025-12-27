@@ -13,6 +13,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 
@@ -223,7 +224,8 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     for r in requests:
         fu = FreeIPAUser.get(r.requested_username)
         full_name = fu.get_full_name() if fu is not None else ""
-        request_rows.append({"r": r, "full_name": full_name})
+        status_note = fu.fasstatusnote if fu is not None else ""
+        request_rows.append({"r": r, "full_name": full_name, "status_note": status_note})
 
     return render(
         request,
@@ -233,6 +235,38 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "request_rows": request_rows,
         },
     )
+
+
+@login_required(login_url="/login/")
+def membership_status_note_update(request: HttpRequest, username: str) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    can_edit = any(
+        request.user.has_perm(p)
+        for p in (
+            ASTRA_ADD_MEMBERSHIP,
+            ASTRA_CHANGE_MEMBERSHIP,
+            ASTRA_DELETE_MEMBERSHIP,
+        )
+    )
+    if not can_edit:
+        raise PermissionDenied
+
+    target_username = _normalize_str(username)
+    if not target_username:
+        raise Http404("User not found")
+
+    note = str(request.POST.get("fasstatusnote") or "")
+    try:
+        FreeIPAUser.set_status_note(target_username, note)
+    except Exception:
+        logger.exception("Failed to update fasstatusnote username=%s", target_username)
+        messages.error(request, "Failed to update note.")
+        return redirect("user-profile", username=target_username)
+
+    messages.success(request, "Note updated.")
+    return redirect("user-profile", username=target_username)
 
 
 @login_required(login_url="/login/")

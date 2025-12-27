@@ -65,6 +65,33 @@
                 {% if row.full_name %}
                   <div class="text-muted small">{{ row.full_name }}</div>
                 {% endif %}
+
+                <details class="mt-1">
+                  <summary class="small text-muted">Membership Committee Notes</summary>
+                  <div class="mt-2">
+                    {% if membership_can_add or membership_can_change or membership_can_delete %}
+                      <form method="post" action="{% url 'membership-status-note-update' r.requested_username %}">
+                        {% csrf_token %}
+                        <div class="form-group mb-2">
+                          <textarea
+                            name="fasstatusnote"
+                            class="form-control form-control-sm"
+                            rows="3"
+                            placeholder="Enter a note for this user"
+                          >{{ row.status_note }}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
+                      </form>
+                    {% else %}
+                      {% if row.status_note %}
+                        <div class="text-muted small" style="white-space: pre-wrap;">{{ row.status_note }}</div>
+                      {% else %}
+                        <div class="text-muted small">No note.</div>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                </details>
+
               </td>
               <td>{{ r.membership_type.name }}</td>
               <td class="text-muted">{{ r.requested_at }}</td>

@@ -238,6 +238,35 @@
             <span class="badge badge-secondary">Pending</span>
           </li>
         {% endif %}
+
+        {% if membership_can_view %}
+          <li class="list-group-item">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>Membership Committee Notes</strong>
+            </div>
+
+            {% if membership_can_add or membership_can_change or membership_can_delete %}
+              <form method="post" action="{% url 'membership-status-note-update' fu.username %}">
+                {% csrf_token %}
+                <div class="form-group mb-2">
+                  <textarea
+                    name="fasstatusnote"
+                    class="form-control"
+                    rows="3"
+                    placeholder="Enter a note for this user"
+                  >{{ fu.fasstatusnote }}</textarea>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
+              </form>
+            {% else %}
+              {% if fu.fasstatusnote %}
+                <div class="text-muted" style="white-space: pre-wrap;">{{ fu.fasstatusnote }}</div>
+              {% else %}
+                <div class="text-muted">No note.</div>
+              {% endif %}
+            {% endif %}
+          </li>
+        {% endif %}
       </ul>
 
       <ul class="list-group h-100 profile-memberships">
