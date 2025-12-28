@@ -1,0 +1,48 @@
+<!--
+Reusable Bootstrap modal for membership request rejection.
+
+Required context:
+- modal_id: str
+- title: str
+- action_url: str
+- reason_id: str
+
+Optional:
+- next_url: str
+- label: str
+- help_text: str
+- dialog_style: str (inline style for .modal-dialog)
+-->
+
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document"{% if dialog_style %} style="{{ dialog_style }}"{% endif %}>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ title }}</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form method="post" action="{{ action_url }}" novalidate>
+          {% csrf_token %}
+          {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+          <div class="form-group">
+            <label for="{{ reason_id }}">{{ label|default:"Rejection reason (optional):" }}</label>
+            <textarea id="{{ reason_id }}" name="reason" class="form-control" rows="3"></textarea>
+          </div>
+
+          {% if help_text %}
+          <div class="text-muted small mb-3">{{ help_text }}</div>
+          {% endif %}
+
+          <div class="d-flex justify-content-between">
+            <button type="submit" class="btn btn-danger">Reject</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>

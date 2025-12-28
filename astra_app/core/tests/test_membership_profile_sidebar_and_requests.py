@@ -109,6 +109,72 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "In Review")
         self.assertContains(resp, "Individual")
 
+    def test_committee_profile_renders_expiry_and_terminate_modals(self) -> None:
+        from core.models import MembershipLog, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.approved,
+            expires_at=timezone.now() + datetime.timedelta(days=200),
+        )
+
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=["membership-committee"])
+        alice = self._make_user("alice", full_name="Alice User")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.views_users._get_full_user", return_value=alice):
+                with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                    with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+
+        set_expiry_url = reverse(
+            "membership-set-expiry",
+            kwargs={"username": "alice", "membership_type_code": "individual"},
+        )
+        terminate_url = reverse(
+            "membership-terminate",
+            kwargs={"username": "alice", "membership_type_code": "individual"},
+        )
+
+        self.assertContains(resp, 'data-target="#expiry-modal-1"')
+        self.assertContains(resp, 'id="expiry-modal-1"')
+        self.assertContains(resp, f'action="{set_expiry_url}"')
+
+        self.assertContains(resp, 'data-target="#terminate-modal-1"')
+        self.assertContains(resp, 'id="terminate-modal-1"')
+        self.assertContains(resp, f'action="{terminate_url}"')
+
+        self.assertContains(
+            resp,
+            "Terminate <strong>alice</strong>&#x27;s Individual membership early?",
+        )
+
     def test_profile_shows_all_pending_membership_requests(self) -> None:
         from core.models import MembershipRequest, MembershipType
 

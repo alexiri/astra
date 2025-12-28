@@ -1,0 +1,51 @@
+{% comment %}
+Inner template for membership request actions.
+
+Expected context:
+- membership_request: MembershipRequest
+- pk_str: str
+- membership_type_name: str
+- requester_display: str
+{% endcomment %}
+
+<button
+  type="button"
+  class="btn btn-sm btn-success"
+  data-toggle="modal"
+  data-target="#approve-modal-{{ pk_str }}"
+>Approve</button>
+
+{% url 'membership-request-approve' membership_request.pk as approve_url %}
+{% with requester=requester_display|default:"(unknown)" %}
+{% with approve_modal_id="approve-modal-"|add:pk_str approve_title="Approve "|add:membership_type_name|add:" request" %}
+  {% with approve_prefix="Approve "|add:membership_type_name|add:" request from" approve_suffix="?" %}
+    {% include 'core/_modal_confirm.html' with modal_id=approve_modal_id title=approve_title body_prefix=approve_prefix body_emphasis=requester body_suffix=approve_suffix action_url=approve_url submit_label="Approve" submit_class="btn-success" dialog_style="text-align: left;" %}
+  {% endwith %}
+{% endwith %}
+
+<button
+  type="button"
+  class="btn btn-sm btn-warning"
+  data-toggle="modal"
+  data-target="#reject-modal-{{ pk_str }}"
+>Reject</button>
+
+{% url 'membership-request-reject' membership_request.pk as reject_url %}
+{% with reject_modal_id="reject-modal-"|add:pk_str reject_title="Reject "|add:membership_type_name|add:" request" reject_reason_id="reject-reason-"|add:pk_str %}
+  {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" %}
+{% endwith %}
+
+<button
+  type="button"
+  class="btn btn-sm btn-outline-secondary"
+  data-toggle="modal"
+  data-target="#ignore-modal-{{ pk_str }}"
+>Ignore</button>
+
+{% url 'membership-request-ignore' membership_request.pk as ignore_url %}
+{% with ignore_modal_id="ignore-modal-"|add:pk_str ignore_title="Ignore "|add:membership_type_name|add:" request" %}
+  {% with ignore_prefix="Ignore "|add:membership_type_name|add:" request from" ignore_suffix="? This does not approve the membership, nor does it notify the user." %}
+    {% include 'core/_modal_confirm.html' with modal_id=ignore_modal_id title=ignore_title body_prefix=ignore_prefix body_emphasis=requester body_suffix=ignore_suffix action_url=ignore_url submit_label="Ignore" submit_class="btn-outline-secondary" dialog_style="text-align: left;" %}
+  {% endwith %}
+{% endwith %}
+{% endwith %}

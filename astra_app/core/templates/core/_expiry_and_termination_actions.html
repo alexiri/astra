@@ -1,0 +1,46 @@
+{% comment %}
+Renders the paired actions used together on membership/sponsorship cards:
+- "Edit expiry" button + expiration date modal
+- "Terminate" button + confirmation modal
+
+Call-sites should pass full objects; this template decides what it needs and owns all UI copy.
+
+User membership mode (pass these):
+- user: FreeIPAUser (expects .username)
+- membership: MembershipLog-like membership object (expects .membership_type.code/.name and .expires_at)
+
+Organization sponsorship mode (pass these):
+- organization: Organization (expects .pk and .membership_level.code)
+- sponsorship: OrganizationSponsorship | None (expects .expires_at when present)
+
+Optional:
+- id_prefix: str (e.g. "sponsorship" -> sponsorship-expiry-modal)
+- id_suffix: str (e.g. "1" -> expiry-modal-1)
+- next_url: str (adds hidden next field)
+{% endcomment %}
+
+{% with prefix=id_prefix|default:"" suffix=id_suffix|default:"" %}
+  {% if prefix %}
+    {% with base=prefix|add:"-" %}
+      {% if suffix %}
+        {% with expiry_modal_id=base|add:"expiry-modal-"|add:suffix terminate_modal_id=base|add:"terminate-modal-"|add:suffix expires_input_id=base|add:"expires-on-"|add:suffix %}
+          {% include 'core/_expiry_and_termination_actions_render.html' %}
+        {% endwith %}
+      {% else %}
+        {% with expiry_modal_id=base|add:"expiry-modal" terminate_modal_id=base|add:"terminate-modal" expires_input_id=base|add:"expires-on" %}
+          {% include 'core/_expiry_and_termination_actions_render.html' %}
+        {% endwith %}
+      {% endif %}
+    {% endwith %}
+  {% else %}
+    {% if suffix %}
+      {% with expiry_modal_id="expiry-modal-"|add:suffix terminate_modal_id="terminate-modal-"|add:suffix expires_input_id="expires-on-"|add:suffix %}
+        {% include 'core/_expiry_and_termination_actions_render.html' %}
+      {% endwith %}
+    {% else %}
+      {% with expiry_modal_id="expiry-modal" terminate_modal_id="terminate-modal" expires_input_id="expires-on" %}
+        {% include 'core/_expiry_and_termination_actions_render.html' %}
+      {% endwith %}
+    {% endif %}
+  {% endif %}
+{% endwith %}

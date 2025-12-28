@@ -562,11 +562,27 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit expiry")
         self.assertContains(resp, "Terminate")
+        self.assertContains(resp, 'data-target="#sponsorship-expiry-modal"')
+        self.assertContains(resp, 'id="sponsorship-expiry-modal"')
+        self.assertContains(
+            resp,
+            f'action="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])}"',
+        )
+        self.assertContains(resp, 'data-target="#sponsorship-terminate-modal"')
+        self.assertContains(resp, 'id="sponsorship-terminate-modal"')
+        self.assertContains(
+            resp,
+            f'action="{reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])}"',
+        )
+
+        self.assertContains(
+            resp,
+            f"Terminate sponsorship for <strong>{org.name}</strong> early?",
+        )
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]))
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Update expiration")
+        self.assertEqual(resp.status_code, 404)
 
         new_expires_on = (timezone.now() + datetime.timedelta(days=90)).date().isoformat()
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):

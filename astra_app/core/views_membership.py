@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import logging
 from urllib.parse import urlencode
-from zoneinfo import ZoneInfo
 
 import post_office.mail
 from django.conf import settings
@@ -670,11 +669,28 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
     membership_type = req.membership_type
 
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
+    else:
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        redirect_to = referer or reverse("membership-requests")
+        if redirect_to and not url_has_allowed_host_and_scheme(
+            url=redirect_to,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            redirect_to = reverse("membership-requests")
+
     if req.requested_username == "":
         org = req.requested_organization
         if org is None:
             messages.error(request, "Organization not found.")
-            return redirect("membership-requests")
+            return redirect(redirect_to)
 
         org.membership_level = membership_type
         org.save(update_fields=["membership_level"])
@@ -693,23 +709,24 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         req.save(update_fields=["status", "decided_at", "decided_by_username"])
 
         messages.success(request, f"Approved sponsorship level request for {org.name}.")
-        return redirect("membership-requests")
+
+        return redirect(redirect_to)
 
     if not membership_type.group_cn:
         messages.error(request, "This membership type is not linked to a group.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     target = FreeIPAUser.get(req.requested_username)
     if target is None:
         messages.error(request, "Unable to load the requested user from FreeIPA.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     try:
         target.add_to_group(group_name=membership_type.group_cn)
     except Exception:
         logger.exception("Failed to add user to membership group")
         messages.error(request, "Failed to add user to the group.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     MembershipLog.create_for_approval(
         actor_username=request.user.get_username(),
@@ -741,111 +758,113 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
     messages.success(request, f"Approved membership request for {target.username}.")
-    return redirect("membership-requests")
+    return redirect(redirect_to)
 
 
 @login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
     membership_type = req.membership_type
 
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
+    else:
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        redirect_to = referer or reverse("membership-requests")
+        if redirect_to and not url_has_allowed_host_and_scheme(
+            url=redirect_to,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            redirect_to = reverse("membership-requests")
+
     if req.requested_username == "":
-        if request.method == "POST":
-            form = MembershipRejectForm(request.POST)
-            if form.is_valid():
-                reason = str(form.cleaned_data.get("reason") or "").strip()
-                if reason:
-                    req.responses = [{"Rejection reason": reason}]
-
-                org = req.requested_organization
-                if org is not None:
-                    MembershipLog.create_for_org_rejection(
-                        actor_username=request.user.get_username(),
-                        target_organization=org,
-                        membership_type=membership_type,
-                        rejection_reason=reason,
-                        membership_request=req,
-                    )
-                else:
-                    MembershipLog.objects.create(
-                        actor_username=request.user.get_username(),
-                        target_username="",
-                        target_organization=None,
-                        target_organization_code=req.requested_organization_code,
-                        target_organization_name=req.requested_organization_name,
-                        membership_type=membership_type,
-                        membership_request=req,
-                        requested_group_cn=membership_type.group_cn,
-                        action=MembershipLog.Action.rejected,
-                        rejection_reason=reason,
-                        expires_at=None,
-                    )
-
-                req.status = MembershipRequest.Status.rejected
-                req.decided_at = timezone.now()
-                req.decided_by_username = request.user.get_username()
-                req.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
-                org_name = org.name if org is not None else (req.requested_organization_name or "organization")
-                messages.success(request, f"Rejected sponsorship level request for {org_name}.")
-                return redirect("membership-requests")
-        else:
-            form = MembershipRejectForm()
-
-        return render(
-            request,
-            "core/membership_reject.html",
-            {
-                "req": req,
-                "form": form,
-            },
-        )
-
-    if request.method == "POST":
         form = MembershipRejectForm(request.POST)
-        if form.is_valid():
-            reason = str(form.cleaned_data.get("reason") or "").strip()
-            target = FreeIPAUser.get(req.requested_username)
+        if not form.is_valid():
+            messages.error(request, "Invalid rejection reason.")
+            return redirect(redirect_to)
 
-            MembershipLog.create_for_rejection(
+        reason = str(form.cleaned_data.get("reason") or "").strip()
+        if reason:
+            req.responses = [{"Rejection reason": reason}]
+
+        org = req.requested_organization
+        if org is not None:
+            MembershipLog.create_for_org_rejection(
                 actor_username=request.user.get_username(),
-                target_username=req.requested_username,
+                target_organization=org,
                 membership_type=membership_type,
                 rejection_reason=reason,
                 membership_request=req,
             )
+        else:
+            MembershipLog.objects.create(
+                actor_username=request.user.get_username(),
+                target_username="",
+                target_organization=None,
+                target_organization_code=req.requested_organization_code,
+                target_organization_name=req.requested_organization_name,
+                membership_type=membership_type,
+                membership_request=req,
+                requested_group_cn=membership_type.group_cn,
+                action=MembershipLog.Action.rejected,
+                rejection_reason=reason,
+                expires_at=None,
+            )
 
-            req.status = MembershipRequest.Status.rejected
-            req.decided_at = timezone.now()
-            req.decided_by_username = request.user.get_username()
-            req.save(update_fields=["status", "decided_at", "decided_by_username"])
+        req.status = MembershipRequest.Status.rejected
+        req.decided_at = timezone.now()
+        req.decided_by_username = request.user.get_username()
+        req.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
+        org_name = org.name if org is not None else (req.requested_organization_name or "organization")
+        messages.success(request, f"Rejected sponsorship level request for {org_name}.")
+        return redirect(redirect_to)
 
-            if target is not None and target.email:
-                post_office.mail.send(
-                    recipients=[target.email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-                    context={
-                        "username": target.username,
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                        "rejection_reason": reason,
-                    },
-                )
+    form = MembershipRejectForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid rejection reason.")
+        return redirect(redirect_to)
 
-            messages.success(request, f"Rejected membership request for {req.requested_username}.")
-            return redirect("membership-requests")
-    else:
-        form = MembershipRejectForm()
+    reason = str(form.cleaned_data.get("reason") or "").strip()
+    target = FreeIPAUser.get(req.requested_username)
 
-    return render(
-        request,
-        "core/membership_reject.html",
-        {
-            "req": req,
-            "form": form,
-        },
+    MembershipLog.create_for_rejection(
+        actor_username=request.user.get_username(),
+        target_username=req.requested_username,
+        membership_type=membership_type,
+        rejection_reason=reason,
+        membership_request=req,
     )
+
+    req.status = MembershipRequest.Status.rejected
+    req.decided_at = timezone.now()
+    req.decided_by_username = request.user.get_username()
+    req.save(update_fields=["status", "decided_at", "decided_by_username"])
+
+    if target is not None and target.email:
+        post_office.mail.send(
+            recipients=[target.email],
+            sender=settings.DEFAULT_FROM_EMAIL,
+            template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+            context={
+                "username": target.username,
+                "membership_type": membership_type.name,
+                "membership_type_code": membership_type.code,
+                "rejection_reason": reason,
+            },
+        )
+
+    messages.success(request, f"Rejected membership request for {req.requested_username}.")
+    return redirect(redirect_to)
 
 
 @login_required(login_url="/login/")
@@ -855,6 +874,23 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404("Not found")
 
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
+    else:
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        redirect_to = referer or reverse("membership-requests")
+        if redirect_to and not url_has_allowed_host_and_scheme(
+            url=redirect_to,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            redirect_to = reverse("membership-requests")
 
     if req.requested_username == "":
         org = req.requested_organization
@@ -887,7 +923,7 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
         req.save(update_fields=["status", "decided_at", "decided_by_username"])
 
         messages.success(request, f"Ignored sponsorship level request for {org_name}.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     MembershipLog.create_for_ignore(
         actor_username=request.user.get_username(),
@@ -902,27 +938,21 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
     req.save(update_fields=["status", "decided_at", "decided_by_username"])
 
     messages.success(request, f"Ignored membership request for {req.requested_username}.")
-    return redirect("membership-requests")
+    return redirect(redirect_to)
 
 
 @login_required(login_url="/login/")
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_set_expiry(request: HttpRequest, username: str, membership_type_code: str) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
     username = _normalize_str(username)
     membership_type_code = _normalize_str(membership_type_code)
     if not username or not membership_type_code:
         raise Http404("Not found")
 
     membership_type = get_object_or_404(MembershipType, pk=membership_type_code)
-
-    target_user = FreeIPAUser.get(username)
-    tz_name_raw = str(_first(target_user._user_data, "fasTimezone", "") or "").strip() if target_user else ""
-    tz_name = tz_name_raw or "UTC"
-    try:
-        ZoneInfo(tz_name)
-    except Exception:
-        tz_name = "UTC"
-        ZoneInfo("UTC")
 
     valid_memberships = get_valid_memberships_for_username(username)
     current_membership = next(
@@ -933,43 +963,25 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
         messages.error(request, "That user does not currently have an active membership of that type.")
         return redirect("user-profile", username=username)
 
-    if request.method == "POST":
-        form = MembershipUpdateExpiryForm(request.POST)
-        if form.is_valid():
-            expires_on = form.cleaned_data["expires_on"]
+    form = MembershipUpdateExpiryForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid expiration date.")
+        return redirect("user-profile", username=username)
 
-            # The committee sets an expiration DATE. Interpret that as end-of-day UTC
-            # (single source of truth), and rely on timezone conversion for display.
-            expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+    expires_on = form.cleaned_data["expires_on"]
 
-            MembershipLog.create_for_expiry_change(
-                actor_username=request.user.get_username(),
-                target_username=username,
-                membership_type=membership_type,
-                expires_at=expires_at,
-            )
-            messages.success(request, "Membership expiration updated.")
-            return redirect("user-profile", username=username)
-    else:
-        initial_date = (
-            current_membership.expires_at.astimezone(datetime.UTC).date()
-            if current_membership.expires_at
-            else None
-        )
-        form = MembershipUpdateExpiryForm(initial={"expires_on": initial_date})
+    # The committee sets an expiration DATE. Interpret that as end-of-day UTC
+    # (single source of truth), and rely on timezone conversion for display.
+    expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
 
-    return render(
-        request,
-        "core/membership_set_expiry.html",
-        {
-            "target_username": username,
-            "membership_type": membership_type,
-            # Template expects `current_log.expires_at`; a Membership has the same field.
-            "current_log": current_membership,
-            "target_timezone_name": tz_name,
-            "form": form,
-        },
+    MembershipLog.create_for_expiry_change(
+        actor_username=request.user.get_username(),
+        target_username=username,
+        membership_type=membership_type,
+        expires_at=expires_at,
     )
+    messages.success(request, "Membership expiration updated.")
+    return redirect("user-profile", username=username)
 
 
 @login_required(login_url="/login/")
@@ -1012,6 +1024,9 @@ def membership_terminate(request: HttpRequest, username: str, membership_type_co
 @login_required(login_url="/login/")
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
 def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
     membership_type_code = _normalize_str(membership_type_code)
     if organization_id <= 0 or not membership_type_code:
         raise Http404("Not found")
@@ -1028,36 +1043,39 @@ def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: i
         messages.error(request, "That organization does not currently have an active sponsorship of that type.")
         return redirect("organization-detail", organization_id=organization.pk)
 
-    if request.method == "POST":
-        form = MembershipUpdateExpiryForm(request.POST)
-        if form.is_valid():
-            expires_on = form.cleaned_data["expires_on"]
-
-            expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-            MembershipLog.create_for_org_expiry_change(
-                actor_username=request.user.get_username(),
-                target_organization=organization,
-                membership_type=membership_type,
-                expires_at=expires_at,
-            )
-
-            messages.success(request, "Sponsorship expiration updated.")
-            return redirect("organization-detail", organization_id=organization.pk)
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
     else:
-        initial_date = sponsorship.expires_at.astimezone(datetime.UTC).date()
-        form = MembershipUpdateExpiryForm(initial={"expires_on": initial_date})
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        redirect_to = referer or reverse("organization-detail", kwargs={"organization_id": organization.pk})
+        if redirect_to and not url_has_allowed_host_and_scheme(
+            url=redirect_to,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            redirect_to = reverse("organization-detail", kwargs={"organization_id": organization.pk})
 
-    return render(
-        request,
-        "core/organization_sponsorship_set_expiry.html",
-        {
-            "organization": organization,
-            "membership_type": membership_type,
-            "current_log": sponsorship,
-            "target_timezone_name": "UTC",
-            "form": form,
-        },
+    form = MembershipUpdateExpiryForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid expiration date.")
+        return redirect(redirect_to)
+
+    expires_on = form.cleaned_data["expires_on"]
+    expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+    MembershipLog.create_for_org_expiry_change(
+        actor_username=request.user.get_username(),
+        target_organization=organization,
+        membership_type=membership_type,
+        expires_at=expires_at,
     )
+
+    messages.success(request, "Sponsorship expiration updated.")
+    return redirect(redirect_to)
 
 
 @login_required(login_url="/login/")

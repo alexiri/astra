@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load tz %}
+
 {% block title %}{{ organization.name }}{% endblock %}
 
 {% block header %}
@@ -87,23 +89,8 @@
                       <span class="badge badge-success">Active</span>
                     {% endif %}
 
-                    {% if membership_can_change %}
-                      <a
-                        href="{% url 'organization-sponsorship-set-expiry' organization.pk organization.membership_level.code %}"
-                        class="btn btn-sm btn-outline-secondary"
-                      >Edit expiry</a>
-                    {% endif %}
-
-                    {% if membership_can_delete %}
-                      <form
-                        method="post"
-                        action="{% url 'organization-sponsorship-terminate' organization.pk organization.membership_level.code %}"
-                        class="m-0 d-inline"
-                        onsubmit="return confirm('Terminate this sponsorship early?');"
-                      >
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-danger">Terminate</button>
-                      </form>
+                    {% if membership_can_change and membership_can_delete %}
+                      {% include 'core/_expiry_and_termination_actions.html' with organization=organization sponsorship=sponsorship id_prefix="sponsorship" next_url=request.get_full_path %}
                     {% endif %}
                   </div>
                 </li>

@@ -63,15 +63,7 @@
       {% if req.status == 'pending' %}
         <hr>
         <div class="d-flex flex-wrap" style="gap: .5rem;">
-          <form method="post" action="{% url 'membership-request-approve' req.pk %}" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Approve this request?');">Approve</button>
-          </form>
-          <a href="{% url 'membership-request-reject' req.pk %}" class="btn btn-sm btn-warning">Reject</a>
-          <form method="post" action="{% url 'membership-request-ignore' req.pk %}" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Ignore this request?');">Ignore</button>
-          </form>
+          {% include 'core/_membership_request_actions.html' with request=req %}
         </div>
       {% endif %}
     </div>

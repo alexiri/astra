@@ -1,0 +1,54 @@
+<!--
+Reusable Bootstrap modal-confirm.
+
+Required context:
+- modal_id: str
+- title: str
+- body: str
+- action_url: str
+- submit_label: str
+
+Optional:
+- next_url: str
+- submit_class: str (default: btn-primary)
+- submit_button_class: str (default: matches submit_class)
+- cancel_label: str (default: Cancel)
+- dialog_style: str (inline style for .modal-dialog)
+
+Alternative body rendering (use instead of `body` when you need one emphasized value):
+- body_prefix: str
+- body_emphasis: str
+- body_suffix: str
+-->
+
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document"{% if dialog_style %} style="{{ dialog_style }}"{% endif %}>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ title }}</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          {% if body_prefix or body_suffix or body_emphasis %}
+            {{ body_prefix }} <strong>{{ body_emphasis }}</strong>{{ body_suffix }}
+          {% else %}
+            {{ body }}
+          {% endif %}
+        </div>
+
+        <form method="post" action="{{ action_url }}" class="m-0">
+          {% csrf_token %}
+          {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+          <div class="d-flex justify-content-between">
+            <button type="submit" class="btn {{ submit_button_class|default:submit_class|default:'btn-primary' }}">{{ submit_label }}</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">{{ cancel_label|default:"Cancel" }}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>

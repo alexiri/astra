@@ -281,6 +281,28 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
         self.assertIn("Missing required info", kwargs["context"]["rejection_reason"])
 
+        def test_reject_requires_post(self) -> None:
+            from core.models import MembershipRequest, MembershipType
+
+            MembershipType.objects.update_or_create(
+                code="individual",
+                defaults={
+                    "name": "Individual",
+                    "group_cn": "almalinux-individual",
+                    "isIndividual": True,
+                    "isOrganization": False,
+                    "sort_order": 0,
+                    "enabled": True,
+                },
+            )
+            req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+            self._login_as_freeipa_user("reviewer")
+
+            with patch("core.backends.FreeIPAUser.get", return_value=None):
+                resp = self.client.get(reverse("membership-request-reject", args=[req.pk]))
+
+            self.assertEqual(resp.status_code, 404)
     def test_committee_can_ignore_request_logs_and_does_not_email(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
 

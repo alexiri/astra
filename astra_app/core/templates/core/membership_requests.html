@@ -167,17 +167,7 @@
 
               </td>
               <td class="text-right">
-                <form method="post" action="{% url 'membership-request-approve' r.pk %}" class="d-inline">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Approve this request?');">Approve</button>
-                </form>
-
-                <a href="{% url 'membership-request-reject' r.pk %}" class="btn btn-sm btn-warning">Reject</a>
-
-                <form method="post" action="{% url 'membership-request-ignore' r.pk %}" class="d-inline">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Ignore this request?');">Ignore</button>
-                </form>
+                {% include 'core/_membership_request_actions.html' with request=r %}
               </td>
             </tr>
             {% endwith %}

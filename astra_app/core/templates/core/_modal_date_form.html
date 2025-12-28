@@ -1,0 +1,62 @@
+<!--
+Reusable Bootstrap modal for editing an end-of-day UTC expiration date.
+
+Required context:
+- modal_id: str
+- title: str
+- action_url: str
+- input_id: str
+
+Optional:
+- next_url: str
+- label: str
+- initial_value: str (YYYY-MM-DD)
+- current_text: str
+- help_text: str
+- submit_label: str (default: Save)
+- submit_class: str (default: btn-primary)
+-->
+
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ title }}</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        {% if current_text %}
+          <div class="mb-3">{{ current_text }}</div>
+        {% endif %}
+
+        <form method="post" action="{{ action_url }}" novalidate>
+          {% csrf_token %}
+          {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+          <div class="form-group">
+            <label for="{{ input_id }}">{{ label|default:"Expiration date" }}</label>
+            <input
+              id="{{ input_id }}"
+              name="expires_on"
+              type="date"
+              class="form-control"
+              value="{{ initial_value|default:'' }}"
+              required
+            />
+          </div>
+
+          {% if help_text %}
+          <div class="text-muted small mb-3">{{ help_text }}</div>
+          {% endif %}
+
+          <div class="d-flex justify-content-between">
+            <button type="submit" class="btn {{ submit_class|default:'btn-primary' }}">{{ submit_label|default:"Save" }}</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
