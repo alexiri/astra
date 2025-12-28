@@ -1,0 +1,79 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Membership Request #{{ req.pk }}{% endblock %}
+
+{% block header %}
+  <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
+    <h1 class="m-0">Membership Request #{{ req.pk }}</h1>
+    <a href="{% url 'membership-requests' %}" class="btn btn-sm btn-outline-secondary">Back to requests</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <dl class="row mb-0">
+        <dt class="col-sm-3">Status</dt>
+        <dd class="col-sm-9">{{ req.get_status_display }}</dd>
+
+        <dt class="col-sm-3">Requested at</dt>
+        <dd class="col-sm-9">{{ req.requested_at|date:"r" }}</dd>
+
+        <dt class="col-sm-3">Target</dt>
+        <dd class="col-sm-9">
+          {% if req.requested_username == '' %}
+            {% if req.requested_organization %}
+              <a href="{% url 'organization-detail' req.requested_organization.pk %}">{{ req.requested_organization.name }}</a>
+            {% else %}
+              <span>{{ req.requested_organization_name }}</span>
+              <span class="text-muted">(deleted)</span>
+            {% endif %}
+          {% else %}
+            <a href="{% url 'user-profile' req.requested_username %}">{{ req.requested_username }}</a>
+            {% if target_full_name %}<span class="text-muted">({{ target_full_name }})</span>{% endif %}
+            {% if target_user_deleted %}<span class="text-muted">(deleted)</span>{% endif %}
+          {% endif %}
+        </dd>
+
+        <dt class="col-sm-3">Type</dt>
+        <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
+
+        {% if req.decided_at %}
+          <dt class="col-sm-3">Decided at</dt>
+          <dd class="col-sm-9">{{ req.decided_at|date:"r" }}</dd>
+        {% endif %}
+
+        {% if req.decided_by_username %}
+          <dt class="col-sm-3">Decided by</dt>
+          <dd class="col-sm-9">{{ req.decided_by_username }}</dd>
+        {% endif %}
+      </dl>
+
+      {% if req.responses %}
+        <hr>
+        <h6 class="text-muted">Request responses</h6>
+        {% for item in req.responses %}
+          {% for k,v in item.items %}
+            <div class="small text-muted font-weight-bold">{{ k }}</div>
+            <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+          {% endfor %}
+        {% endfor %}
+      {% endif %}
+
+      {% if req.status == 'pending' %}
+        <hr>
+        <div class="d-flex flex-wrap" style="gap: .5rem;">
+          <form method="post" action="{% url 'membership-request-approve' req.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Approve this request?');">Approve</button>
+          </form>
+          <a href="{% url 'membership-request-reject' req.pk %}" class="btn btn-sm btn-warning">Reject</a>
+          <form method="post" action="{% url 'membership-request-ignore' req.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Ignore this request?');">Ignore</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

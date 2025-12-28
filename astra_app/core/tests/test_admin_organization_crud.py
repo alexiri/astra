@@ -17,7 +17,18 @@ class AdminOrganizationCRUDTests(TestCase):
         session.save()
 
     def test_admin_can_create_organization_with_representatives_and_is_logged(self) -> None:
-        from core.models import Organization
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
 
         self._login_as_freeipa_admin("alice")
 
@@ -32,10 +43,17 @@ class AdminOrganizationCRUDTests(TestCase):
             resp = self.client.post(
                 url,
                 data={
-                    "code": "almalinux",
                     "name": "AlmaLinux",
-                    "contact": "contact@almalinux.org",
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@almalinux.org",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@almalinux.org",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@almalinux.org",
+                    "membership_level": "silver",
+                    "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
+                    "additional_information": "",
                     "notes": "Internal notes",
                     "representatives": ["bob"],
                     "_save": "Save",
@@ -44,7 +62,7 @@ class AdminOrganizationCRUDTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        org = Organization.objects.get(code="almalinux")
+        org = Organization.objects.get(name="AlmaLinux")
         self.assertEqual(org.name, "AlmaLinux")
         self.assertEqual(org.representatives, ["bob"])
 
@@ -58,4 +76,4 @@ class AdminOrganizationCRUDTests(TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry.user_id, shadow_user.pk)
         self.assertEqual(entry.action_flag, ADDITION)
-        self.assertEqual(entry.object_id, "almalinux")
+        self.assertEqual(entry.object_id, str(org.pk))

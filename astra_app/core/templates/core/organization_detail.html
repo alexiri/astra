@@ -5,35 +5,226 @@
 {% block header %}
   <div class="d-flex align-items-center justify-content-between">
     <h1 class="h3 mb-0">{{ organization.name }}</h1>
-    <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-edit' organization.code %}">
-      <i class="fas fa-edit mr-1"></i> Edit
-    </a>
+    {% if can_edit_organization %}
+      <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-edit' organization.pk %}">
+        <i class="fas fa-edit mr-1"></i> Edit
+      </a>
+    {% endif %}
   </div>
 {% endblock %}
 
 {% block content %}
-  <div class="card">
-    <div class="card-body">
-      {% if organization.logo %}
-        <div class="mb-3">
-          <img src="{{ organization.logo.url }}" alt="{{ organization.name }} logo" style="max-height: 120px;" />
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Branding</h3>
         </div>
-      {% endif %}
+        <div class="card-body">
+          {% if organization.logo %}
+            <div class="mb-3">
+              <img src="{{ organization.logo.url }}" alt="{{ organization.name }} logo" style="max-height: 120px;" />
+            </div>
+          {% endif %}
 
-      <dl class="row mb-0">
-        <dt class="col-sm-3">Code</dt>
-        <dd class="col-sm-9">{{ organization.code }}</dd>
+          <dl class="row mb-0">
+            <dt class="col-sm-5">Name</dt>
+            <dd class="col-sm-7">{{ organization.name }}</dd>
 
-        {% if organization.contact %}
-          <dt class="col-sm-3">Contact</dt>
-          <dd class="col-sm-9"><a href="mailto:{{ organization.contact }}">{{ organization.contact }}</a></dd>
-        {% endif %}
+            {% if organization.website %}
+              <dt class="col-sm-5">Website</dt>
+              <dd class="col-sm-7"><a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a></dd>
+            {% endif %}
 
-        {% if organization.website %}
-          <dt class="col-sm-3">Website</dt>
-          <dd class="col-sm-9"><a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a></dd>
-        {% endif %}
-      </dl>
+            {% if organization.website_logo %}
+              <dt class="col-sm-5">Logo</dt>
+              <dd class="col-sm-7"><a href="{{ organization.website_logo }}" rel="noopener noreferrer">{{ organization.website_logo }}</a></dd>
+            {% endif %}
+          </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0">Sponsorship Level</h3>
+            {% if membership_can_view %}
+              <a href="{% url 'membership-audit-log-organization' organization.pk %}" class="btn btn-sm btn-outline-secondary">History</a>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <ul class="list-group list-group-flush">
+            {% if organization.membership_level or pending_membership_level_request %}
+              {% if organization.membership_level %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  <div>
+                    <div class="font-weight-bold">{{ organization.membership_level.name }}</div>
+                    {% if organization.membership_level.description %}
+                      <div class="text-muted small">{{ organization.membership_level.description }}</div>
+                    {% endif %}
+
+                    {% if sponsorship and sponsorship.expires_at %}
+                      {% if sponsorship_is_expiring_soon %}
+                        <div class="text-danger small">
+                          <i class="fas fa-exclamation-triangle mr-1"></i>
+                          Expires {{ sponsorship.expires_at|date:"M j, Y" }}
+                        </div>
+                      {% else %}
+                        <div class="text-muted small">
+                          Expires {{ sponsorship.expires_at|date:"M j, Y" }}
+                        </div>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                  <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
+                    {% if is_representative and sponsorship_is_expiring_soon and not pending_membership_level_request %}
+                      <form method="post" action="{% url 'organization-sponsorship-extend' organization.pk %}" class="m-0 d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-primary">Extend</button>
+                      </form>
+                    {% else %}
+                      <span class="badge badge-success">Active</span>
+                    {% endif %}
+
+                    {% if membership_can_change %}
+                      <a
+                        href="{% url 'organization-sponsorship-set-expiry' organization.pk organization.membership_level.code %}"
+                        class="btn btn-sm btn-outline-secondary"
+                      >Edit expiry</a>
+                    {% endif %}
+
+                    {% if membership_can_delete %}
+                      <form
+                        method="post"
+                        action="{% url 'organization-sponsorship-terminate' organization.pk organization.membership_level.code %}"
+                        class="m-0 d-inline"
+                        onsubmit="return confirm('Terminate this sponsorship early?');"
+                      >
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Terminate</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </li>
+              {% endif %}
+
+              {% if pending_membership_level_request %}
+                <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+                  <div>
+                    <div class="font-weight-bold">{{ pending_membership_level_request.membership_type.name }}</div>
+                    {% if pending_membership_level_request.membership_type.description %}
+                      <div class="text-muted small">{{ pending_membership_level_request.membership_type.description }}</div>
+                    {% endif %}
+                  </div>
+                  <span class="badge badge-secondary">In Review</span>
+                </li>
+              {% endif %}
+            {% else %}
+              <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+                <div>
+                  No sponsorship level set
+                </div>
+              </li>
+            {% endif %}
+
+
+            {% if membership_can_view %}
+              <li class="list-group-item">
+                <details class="mt-1">
+                  <summary class="small text-muted">Membership Committee Notes</summary>
+                  <div class="mt-2">
+                    {% if membership_can_add or membership_can_change or membership_can_delete %}
+                      <form method="post" action="{% url 'organization-committee-notes-update' organization.pk %}" novalidate>
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}" />
+                        <div class="form-group mb-2">
+                          <textarea name="notes" class="form-control" rows="3" placeholder="Enter a note for this organization">{{ organization.notes }}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
+                      </form>
+                    {% else %}
+                      {% if organization.notes %}
+                        <div class="text-muted" style="white-space: pre-wrap;">{{ organization.notes }}</div>
+                      {% else %}
+                        <div class="text-muted">No notes</div>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                </details>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Business Contact</h3>
+        </div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-4">Name</dt>
+            <dd class="col-sm-8">{{ organization.business_contact_name|default:"—" }}</dd>
+            <dt class="col-sm-4">Email</dt>
+            <dd class="col-sm-8">
+              {% if organization.business_contact_email %}
+                <a href="mailto:{{ organization.business_contact_email }}">{{ organization.business_contact_email }}</a>
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+            <dt class="col-sm-4">Phone</dt>
+            <dd class="col-sm-8">{{ organization.business_contact_phone|default:"—" }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">PR and/or Marketing Contact</h3>
+        </div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-4">Name</dt>
+            <dd class="col-sm-8">{{ organization.pr_marketing_contact_name|default:"—" }}</dd>
+            <dt class="col-sm-4">Email</dt>
+            <dd class="col-sm-8">
+              {% if organization.pr_marketing_contact_email %}
+                <a href="mailto:{{ organization.pr_marketing_contact_email }}">{{ organization.pr_marketing_contact_email }}</a>
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+            <dt class="col-sm-4">Phone</dt>
+            <dd class="col-sm-8">{{ organization.pr_marketing_contact_phone|default:"—" }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Technical Contact</h3>
+        </div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-4">Name</dt>
+            <dd class="col-sm-8">{{ organization.technical_contact_name|default:"—" }}</dd>
+            <dt class="col-sm-4">Email</dt>
+            <dd class="col-sm-8">
+              {% if organization.technical_contact_email %}
+                <a href="mailto:{{ organization.technical_contact_email }}">{{ organization.technical_contact_email }}</a>
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+            <dt class="col-sm-4">Phone</dt>
+            <dd class="col-sm-8">{{ organization.technical_contact_phone|default:"—" }}</dd>
+          </dl>
+        </div>
+      </div>
     </div>
   </div>
 {% endblock %}

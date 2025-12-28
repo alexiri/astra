@@ -8,15 +8,15 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
-from django.utils import timezone
 from django.db.models import Q
+from django.utils import timezone
 from PIL import Image
 
 
 def organization_logo_upload_to(instance: Organization, filename: str) -> str:
     # Always store organizations' logos with a deterministic name.
     # Access control (bucket policy / auth) must be the security boundary.
-    return f"organizations/logos/{instance.code}.png"
+    return f"organizations/logos/{instance.pk}.png"
 
 
 class IPAUser(models.Model):
@@ -117,6 +117,8 @@ class IPAFASAgreement(models.Model):
 class MembershipType(models.Model):
     code = models.CharField(max_length=64, primary_key=True)
     name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    votes = models.PositiveIntegerField(blank=True, default=0)
     group_cn = models.CharField(max_length=255, blank=True, default="", verbose_name="Group")
     isIndividual = models.BooleanField(default=False)
     isOrganization = models.BooleanField(default=False)
@@ -131,22 +133,58 @@ class MembershipType(models.Model):
 
 
 class Organization(models.Model):
-    code = models.CharField(max_length=64, primary_key=True)
     name = models.CharField(max_length=255)
-    logo = models.ImageField(upload_to=organization_logo_upload_to, blank=True, null=True)
-    contact = models.EmailField(blank=True, default="")
+
+    business_contact_name = models.CharField(max_length=255, blank=True, default="")
+    business_contact_email = models.EmailField(blank=True, default="")
+    business_contact_phone = models.CharField(max_length=64, blank=True, default="")
+
+    pr_marketing_contact_name = models.CharField(max_length=255, blank=True, default="")
+    pr_marketing_contact_email = models.EmailField(blank=True, default="")
+    pr_marketing_contact_phone = models.CharField(max_length=64, blank=True, default="")
+
+    technical_contact_name = models.CharField(max_length=255, blank=True, default="")
+    technical_contact_email = models.EmailField(blank=True, default="")
+    technical_contact_phone = models.CharField(max_length=64, blank=True, default="")
+
+    membership_level = models.ForeignKey(
+        MembershipType,
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="organizations",
+        limit_choices_to={"isOrganization": True},
+    )
+
+    website_logo = models.URLField(blank=True, default="", max_length=2048)
+
     website = models.URLField(blank=True, default="")
+    logo = models.ImageField(
+        upload_to=organization_logo_upload_to,
+        blank=True,
+        null=True,
+    )
+
+    additional_information = models.TextField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
     representatives = models.JSONField(blank=True, default=list)
 
     class Meta:
-        ordering = ("name", "code")
+        ordering = ("name", "id")
 
     def __str__(self) -> str:
         return f"{self.name}"
 
     @override
     def save(self, *args, **kwargs) -> None:
+        if self.pk is None and self.logo:
+            # The storage path is based on the autoincrement PK; ensure we have
+            # one before writing the file.
+            pending_logo = self.logo
+            self.logo = None
+            super().save(*args, **kwargs)
+            self.logo = pending_logo
+
         self._convert_new_logo_upload_to_png()
         super().save(*args, **kwargs)
 
@@ -175,8 +213,28 @@ class Organization(models.Model):
         content = ContentFile(buf.getvalue())
 
         # The upload_to callable ignores the provided filename and always
-        # generates organizations/logos/{code}.png.
-        self.logo.save(f"{self.code}.png", content, save=False)
+        # generates organizations/logos/{pk}.png.
+        self.logo.save(f"{self.pk}.png", content, save=False)
+
+
+class OrganizationSponsorship(models.Model):
+    organization = models.OneToOneField(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="sponsorship",
+    )
+    membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
+    expires_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["expires_at"], name="orgs_exp_at"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.organization_id} ({self.membership_type_id})"
 
 
 class MembershipRequest(models.Model):
@@ -186,7 +244,16 @@ class MembershipRequest(models.Model):
         rejected = "rejected", "Rejected"
         ignored = "ignored", "Ignored"
 
-    requested_username = models.CharField(max_length=255)
+    requested_username = models.CharField(max_length=255, blank=True, default="")
+    requested_organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="membership_requests",
+    )
+    requested_organization_code = models.CharField(max_length=64, blank=True, default="")
+    requested_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     requested_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.pending, db_index=True)
@@ -198,18 +265,49 @@ class MembershipRequest(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["requested_username", "membership_type"],
-                condition=Q(status="pending"),
+                condition=Q(status="pending", requested_organization__isnull=True) & ~Q(requested_username=""),
                 name="uniq_membershiprequest_open_user_type",
+            ),
+            models.UniqueConstraint(
+                fields=["requested_organization", "membership_type"],
+                condition=Q(status="pending", requested_organization__isnull=False),
+                name="uniq_membershiprequest_open_org_type",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        Q(requested_organization__isnull=True)
+                        & Q(requested_organization_code="")
+                        & ~Q(requested_username="")
+                    )
+                    | (
+                        Q(requested_username="")
+                        & (Q(requested_organization__isnull=False) | ~Q(requested_organization_code=""))
+                    )
+                ),
+                name="chk_membershiprequest_exactly_one_target",
             ),
         ]
         indexes = [
             models.Index(fields=["requested_at"], name="mr_req_at"),
             models.Index(fields=["status", "requested_at"], name="mr_status_at"),
             models.Index(fields=["requested_username", "status"], name="mr_user_status"),
+            models.Index(fields=["requested_organization", "status"], name="mr_org_status"),
+            models.Index(fields=["requested_organization_code", "status"], name="mr_org_code_status"),
         ]
         ordering = ("-requested_at",)
 
+    @override
+    def save(self, *args, **kwargs) -> None:
+        if self.requested_organization_id is not None and not self.requested_organization_code:
+            self.requested_organization_code = str(self.requested_organization_id)
+            self.requested_organization_name = self.requested_organization.name
+        super().save(*args, **kwargs)
+
     def __str__(self) -> str:
+        if self.requested_username == "":
+            code = self.requested_organization_code or (self.requested_organization_id or "")
+            return f"org:{code} → {self.membership_type_id}"
         return f"{self.requested_username} → {self.membership_type_id}"
 
 
@@ -247,7 +345,16 @@ class MembershipLog(models.Model):
         terminated = "terminated", "Terminated"
 
     actor_username = models.CharField(max_length=255)
-    target_username = models.CharField(max_length=255)
+    target_username = models.CharField(max_length=255, blank=True, default="")
+    target_organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="membership_logs",
+    )
+    target_organization_code = models.CharField(max_length=64, blank=True, default="")
+    target_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     membership_request = models.ForeignKey(
         MembershipRequest,
@@ -263,16 +370,60 @@ class MembershipLog(models.Model):
     expires_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (
+                        Q(target_username="")
+                        & (Q(target_organization__isnull=False) | ~Q(target_organization_code=""))
+                    )
+                    | (
+                        ~Q(target_username="")
+                        & Q(target_organization__isnull=True)
+                        & Q(target_organization_code="")
+                    )
+                ),
+                name="chk_membershiplog_exactly_one_target",
+            )
+        ]
         indexes = [
             models.Index(fields=["target_username", "created_at"], name="ml_tgt_at"),
             models.Index(fields=["target_username", "action", "created_at"], name="ml_tgt_act_at"),
+            models.Index(fields=["target_organization", "created_at"], name="ml_org_at"),
+            models.Index(fields=["target_organization", "action", "created_at"], name="ml_org_act_at"),
+            models.Index(fields=["target_organization_code", "created_at"], name="ml_org_code_at"),
+            models.Index(fields=["target_organization_code", "action", "created_at"], name="ml_org_code_act_at"),
             models.Index(fields=["expires_at"], name="ml_exp_at"),
         ]
         ordering = ("-created_at",)
 
     @override
     def save(self, *args, **kwargs) -> None:
+        if self.target_organization_id is not None and not self.target_organization_code:
+            self.target_organization_code = str(self.target_organization_id)
+            self.target_organization_name = self.target_organization.name
         super().save(*args, **kwargs)
+
+        if self.target_organization_id is not None:
+            if self.action not in {
+                self.Action.approved,
+                self.Action.expiry_changed,
+                self.Action.terminated,
+            }:
+                return
+
+            OrganizationSponsorship.objects.update_or_create(
+                organization_id=self.target_organization_id,
+                defaults={
+                    "membership_type": self.membership_type,
+                    "expires_at": self.expires_at,
+                },
+            )
+            return
+
+        if self.target_organization_code:
+            # Organization-target logs without a live FK should never affect current-state tables.
+            return
 
         if self.action not in {
             self.Action.approved,
@@ -292,6 +443,9 @@ class MembershipLog(models.Model):
         )
 
     def __str__(self) -> str:
+        if self.target_username == "":
+            code = self.target_organization_code or (self.target_organization_id or "")
+            return f"{self.action}: org:{code} ({self.membership_type_id})"
         return f"{self.action}: {self.target_username} ({self.membership_type_id})"
 
     @classmethod
@@ -337,6 +491,27 @@ class MembershipLog(models.Model):
         )
 
     @classmethod
+    def create_for_org_request(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.requested,
+        )
+
+    @classmethod
     def create_for_approval(
         cls,
         *,
@@ -350,6 +525,30 @@ class MembershipLog(models.Model):
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.approved,
+            expires_at=cls.expiry_for_approval_at(approved_at=approved_at, previous_expires_at=previous_expires_at),
+        )
+
+    @classmethod
+    def create_for_org_approval(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        previous_expires_at: datetime.datetime | None = None,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        approved_at = timezone.now()
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
             membership_type=membership_type,
             membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
@@ -378,6 +577,29 @@ class MembershipLog(models.Model):
         )
 
     @classmethod
+    def create_for_org_expiry_change(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        expires_at: datetime.datetime,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.expiry_changed,
+            expires_at=expires_at,
+        )
+
+    @classmethod
     def create_for_termination(
         cls,
         *,
@@ -390,6 +612,29 @@ class MembershipLog(models.Model):
         return cls.objects.create(
             actor_username=actor_username,
             target_username=target_username,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.terminated,
+            expires_at=terminated_at,
+        )
+
+    @classmethod
+    def create_for_org_termination(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        terminated_at = timezone.now()
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
             membership_type=membership_type,
             membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
@@ -418,6 +663,30 @@ class MembershipLog(models.Model):
         )
 
     @classmethod
+    def create_for_org_rejection(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        rejection_reason: str,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.rejected,
+            rejection_reason=rejection_reason,
+            expires_at=None,
+        )
+
+    @classmethod
     def create_for_ignore(
         cls,
         *,
@@ -433,6 +702,28 @@ class MembershipLog(models.Model):
             membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.ignored,
+        )
+
+    @classmethod
+    def create_for_org_ignore(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.ignored,
+            expires_at=None,
         )
 
 

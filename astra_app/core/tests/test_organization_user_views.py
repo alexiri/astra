@@ -1,31 +1,55 @@
 from __future__ import annotations
 
+import datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import mkdtemp
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from core.backends import FreeIPAUser
+from core.models import FreeIPAPermissionGrant
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
 
 class OrganizationUserViewsTests(TestCase):
     _test_media_root = Path(mkdtemp(prefix="alx_test_media_"))
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
 
     def test_representative_can_view_org_pages_notes_hidden(self) -> None:
-        from core.models import Organization
+        from core.models import MembershipType, Organization
 
-        Organization.objects.create(
-            code="almalinux",
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
             name="AlmaLinux",
-            contact="contact@almalinux.org",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
             representatives=["bob"],
@@ -37,22 +61,100 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organizations"))
             self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, "Only create an organization")
 
-            resp = self.client.get(reverse("organization-detail", args=["almalinux"]))
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "AlmaLinux")
+            self.assertContains(resp, "Annual dues: $2,500 USD")
             self.assertNotContains(resp, "secret internal")
 
             # Navbar should include Organizations link for authenticated users.
             self.assertContains(resp, reverse("organizations"))
 
-    def test_representative_can_edit_org_data_notes_hidden(self) -> None:
-        from core.models import Organization
+    def test_membership_viewer_can_view_org_but_cannot_see_edit_button(self) -> None:
+        from core.models import MembershipType, Organization
 
-        Organization.objects.create(
-            code="almalinux",
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
             name="AlmaLinux",
-            contact="contact@almalinux.org",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
+            representatives=["bob"],
+        )
+
+        # Viewer can see org pages but should not see the Edit button.
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertNotContains(resp, reverse("organization-edit", args=[org.pk]))
+
+            resp = self.client.get(reverse("organization-edit", args=[org.pk]))
+            self.assertEqual(resp.status_code, 404)
+
+    def test_representative_can_edit_org_data_notes_hidden(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
             representatives=["bob"],
@@ -62,27 +164,43 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
-            resp = self.client.get(reverse("organization-edit", args=["almalinux"]))
+            resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "AlmaLinux")
-            self.assertNotContains(resp, "notes")
+            self.assertContains(resp, 'id="id_additional_information"')
+            self.assertContains(resp, "Annual dues: $2,500 USD")
+            self.assertContains(resp, 'id="id_website_logo"')
+            self.assertNotContains(resp, 'textarea name="website_logo"')
             self.assertNotContains(resp, "secret internal")
 
             resp = self.client.post(
-                reverse("organization-edit", args=["almalinux"]),
+                reverse("organization-edit", args=[org.pk]),
                 data={
+                    "business_contact_name": "Business Person Updated",
+                    "business_contact_email": "hello@almalinux.org",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person Updated",
+                    "pr_marketing_contact_email": "pr-updated@almalinux.org",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person Updated",
+                    "technical_contact_email": "tech-updated@almalinux.org",
+                    "technical_contact_phone": "",
+                    "membership_level": "silver",
                     "name": "AlmaLinux Updated",
-                    "contact": "hello@almalinux.org",
+                    "website_logo": "https://example.com/logo-options-updated",
                     "website": "https://example.com/",
+                    "additional_information": "Some extra info",
                 },
                 follow=False,
             )
         self.assertEqual(resp.status_code, 302)
 
-        org = Organization.objects.get(code="almalinux")
+        org.refresh_from_db()
         self.assertEqual(org.name, "AlmaLinux Updated")
-        self.assertEqual(org.contact, "hello@almalinux.org")
+        self.assertEqual(org.business_contact_email, "hello@almalinux.org")
         self.assertEqual(org.website, "https://example.com/")
+        self.assertEqual(org.additional_information, "Some extra info")
+        self.assertEqual(org.notes, "secret internal")
 
     @override_settings(
         STORAGES={
@@ -91,14 +209,34 @@ class OrganizationUserViewsTests(TestCase):
         },
         MEDIA_ROOT=_test_media_root,
     )
-    def test_representative_logo_upload_is_png_named_by_code(self) -> None:
+    def test_representative_logo_upload_is_png_named_by_id(self) -> None:
         from PIL import Image
 
-        from core.models import Organization
+        from core.models import MembershipType, Organization
 
-        Organization.objects.create(
-            code="almalinux",
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
             name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
             representatives=["bob"],
         )
 
@@ -115,19 +253,44 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
-                reverse("organization-edit", args=["almalinux"]),
+                reverse("organization-edit", args=[org.pk]),
                 data={
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@almalinux.org",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@almalinux.org",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@almalinux.org",
+                    "technical_contact_phone": "",
+                    "membership_level": "silver",
                     "name": "AlmaLinux",
-                    "contact": "",
-                    "website": "",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://almalinux.org/",
+                    "additional_information": "",
                     "logo": logo_upload,
                 },
                 follow=False,
             )
         self.assertEqual(resp.status_code, 302)
 
-        org = Organization.objects.get(code="almalinux")
-        self.assertTrue(org.logo.name.endswith("organizations/logos/almalinux.png"))
+        org.refresh_from_db()
+        expected_logo_path = f"organizations/logos/{org.pk}.png"
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-edit", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, expected_logo_path)
+
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, expected_logo_path)
+
+            resp = self.client.get(reverse("organizations"))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, expected_logo_path)
+        self.assertTrue(org.logo.name.endswith(expected_logo_path))
 
         org.logo.open("rb")
         try:
@@ -135,13 +298,336 @@ class OrganizationUserViewsTests(TestCase):
         finally:
             org.logo.close()
 
-    def test_non_representative_cannot_view_org_detail(self) -> None:
-        from core.models import Organization
+    def test_membership_level_change_creates_request_until_approved(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType, Organization
 
-        Organization.objects.create(
-            code="almalinux",
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
             name="AlmaLinux",
-            contact="contact@almalinux.org",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
+            notes="Committee note for AlmaLinux",
+            representatives=["bob"],
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(
+                reverse("organization-edit", args=[org.pk]),
+                data={
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@almalinux.org",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@almalinux.org",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@almalinux.org",
+                    "technical_contact_phone": "",
+                    "membership_level": "gold",
+                    "name": "AlmaLinux",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://almalinux.org/",
+                    "additional_information": "Please consider our updated sponsorship level.",
+                },
+                follow=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+
+        org.refresh_from_db()
+        self.assertEqual(org.membership_level_id, "silver")
+
+        req = MembershipRequest.objects.get(status=MembershipRequest.Status.pending)
+        self.assertEqual(req.membership_type_id, "gold")
+        self.assertEqual(req.requested_organization_id, org.pk)
+        self.assertEqual(req.responses, [{"Additional Information": "Please consider our updated sponsorship level."}])
+
+        req_log = MembershipLog.objects.get(action=MembershipLog.Action.requested, target_organization=org)
+        self.assertEqual(req_log.membership_type_id, "gold")
+        self.assertEqual(req_log.membership_request_id, req.pk)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, "In Review")
+            self.assertContains(resp, "Annual dues: $20,000 USD")
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-requests"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, "Request responses")
+        self.assertContains(resp, "Please consider our updated sponsorship level.")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=False)
+        self.assertEqual(resp.status_code, 302)
+
+        org.refresh_from_db()
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
+        self.assertEqual(org.membership_level_id, "gold")
+
+        approval_log = MembershipLog.objects.get(action=MembershipLog.Action.approved, target_organization=org)
+        self.assertEqual(approval_log.membership_type_id, "gold")
+        self.assertEqual(approval_log.membership_request_id, req.pk)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-audit-log-organization", args=[org.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Audit Log")
+        self.assertContains(resp, "AlmaLinux")
+        self.assertContains(resp, "Approved")
+        self.assertContains(resp, reverse("membership-request-detail", args=[req.pk]))
+
+
+    def test_sponsorship_expiration_display_and_extend_request(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="gold",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
+            additional_information="Renewal note",
+            representatives=["bob"],
+        )
+
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Expires")
+        self.assertContains(resp, "Extend")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
+        self.assertEqual(resp.status_code, 302)
+
+        req = MembershipRequest.objects.get(status=MembershipRequest.Status.pending)
+        self.assertEqual(req.requested_organization_id, org.pk)
+        self.assertEqual(req.membership_type_id, "gold")
+        self.assertEqual(req.responses, [{"Additional Information": "Renewal note"}])
+
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                action=MembershipLog.Action.requested,
+                target_organization=org,
+                membership_request=req,
+            ).exists()
+        )
+
+    def test_committee_can_edit_org_sponsorship_expiry_and_terminate(self) -> None:
+        from core.models import (
+            FreeIPAPermissionGrant,
+            MembershipLog,
+            MembershipType,
+            Organization,
+            OrganizationSponsorship,
+        )
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="gold",
+            website="https://almalinux.org/",
+            representatives=["bob"],
+        )
+
+        expires_at = timezone.now() + datetime.timedelta(days=30)
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_DELETE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Edit expiry")
+        self.assertContains(resp, "Terminate")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Update expiration")
+
+        new_expires_on = (timezone.now() + datetime.timedelta(days=90)).date().isoformat()
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={"expires_on": new_expires_on},
+                follow=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+
+        org.refresh_from_db()
+        sponsorship = OrganizationSponsorship.objects.get(organization=org)
+        self.assertEqual(sponsorship.membership_type_id, "gold")
+        self.assertIsNotNone(sponsorship.expires_at)
+
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                action=MembershipLog.Action.expiry_changed,
+                target_organization=org,
+                membership_type_id="gold",
+            ).exists()
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]), follow=False)
+        self.assertEqual(resp.status_code, 302)
+
+        org.refresh_from_db()
+        self.assertIsNone(org.membership_level_id)
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                action=MembershipLog.Action.terminated,
+                target_organization=org,
+                membership_type_id="gold",
+            ).exists()
+        )
+
+    def test_non_representative_cannot_view_org_detail(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
             representatives=["bob"],
@@ -151,25 +637,263 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            resp = self.client.get(reverse("organization-detail", args=["almalinux"]))
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 404)
 
     def test_non_representative_cannot_edit_org(self) -> None:
-        from core.models import Organization
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
 
         Organization.objects.create(
-            code="almalinux",
             name="AlmaLinux",
-            contact="contact@almalinux.org",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
             representatives=["bob"],
         )
 
+    def test_membership_committee_can_view_and_edit_committee_notes(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
+            notes="secret internal",
+            representatives=["bob"],
+        )
+
+        # Grant membership view+change to reviewer.
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, "Committee Notes")
+            self.assertContains(resp, "secret internal")
+
+            resp = self.client.post(
+                reverse("organization-committee-notes-update", args=[org.pk]),
+                data={"notes": "updated notes", "next": reverse("organization-detail", args=[org.pk])},
+                follow=False,
+            )
+            self.assertEqual(resp.status_code, 302)
+
+        org.refresh_from_db()
+        self.assertEqual(org.notes, "updated notes")
+
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
         self._login_as_freeipa_user("alice")
 
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            resp = self.client.get(reverse("organization-edit", args=["almalinux"]))
+            resp = self.client.get(reverse("organization-edit", args=[org.pk]))
         self.assertEqual(resp.status_code, 404)
+
+    def test_committee_with_change_membership_can_edit_org_and_manage_representatives(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
+            representatives=["bob"],
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-edit", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, 'name="representatives"')
+            self.assertContains(resp, "select2.full")
+            self.assertContains(resp, "select2.css")
+
+            resp = self.client.post(
+                reverse("organization-edit", args=[org.pk]),
+                data={
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@almalinux.org",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@almalinux.org",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@almalinux.org",
+                    "technical_contact_phone": "",
+                    "membership_level": "silver",
+                    "name": "AlmaLinux",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://almalinux.org/",
+                    "additional_information": "",
+                    "representatives": ["bob", "carol"],
+                },
+                follow=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+
+        org.refresh_from_db()
+        self.assertEqual(org.representatives, ["bob", "carol"])
+
+    def test_deleting_organization_does_not_delete_membership_requests_or_audit_logs(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType, Organization
+
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            representatives=["bob"],
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Additional Information": "Please consider our updated sponsorship level."}],
+        )
+        MembershipLog.create_for_org_request(
+            actor_username="bob",
+            target_organization=org,
+            membership_type=membership_type,
+            membership_request=req,
+        )
+
+        org.delete()
+
+        self.assertTrue(MembershipRequest.objects.filter(pk=req.pk).exists())
+        self.assertTrue(MembershipLog.objects.filter(membership_request_id=req.pk).exists())
+
+    def test_user_can_create_organization_and_becomes_representative(self) -> None:
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-create"))
+        self.assertEqual(resp.status_code, 200)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(
+                reverse("organization-create"),
+                data={
+                    "name": "AlmaLinux",
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@almalinux.org",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@almalinux.org",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@almalinux.org",
+                    "technical_contact_phone": "",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://almalinux.org/",
+                    "additional_information": "We would like to join.",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+
+        from core.models import Organization
+
+        created = Organization.objects.get(name="AlmaLinux")
+        self.assertEqual(created.representatives, ["bob"])
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organizations"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("organization-detail", args=[created.pk]))

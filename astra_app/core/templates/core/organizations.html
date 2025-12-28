@@ -1,24 +1,51 @@
 {% extends 'core/base.html' %}
 
+{% load core_organization_grid %}
+
 {% block title %}Organizations{% endblock %}
 
 {% block header %}
-  <h1 class="h3">Organizations</h1>
+  <h1 class="m-0">Organizations</h1>
 {% endblock %}
 
 {% block content %}
   <div class="card">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between" style="gap: .75rem;">
+        <a href="{{ create_url|default:'' }}" class="btn btn-primary">Create organization</a>
+
+        <form method="get" class="input-group input-group-sm" style="width: 220px;">
+          <input
+            type="text"
+            name="q"
+            class="form-control float-right"
+            placeholder="Search"
+            value="{{ q }}"
+            aria-label="Search organizations"
+          >
+          <div class="input-group-append">
+            {% if q %}
+              <button
+                type="button"
+                class="btn btn-default"
+                aria-label="Clear search"
+                onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            {% endif %}
+            <button type="submit" class="btn btn-default" aria-label="Search">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
     <div class="card-body">
-      <ul class="list-unstyled mb-0">
-        {% for org in organizations %}
-          <li class="mb-2">
-            <a href="{% url 'organization-detail' org.code %}">
-              <strong>{{ org.name }}</strong>
-            </a>
-            <div class="text-muted small">{{ org.code }}</div>
-          </li>
-        {% endfor %}
-      </ul>
+      <div class="alert alert-info">
+        <strong>Only create an organization</strong> if you are an employee or authorized representative of a company/organization that wants to become a Sponsor of AlmaLinux.
+      </div>
+      {% organization_grid organizations=organizations empty_label=empty_label %}
     </div>
   </div>
 {% endblock %}

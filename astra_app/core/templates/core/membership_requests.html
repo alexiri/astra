@@ -39,7 +39,7 @@
               <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
             </th>
             <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Requested at</th>
-            <th class="text-nowrap" style="width: 30%; white-space: nowrap;">User</th>
+            <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Target</th>
             <th>Type</th>
             <th style="width: 280px" class="text-right">Actions</th>
           </tr>
@@ -55,42 +55,83 @@
                   name="selected"
                   value="{{ r.pk }}"
                   form="bulk-action-form"
-                  aria-label="Select request for {{ r.requested_username }}"
+                  aria-label="Select request"
                 >
               </td>
               <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">{{ r.requested_at }}</td>
               <td>
-                <div>
-                  <a href="{% url 'user-profile' r.requested_username %}">{{ r.requested_username }}</a>
-                </div>
-                {% if row.full_name %}
-                  <div class="text-muted small">{{ row.full_name }}</div>
+                {% if row.organization or row.organization_code %}
+                  <div>
+                    {% if row.organization %}
+                      <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
+                    {% else %}
+                      <span>{{ row.organization_name }}</span>
+                      <span class="text-muted">({{ row.organization_code }})</span>
+                      <span class="text-muted">(deleted)</span>
+                    {% endif %}
+                  </div>
+
+                  {% if row.organization and row.organization.notes %}
+                    <details class="mt-1">
+                      <summary class="small text-muted">Membership Committee Notes</summary>
+                      <div class="mt-2">
+                        {% if membership_can_add or membership_can_change or membership_can_delete %}
+                          <form method="post" action="{% url 'organization-committee-notes-update' row.organization.pk %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <div class="form-group mb-2">
+                              <textarea
+                                name="notes"
+                                class="form-control form-control-sm"
+                                rows="3"
+                                placeholder="Enter a note for this organization"
+                              >{{ row.organization.notes }}</textarea>
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
+                          </form>
+                        {% else %}
+                          <div class="text-muted small" style="white-space: pre-wrap;">{{ row.organization.notes }}</div>
+                        {% endif %}
+                      </div>
+                    </details>
+                  {% endif %}
+                {% elif r.requested_username %}
+                  <div>
+                    <a href="{% url 'user-profile' r.requested_username %}">{{ r.requested_username }}</a>
+                    {% if row.user_deleted %}
+                      <span class="text-muted">(deleted)</span>
+                    {% endif %}
+                  </div>
+                  {% if row.full_name %}
+                    <div class="text-muted small">{{ row.full_name }}</div>
+                  {% endif %}
+
+                  {% if row.status_note %}
+                    <details class="mt-1">
+                      <summary class="small text-muted">Membership Committee Notes</summary>
+                      <div class="mt-2">
+                        {% if membership_can_add or membership_can_change or membership_can_delete %}
+                          <form method="post" action="{% url 'membership-status-note-update' r.requested_username %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <div class="form-group mb-2">
+                              <textarea
+                                name="fasstatusnote"
+                                class="form-control form-control-sm"
+                                rows="3"
+                                placeholder="Enter a note for this user"
+                              >{{ row.status_note }}</textarea>
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
+                          </form>
+                        {% else %}
+                          <div class="text-muted small" style="white-space: pre-wrap;">{{ row.status_note }}</div>
+                        {% endif %}
+                      </div>
+                    </details>
+                  {% endif %}
                 {% endif %}
 
-                {% if row.status_note %}
-                  <details class="mt-1">
-                    <summary class="small text-muted">Membership Committee Notes</summary>
-                    <div class="mt-2">
-                      {% if membership_can_add or membership_can_change or membership_can_delete %}
-                        <form method="post" action="{% url 'membership-status-note-update' r.requested_username %}">
-                          {% csrf_token %}
-                          <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                          <div class="form-group mb-2">
-                            <textarea
-                              name="fasstatusnote"
-                              class="form-control form-control-sm"
-                              rows="3"
-                              placeholder="Enter a note for this user"
-                            >{{ row.status_note }}</textarea>
-                          </div>
-                          <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
-                        </form>
-                      {% else %}
-                        <div class="text-muted small" style="white-space: pre-wrap;">{{ row.status_note }}</div>
-                      {% endif %}
-                    </div>
-                  </details>
-                {% endif %}
 
               </td>
               <td>
@@ -100,12 +141,26 @@
                   <details class="mt-2">
                     <summary class="small text-muted">Request responses</summary>
                     <div class="mt-2">
-                      {% for item in r.responses %}
-                        {% for k,v in item.items %}
-                          <div class="small text-muted font-weight-bold">{{ k }}</div>
-                          <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+                      <div class="small text-muted">
+                        <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a>
+                        &middot; {{ r.requested_at|date:"r" }}
+                      </div>
+                      <div class="mt-2">
+                        {% for item in r.responses %}
+                          {% for k,v in item.items %}
+                            <div class="small text-muted font-weight-bold">{{ k }}</div>
+                            <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+                          {% endfor %}
                         {% endfor %}
-                      {% endfor %}
+                      </div>
+                    </div>
+                  </details>
+                {% elif row.organization and row.organization.additional_information %}
+                  <details class="mt-2">
+                    <summary class="small text-muted">Request responses</summary>
+                    <div class="mt-2">
+                      <div class="small text-muted font-weight-bold">Additional Information</div>
+                      <div class="small" style="white-space: pre-wrap;">{{ row.organization.additional_information }}</div>
                     </div>
                   </details>
                 {% endif %}

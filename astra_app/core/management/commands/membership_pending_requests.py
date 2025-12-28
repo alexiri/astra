@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 import post_office.mail
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -9,9 +7,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.models import FreeIPAPermissionGrant, MembershipRequest
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.models import FreeIPAPermissionGrant
-from core.models import MembershipRequest
 
 
 def _membership_requests_url(*, base_url: str) -> str:

@@ -13,6 +13,7 @@
   {% if not request.user.is_authenticated %}
     <link rel="stylesheet" href="{% static 'core/css/login.css' %}" />
   {% endif %}
+  {% block extra_head %}{% endblock %}
 </head>
 
 <body class="hold-transition {% if request.user.is_authenticated %}sidebar-mini layout-fixed{% else %}layout-top-nav public-auth{% endif %}">

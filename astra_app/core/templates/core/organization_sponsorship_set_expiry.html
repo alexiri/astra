@@ -1,0 +1,56 @@
+{% extends 'core/base.html' %}
+
+{% load tz %}
+
+{% block title %}Sponsorship Expiration{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Update expiration</h3>
+      </div>
+
+      <div class="card-body">
+        <p class="text-muted mb-3">
+          Editing sponsorship expiration for <strong>{{ organization.name }}</strong> — <strong>{{ membership_type.name }}</strong>
+        </p>
+
+        {% if current_log.expires_at %}
+          <p class="mb-3">
+            Current expiration:
+            <strong>
+              {% timezone target_timezone_name %}
+                {{ current_log.expires_at|date:"M j, Y H:i" }} ({{ target_timezone_name }})
+              {% endtimezone %}
+            </strong>
+          </p>
+        {% endif %}
+
+        <form method="post" action="{% url 'organization-sponsorship-set-expiry' organization.pk membership_type.code %}">
+          {% csrf_token %}
+          <div class="form-group">
+            <label for="id_expires_on">New expiration date</label>
+            {{ form.expires_on }}
+            {% if form.expires_on.errors %}
+              <div class="text-danger small">{{ form.expires_on.errors }}</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn btn-primary">Save</button>
+          <a href="{% url 'organization-detail' organization.pk %}" class="btn btn-secondary">Cancel</a>
+        </form>
+      </div>
+
+      {% if membership_can_delete %}
+        <div class="card-footer">
+          <form method="post" action="{% url 'organization-sponsorship-terminate' organization.pk membership_type.code %}" onsubmit="return confirm('Terminate this sponsorship early?');" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-danger">Terminate sponsorship</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

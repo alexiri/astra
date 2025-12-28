@@ -18,13 +18,44 @@ urlpatterns = [
     path("group/<str:name>/", views_groups.group_detail, name="group-detail"),
 
     path("organizations/", views_organizations.organizations, name="organizations"),
-    path("organization/<str:code>/", views_organizations.organization_detail, name="organization-detail"),
-    path("organization/<str:code>/edit/", views_organizations.organization_edit, name="organization-edit"),
+    path("organizations/create/", views_organizations.organization_create, name="organization-create"),
+    path(
+        "organizations/representatives/search/",
+        views_organizations.organization_representatives_search,
+        name="organization-representatives-search",
+    ),
+    path("organization/<int:organization_id>/", views_organizations.organization_detail, name="organization-detail"),
+    path(
+        "organization/<int:organization_id>/sponsorship/extend/",
+        views_organizations.organization_sponsorship_extend,
+        name="organization-sponsorship-extend",
+    ),
+    path(
+        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/expiry/",
+        views_membership.organization_sponsorship_set_expiry,
+        name="organization-sponsorship-set-expiry",
+    ),
+    path(
+        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/terminate/",
+        views_membership.organization_sponsorship_terminate,
+        name="organization-sponsorship-terminate",
+    ),
+    path("organization/<int:organization_id>/edit/", views_organizations.organization_edit, name="organization-edit"),
+    path(
+        "organization/<int:organization_id>/committee-notes/",
+        views_organizations.organization_committee_notes_update,
+        name="organization-committee-notes-update",
+    ),
 
     path("search/", views_search.global_search, name="global-search"),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),
+    path(
+        "membership/requests/<int:pk>/",
+        views_membership.membership_request_detail,
+        name="membership-request-detail",
+    ),
     path(
         "membership/requests/bulk/",
         views_membership.membership_requests_bulk,
@@ -47,6 +78,11 @@ urlpatterns = [
     ),
 
     path("membership/log/", views_membership.membership_audit_log, name="membership-audit-log"),
+    path(
+        "membership/log/org/<int:organization_id>/",
+        views_membership.membership_audit_log_organization,
+        name="membership-audit-log-organization",
+    ),
     path(
         "membership/log/<str:username>/",
         views_membership.membership_audit_log_user,

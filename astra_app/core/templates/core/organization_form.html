@@ -1,0 +1,251 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block title %}{% if is_create %}Create organization{% else %}Edit {{ organization.name }}{% endif %}{% endblock %}
+
+{% block header %}
+  <h1 class="h3">{% if is_create %}Create organization{% else %}Edit {{ organization.name }}{% endif %}</h1>
+{% endblock %}
+
+{% block extra_head %}
+  {% if show_representatives %}
+    <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/autocomplete.css' %}">
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% if is_create %}
+      <div class="alert alert-info">
+        <strong>Only create an organization</strong> if you are an employee or authorized representative of a company/organization that wants to become a Sponsor of AlmaLinux.
+        You will be listed as an initial representative for the organization.
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Business Contact</h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">
+          All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
+        </p>
+
+        <div class="form-group">
+          <label for="{{ form.business_contact_name.id_for_label }}">{{ form.business_contact_name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.business_contact_name }}
+          {% if form.business_contact_name.errors %}<div class="text-danger">{{ form.business_contact_name.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.business_contact_email.id_for_label }}">{{ form.business_contact_email.label }} <span class="text-danger">(required)</span></label>
+          {{ form.business_contact_email }}
+          {% if form.business_contact_email.errors %}<div class="text-danger">{{ form.business_contact_email.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.business_contact_phone.id_for_label }}">{{ form.business_contact_phone.label }}</label>
+          {{ form.business_contact_phone }}
+          {% if form.business_contact_phone.errors %}<div class="text-danger">{{ form.business_contact_phone.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">PR and/or Marketing Contact</h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">This person will be contacted for press release and marketing benefit reasons</p>
+
+        <div class="form-group">
+          <label for="{{ form.pr_marketing_contact_name.id_for_label }}">{{ form.pr_marketing_contact_name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.pr_marketing_contact_name }}
+          {% if form.pr_marketing_contact_name.errors %}<div class="text-danger">{{ form.pr_marketing_contact_name.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.pr_marketing_contact_email.id_for_label }}">{{ form.pr_marketing_contact_email.label }} <span class="text-danger">(required)</span></label>
+          {{ form.pr_marketing_contact_email }}
+          {% if form.pr_marketing_contact_email.errors %}<div class="text-danger">{{ form.pr_marketing_contact_email.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.pr_marketing_contact_phone.id_for_label }}">{{ form.pr_marketing_contact_phone.label }}</label>
+          {{ form.pr_marketing_contact_phone }}
+          {% if form.pr_marketing_contact_phone.errors %}<div class="text-danger">{{ form.pr_marketing_contact_phone.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Technical Contact</h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">
+          All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
+        </p>
+
+        <div class="form-group">
+          <label for="{{ form.technical_contact_name.id_for_label }}">{{ form.technical_contact_name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.technical_contact_name }}
+          {% if form.technical_contact_name.errors %}<div class="text-danger">{{ form.technical_contact_name.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.technical_contact_email.id_for_label }}">{{ form.technical_contact_email.label }} <span class="text-danger">(required)</span></label>
+          {{ form.technical_contact_email }}
+          {% if form.technical_contact_email.errors %}<div class="text-danger">{{ form.technical_contact_email.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.technical_contact_phone.id_for_label }}">{{ form.technical_contact_phone.label }}</label>
+          {{ form.technical_contact_phone }}
+          {% if form.technical_contact_phone.errors %}<div class="text-danger">{{ form.technical_contact_phone.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Branding</h3>
+      </div>
+      <div class="card-body">
+        <div class="form-group">
+          <label for="{{ form.name.id_for_label }}">{{ form.name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.name }}
+          {% if form.name.errors %}<div class="text-danger">{{ form.name.errors }}</div>{% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="{{ form.website_logo.id_for_label }}">{{ form.website_logo.label }} <span class="text-danger">(required)</span></label>
+          {{ form.website_logo }}
+          {% if form.website_logo.help_text %}<small class="form-text text-muted">{{ form.website_logo.help_text }}</small>{% endif %}
+          {% if form.website_logo.errors %}<div class="text-danger">{{ form.website_logo.errors }}</div>{% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="{{ form.website.id_for_label }}">{{ form.website.label }} <span class="text-danger">(required)</span></label>
+          {{ form.website }}
+          {% if form.website.help_text %}<small class="form-text text-muted">{{ form.website.help_text }}</small>{% endif %}
+          {% if form.website.errors %}<div class="text-danger">{{ form.website.errors }}</div>{% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="{{ form.logo.id_for_label }}">{{ form.logo.label }}</label>
+          {{ form.logo }}
+          {% if form.logo.errors %}<div class="text-danger">{{ form.logo.errors }}</div>{% endif %}
+          {% if not is_create and organization and organization.logo %}
+            <div class="mt-2">
+              <img src="{{ organization.logo.url }}" alt="{{ organization.name }} logo" style="max-height: 120px;" />
+            </div>
+            <div class="mt-2">
+              <a href="{{ organization.logo.url }}" rel="noopener noreferrer">Current logo</a>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Sponsorship Level</h3>
+      </div>
+      <div class="card-body">
+        <div class="mb-3 text-muted">
+          Sponsorship is subject to confirmation of eligibility.
+          Your request will be reviewed by the Membership Committee.
+          The full details of what each sponsorship level includes can be found here: <a href="https://almalinux.org/members" rel="noopener noreferrer">almalinux.org/members</a>
+        </div>
+        <div class="form-group">
+          <label for="{{ form.membership_level.id_for_label }}">{{ form.membership_level.label }}</label>
+          {{ form.membership_level }}
+          {% if form.membership_level.errors %}<div class="text-danger">{{ form.membership_level.errors }}</div>{% endif %}
+        </div>
+
+        <div class="form-group mb-0">
+          <label for="{{ form.additional_information.id_for_label }}">{{ form.additional_information.label }}</label>
+          {{ form.additional_information }}
+          {% if form.additional_information.errors %}<div class="text-danger">{{ form.additional_information.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if show_representatives %}
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Representatives</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group mb-0">
+            <label for="{{ form.representatives.id_for_label }}">{{ form.representatives.label }}</label>
+            {{ form.representatives }}
+            {% if form.representatives.help_text %}<small class="form-text text-muted">{{ form.representatives.help_text }}</small>{% endif %}
+            {% if form.representatives.errors %}<div class="text-danger">{{ form.representatives.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-body">
+        <div class="mb-3 text-muted">
+          By clicking the "{% if is_create %}Create{% else %}Save{% endif %}" button below, you acknowledge
+          and agree that, when accepted by AlmaLinux OS Foundation, this application represents a binding
+          contract between the parties and commits the applicant to comply with all the terms and conditions
+          of AlmaLinux OS Foundation's Bylaws and such rules and policies as the Board of Directors and/or committees
+          may from time to time adopt. Additionally, the applicant hereby acknowledges and consents to
+          the terms set forth in the <a href="https://almalinux.org/p/privacy-policy/">AlmaLinux OS Foundation Privacy Policy</a>.
+        </div>
+        <div class="m-3">
+          <button type="submit" class="btn btn-primary">{% if is_create %}Create{% else %}Save{% endif %}</button>
+          {% if is_create %}
+            <a class="btn btn-secondary" href="{{ cancel_url }}">Cancel</a>
+          {% else %}
+            <a class="btn btn-secondary" href="{% url 'organization-detail' organization.pk %}">Cancel</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </form>
+{% endblock %}
+
+{% block scripts %}
+  {% if show_representatives %}
+    <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
+    <script>
+      (function () {
+        const $ = window.jQuery;
+        if (!$ || !$.fn || !$.fn.select2) return;
+
+        $('select.alx-select2[multiple]').each(function () {
+          const $select = $(this);
+          if ($select.data('alx-select2-initialized')) return;
+          $select.data('alx-select2-initialized', true);
+
+          const ajaxUrl = $select.data('ajax-url') || $select.attr('data-ajax-url') || '';
+          $select.select2({
+            width: '100%',
+            placeholder: $select.data('placeholder') || 'Search users…',
+            allowClear: true,
+            ajax: ajaxUrl ? {
+              url: ajaxUrl,
+              dataType: 'json',
+              delay: 200,
+              data: function (params) {
+                return { q: params.term || '' };
+              },
+              processResults: function (data) {
+                return { results: Array.isArray(data.results) ? data.results : [] };
+              },
+              cache: true,
+            } : undefined,
+            minimumInputLength: 1,
+          });
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

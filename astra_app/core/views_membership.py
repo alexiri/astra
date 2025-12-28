@@ -8,22 +8,27 @@ from zoneinfo import ZoneInfo
 import post_office.mail
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.decorators import permission_required
+from django.contrib.auth.decorators import login_required, permission_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.backends import FreeIPAUser
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username
-from core.membership_notifications import send_membership_notification
-from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
+from core.models import (
+    Membership,
+    MembershipLog,
+    MembershipRequest,
+    MembershipType,
+    Organization,
+    OrganizationSponsorship,
+)
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -68,6 +73,13 @@ def _previous_expires_at_for_extension(*, username: str, membership_type: Member
     """
 
     current = Membership.objects.filter(target_username=username, membership_type=membership_type).first()
+    if current is None:
+        return None
+    return current.expires_at
+
+
+def _previous_expires_at_for_org_extension(*, organization_id: int) -> datetime.datetime | None:
+    current = OrganizationSponsorship.objects.filter(organization_id=organization_id).first()
     if current is None:
         return None
     return current.expires_at
@@ -156,18 +168,26 @@ def membership_request(request: HttpRequest) -> HttpResponse:
 def membership_audit_log(request: HttpRequest) -> HttpResponse:
     q = _normalize_str(request.GET.get("q"))
     username = _normalize_str(request.GET.get("username"))
+    raw_org = _normalize_str(request.GET.get("organization"))
+    organization_id = int(raw_org) if raw_org.isdigit() else None
     page_number = _normalize_str(request.GET.get("page")) or None
 
     logs = MembershipLog.objects.select_related(
         "membership_type",
         "membership_request",
         "membership_request__membership_type",
+        "target_organization",
     ).all()
     if username:
         logs = logs.filter(target_username=username)
+    if organization_id is not None:
+        logs = logs.filter(Q(target_organization_id=organization_id) | Q(target_organization_code=str(organization_id)))
     if q:
         logs = logs.filter(
             Q(target_username__icontains=q)
+            | Q(target_organization__name__icontains=q)
+            | Q(target_organization_code__icontains=q)
+            | Q(target_organization_name__icontains=q)
             | Q(actor_username__icontains=q)
             | Q(membership_type__name__icontains=q)
             | Q(membership_type__code__icontains=q)
@@ -182,6 +202,8 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
         query_params["q"] = q
     if username:
         query_params["username"] = username
+    if organization_id is not None:
+        query_params["organization"] = str(organization_id)
     qs = urlencode(query_params)
     page_url_prefix = f"?{qs}&page=" if qs else "?page="
 
@@ -192,6 +214,55 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
             "logs": page_obj.object_list,
             "filter_username": username,
             "filter_username_param": username,
+            "filter_organization": str(organization_id) if organization_id is not None else "",
+            "filter_organization_param": str(organization_id) if organization_id is not None else "",
+            "q": q,
+            **_pagination_context(paginator=paginator, page_obj=page_obj, page_url_prefix=page_url_prefix),
+        },
+    )
+
+
+@login_required(login_url="/login/")
+@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_audit_log_organization(request: HttpRequest, organization_id: int) -> HttpResponse:
+    q = _normalize_str(request.GET.get("q"))
+    page_number = _normalize_str(request.GET.get("page")) or None
+
+    logs = (
+        MembershipLog.objects.select_related(
+            "membership_type",
+            "membership_request",
+            "membership_request__membership_type",
+            "target_organization",
+        )
+        .filter(Q(target_organization_id=organization_id) | Q(target_organization_code=str(organization_id)))
+        .order_by("-created_at")
+    )
+    if q:
+        logs = logs.filter(
+            Q(actor_username__icontains=q)
+            | Q(membership_type__name__icontains=q)
+            | Q(membership_type__code__icontains=q)
+            | Q(action__icontains=q)
+        )
+
+    paginator = Paginator(logs, 50)
+    page_obj = paginator.get_page(page_number)
+    query_params: dict[str, str] = {}
+    if q:
+        query_params["q"] = q
+    qs = urlencode(query_params)
+    page_url_prefix = f"?{qs}&page=" if qs else "?page="
+
+    return render(
+        request,
+        "core/membership_audit_log.html",
+        {
+            "logs": page_obj.object_list,
+            "filter_username": "",
+            "filter_username_param": "",
+            "filter_organization": str(organization_id),
+            "filter_organization_param": str(organization_id),
             "q": q,
             **_pagination_context(paginator=paginator, page_obj=page_obj, page_url_prefix=page_url_prefix),
         },
@@ -247,17 +318,34 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
     requests = (
-        MembershipRequest.objects.select_related("membership_type")
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
         .filter(status=MembershipRequest.Status.pending)
         .order_by("requested_at")
     )
 
     request_rows: list[dict[str, object]] = []
     for r in requests:
-        fu = FreeIPAUser.get(r.requested_username)
-        full_name = fu.get_full_name() if fu is not None else ""
-        status_note = fu.fasstatusnote if fu is not None else ""
-        request_rows.append({"r": r, "full_name": full_name, "status_note": status_note})
+        if r.requested_username == "":
+            request_rows.append(
+                {
+                    "r": r,
+                    "organization": r.requested_organization,
+                    "organization_code": r.requested_organization_code,
+                    "organization_name": r.requested_organization_name,
+                }
+            )
+        else:
+            fu = FreeIPAUser.get(r.requested_username)
+            full_name = fu.get_full_name() if fu is not None else ""
+            status_note = fu.fasstatusnote if fu is not None else ""
+            request_rows.append(
+                {
+                    "r": r,
+                    "full_name": full_name,
+                    "status_note": status_note,
+                    "user_deleted": fu is None,
+                }
+            )
 
     return render(
         request,
@@ -265,6 +353,33 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
         {
             "requests": requests,
             "request_rows": request_rows,
+        },
+    )
+
+
+@login_required(login_url="/login/")
+@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+
+    target_user = None
+    target_full_name = ""
+    target_user_deleted = False
+    if req.requested_username:
+        target_user = FreeIPAUser.get(req.requested_username)
+        if target_user is None:
+            target_user_deleted = True
+        else:
+            target_full_name = target_user.get_full_name()
+
+    return render(
+        request,
+        "core/membership_request_detail.html",
+        {
+            "req": req,
+            "target_user": target_user,
+            "target_full_name": target_full_name,
+            "target_user_deleted": target_user_deleted,
         },
     )
 
@@ -348,7 +463,9 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
 
     actor_username = request.user.get_username()
     reqs = list(
-        MembershipRequest.objects.select_related("membership_type").filter(pk__in=selected_ids).order_by("pk")
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(pk__in=selected_ids)
+        .order_by("pk")
     )
     if not reqs:
         messages.error(request, "No matching pending requests were found.")
@@ -361,6 +478,88 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
 
     for req in reqs:
         membership_type = req.membership_type
+
+        if req.requested_username == "":
+            org = req.requested_organization
+            if action == "approve":
+                if org is None:
+                    failures += 1
+                    continue
+
+                org.membership_level = membership_type
+                org.save(update_fields=["membership_level"])
+
+                MembershipLog.create_for_org_approval(
+                    actor_username=actor_username,
+                    target_organization=org,
+                    membership_type=membership_type,
+                    previous_expires_at=_previous_expires_at_for_org_extension(organization_id=org.pk),
+                    membership_request=req,
+                )
+
+                req.status = MembershipRequest.Status.approved
+                req.decided_at = timezone.now()
+                req.decided_by_username = actor_username
+                req.save(update_fields=["status", "decided_at", "decided_by_username"])
+                approved += 1
+                continue
+
+            if action == "reject":
+                if org is not None:
+                    MembershipLog.create_for_org_rejection(
+                        actor_username=actor_username,
+                        target_organization=org,
+                        membership_type=membership_type,
+                        rejection_reason="",
+                        membership_request=req,
+                    )
+                else:
+                    MembershipLog.objects.create(
+                        actor_username=actor_username,
+                        target_username="",
+                        target_organization=None,
+                        target_organization_code=req.requested_organization_code,
+                        target_organization_name=req.requested_organization_name,
+                        membership_type=membership_type,
+                        membership_request=req,
+                        requested_group_cn=membership_type.group_cn,
+                        action=MembershipLog.Action.rejected,
+                        rejection_reason="",
+                        expires_at=None,
+                    )
+                req.status = MembershipRequest.Status.rejected
+                req.decided_at = timezone.now()
+                req.decided_by_username = actor_username
+                req.save(update_fields=["status", "decided_at", "decided_by_username"])
+                rejected += 1
+                continue
+
+            if org is not None:
+                MembershipLog.create_for_org_ignore(
+                    actor_username=actor_username,
+                    target_organization=org,
+                    membership_type=membership_type,
+                    membership_request=req,
+                )
+            else:
+                MembershipLog.objects.create(
+                    actor_username=actor_username,
+                    target_username="",
+                    target_organization=None,
+                    target_organization_code=req.requested_organization_code,
+                    target_organization_name=req.requested_organization_name,
+                    membership_type=membership_type,
+                    membership_request=req,
+                    requested_group_cn=membership_type.group_cn,
+                    action=MembershipLog.Action.ignored,
+                    expires_at=None,
+                )
+            req.status = MembershipRequest.Status.ignored
+            req.decided_at = timezone.now()
+            req.decided_by_username = actor_username
+            req.save(update_fields=["status", "decided_at", "decided_by_username"])
+            ignored += 1
+            continue
 
         if action == "approve":
             if not membership_type.group_cn:
@@ -468,8 +667,34 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
-    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type"), pk=pk)
+    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
     membership_type = req.membership_type
+
+    if req.requested_username == "":
+        org = req.requested_organization
+        if org is None:
+            messages.error(request, "Organization not found.")
+            return redirect("membership-requests")
+
+        org.membership_level = membership_type
+        org.save(update_fields=["membership_level"])
+
+        MembershipLog.create_for_org_approval(
+            actor_username=request.user.get_username(),
+            target_organization=org,
+            membership_type=membership_type,
+            previous_expires_at=_previous_expires_at_for_org_extension(organization_id=org.pk),
+            membership_request=req,
+        )
+
+        req.status = MembershipRequest.Status.approved
+        req.decided_at = timezone.now()
+        req.decided_by_username = request.user.get_username()
+        req.save(update_fields=["status", "decided_at", "decided_by_username"])
+
+        messages.success(request, f"Approved sponsorship level request for {org.name}.")
+        return redirect("membership-requests")
+
     if not membership_type.group_cn:
         messages.error(request, "This membership type is not linked to a group.")
         return redirect("membership-requests")
@@ -522,8 +747,59 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
-    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type"), pk=pk)
+    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
     membership_type = req.membership_type
+
+    if req.requested_username == "":
+        if request.method == "POST":
+            form = MembershipRejectForm(request.POST)
+            if form.is_valid():
+                reason = str(form.cleaned_data.get("reason") or "").strip()
+                if reason:
+                    req.responses = [{"Rejection reason": reason}]
+
+                org = req.requested_organization
+                if org is not None:
+                    MembershipLog.create_for_org_rejection(
+                        actor_username=request.user.get_username(),
+                        target_organization=org,
+                        membership_type=membership_type,
+                        rejection_reason=reason,
+                        membership_request=req,
+                    )
+                else:
+                    MembershipLog.objects.create(
+                        actor_username=request.user.get_username(),
+                        target_username="",
+                        target_organization=None,
+                        target_organization_code=req.requested_organization_code,
+                        target_organization_name=req.requested_organization_name,
+                        membership_type=membership_type,
+                        membership_request=req,
+                        requested_group_cn=membership_type.group_cn,
+                        action=MembershipLog.Action.rejected,
+                        rejection_reason=reason,
+                        expires_at=None,
+                    )
+
+                req.status = MembershipRequest.Status.rejected
+                req.decided_at = timezone.now()
+                req.decided_by_username = request.user.get_username()
+                req.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
+                org_name = org.name if org is not None else (req.requested_organization_name or "organization")
+                messages.success(request, f"Rejected sponsorship level request for {org_name}.")
+                return redirect("membership-requests")
+        else:
+            form = MembershipRejectForm()
+
+        return render(
+            request,
+            "core/membership_reject.html",
+            {
+                "req": req,
+                "form": form,
+            },
+        )
 
     if request.method == "POST":
         form = MembershipRejectForm(request.POST)
@@ -578,7 +854,41 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
-    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type"), pk=pk)
+    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+
+    if req.requested_username == "":
+        org = req.requested_organization
+        org_name = org.name if org is not None else (req.requested_organization_name or "organization")
+
+        if org is not None:
+            MembershipLog.create_for_org_ignore(
+                actor_username=request.user.get_username(),
+                target_organization=org,
+                membership_type=req.membership_type,
+                membership_request=req,
+            )
+        else:
+            MembershipLog.objects.create(
+                actor_username=request.user.get_username(),
+                target_username="",
+                target_organization=None,
+                target_organization_code=req.requested_organization_code,
+                target_organization_name=req.requested_organization_name,
+                membership_type=req.membership_type,
+                membership_request=req,
+                requested_group_cn=req.membership_type.group_cn,
+                action=MembershipLog.Action.ignored,
+                expires_at=None,
+            )
+
+        req.status = MembershipRequest.Status.ignored
+        req.decided_at = timezone.now()
+        req.decided_by_username = request.user.get_username()
+        req.save(update_fields=["status", "decided_at", "decided_by_username"])
+
+        messages.success(request, f"Ignored sponsorship level request for {org_name}.")
+        return redirect("membership-requests")
+
     MembershipLog.create_for_ignore(
         actor_username=request.user.get_username(),
         target_username=req.requested_username,
@@ -697,3 +1007,88 @@ def membership_terminate(request: HttpRequest, username: str, membership_type_co
 
     messages.success(request, "Membership terminated.")
     return redirect("user-profile", username=username)
+
+
+@login_required(login_url="/login/")
+@permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
+def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
+    membership_type_code = _normalize_str(membership_type_code)
+    if organization_id <= 0 or not membership_type_code:
+        raise Http404("Not found")
+
+    organization = get_object_or_404(Organization, pk=organization_id)
+    membership_type = get_object_or_404(MembershipType, pk=membership_type_code)
+
+    if organization.membership_level_id != membership_type.code:
+        messages.error(request, "That organization does not currently have an active sponsorship of that type.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    sponsorship = OrganizationSponsorship.objects.filter(organization=organization, membership_type=membership_type).first()
+    if sponsorship is None or sponsorship.expires_at is None or sponsorship.expires_at <= timezone.now():
+        messages.error(request, "That organization does not currently have an active sponsorship of that type.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    if request.method == "POST":
+        form = MembershipUpdateExpiryForm(request.POST)
+        if form.is_valid():
+            expires_on = form.cleaned_data["expires_on"]
+
+            expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+            MembershipLog.create_for_org_expiry_change(
+                actor_username=request.user.get_username(),
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at,
+            )
+
+            messages.success(request, "Sponsorship expiration updated.")
+            return redirect("organization-detail", organization_id=organization.pk)
+    else:
+        initial_date = sponsorship.expires_at.astimezone(datetime.UTC).date()
+        form = MembershipUpdateExpiryForm(initial={"expires_on": initial_date})
+
+    return render(
+        request,
+        "core/organization_sponsorship_set_expiry.html",
+        {
+            "organization": organization,
+            "membership_type": membership_type,
+            "current_log": sponsorship,
+            "target_timezone_name": "UTC",
+            "form": form,
+        },
+    )
+
+
+@login_required(login_url="/login/")
+@permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
+def organization_sponsorship_terminate(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    membership_type_code = _normalize_str(membership_type_code)
+    if organization_id <= 0 or not membership_type_code:
+        raise Http404("Not found")
+
+    organization = get_object_or_404(Organization, pk=organization_id)
+    membership_type = get_object_or_404(MembershipType, pk=membership_type_code)
+
+    if organization.membership_level_id != membership_type.code:
+        messages.error(request, "That organization does not currently have an active sponsorship of that type.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    sponsorship = OrganizationSponsorship.objects.filter(organization=organization, membership_type=membership_type).first()
+    if sponsorship is None or sponsorship.expires_at is None or sponsorship.expires_at <= timezone.now():
+        messages.error(request, "That organization does not currently have an active sponsorship of that type.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    MembershipLog.create_for_org_termination(
+        actor_username=request.user.get_username(),
+        target_organization=organization,
+        membership_type=membership_type,
+    )
+    organization.membership_level = None
+    organization.save(update_fields=["membership_level"])
+
+    messages.success(request, "Sponsorship terminated.")
+    return redirect("organization-detail", organization_id=organization.pk)

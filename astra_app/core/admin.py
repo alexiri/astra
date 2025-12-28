@@ -1243,6 +1243,51 @@ class OrganizationAdmin(admin.ModelAdmin):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
+            if "membership_level" in self.fields:
+                self.fields["membership_level"].queryset = MembershipType.objects.filter(isOrganization=True).order_by(
+                    "sort_order",
+                    "code",
+                )
+                self.fields["membership_level"].label_from_instance = (
+                    lambda membership_type: membership_type.description or membership_type.name
+                )
+
+            self.fields["business_contact_name"].label = "Name"
+            self.fields["business_contact_email"].label = "Email"
+            self.fields["business_contact_phone"].label = "Phone"
+            self.fields["business_contact_email"].help_text = (
+                "All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"
+            )
+
+            self.fields["pr_marketing_contact_name"].label = "Name"
+            self.fields["pr_marketing_contact_email"].label = "Email"
+            self.fields["pr_marketing_contact_phone"].label = "Phone"
+            self.fields["pr_marketing_contact_email"].help_text = (
+                "This person will be contacted for press release and marketing benefit reasons"
+            )
+
+            self.fields["technical_contact_name"].label = "Name"
+            self.fields["technical_contact_email"].label = "Email"
+            self.fields["technical_contact_phone"].label = "Phone"
+            self.fields["technical_contact_email"].help_text = (
+                "All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"
+            )
+
+            self.fields["membership_level"].help_text = (
+                "The full details of what each sponsorship level includes can be found here: almalinux.org/members"
+            )
+
+            self.fields["name"].label = "Legal/Official name of the sponsor to be listed"
+            self.fields["website_logo"].label = "High-quality logo that you would like used on the website"
+            self.fields["website_logo"].help_text = "Please provide a white logo, or a link to all of your logo options"
+            self.fields["website"].label = "URL we should link to"
+            self.fields["website"].help_text = (
+                "Please provide the exact URL that you would like the logo to link to - this can be a dedicated page or just your primary URL"
+            )
+            self.fields["logo"].label = "Logo upload for AlmaLinux Accounts"
+            self.fields["additional_information"].label = "Please provide any additional information the Membership Committee should take into account"
+            self.fields["notes"].label = "Committee notes (private)"
+
             users = FreeIPAUser.all()
             usernames = sorted({u.username for u in users if u.username})
 
@@ -1267,15 +1312,80 @@ class OrganizationAdmin(admin.ModelAdmin):
 
     form = OrganizationAdminForm
 
-    list_display = ("code", "name", "contact", "website")
-    search_fields = ("code", "name", "contact")
-    ordering = ("name", "code")
+    fieldsets = (
+        (
+            "Business Contact",
+            {
+                "description": (
+                    "All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"
+                ),
+                "fields": ("business_contact_name", "business_contact_email", "business_contact_phone"),
+            },
+        ),
+        (
+            "PR and/or Marketing Contact",
+            {
+                "description": "This person will be contacted for press release and marketing benefit reasons",
+                "fields": ("pr_marketing_contact_name", "pr_marketing_contact_email", "pr_marketing_contact_phone"),
+            },
+        ),
+        (
+            "Technical Contact",
+            {
+                "description": (
+                    "All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"
+                ),
+                "fields": ("technical_contact_name", "technical_contact_email", "technical_contact_phone"),
+            },
+        ),
+        (
+            "Sponsorship Level",
+            {
+                "description": "The full details of what each sponsorship level includes can be found here: almalinux.org/members",
+                "fields": ("membership_level",),
+            },
+        ),
+        (
+            "Branding",
+            {
+                "fields": ("name", "website_logo", "website", "logo"),
+            },
+        ),
+        (
+            "Additional Information",
+            {
+                "fields": ("additional_information",),
+            },
+        ),
+        (
+            "Committee Notes",
+            {
+                "fields": ("notes",),
+            },
+        ),
+        (
+            "Access",
+            {
+                "fields": ("id", "representatives"),
+            },
+        ),
+    )
+
+    list_display = ("id", "name", "membership_level", "business_contact_email", "website")
+    search_fields = (
+        "name",
+        "business_contact_email",
+        "technical_contact_email",
+        "pr_marketing_contact_email",
+        "website",
+    )
+    ordering = ("name", "id")
 
     @override
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj=obj))
-        if obj is not None and "code" not in readonly:
-            readonly.append("code")
+        if "id" not in readonly:
+            readonly.append("id")
         return tuple(readonly)
 
 

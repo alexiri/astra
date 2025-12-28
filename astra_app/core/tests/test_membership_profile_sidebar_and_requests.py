@@ -498,6 +498,18 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("membership-audit-log"))
 
+    def test_committee_sidebar_shows_organizations_link(self) -> None:
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
+                resp = self.client.get(reverse("users"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("organizations"))
+
     def test_requests_list_links_to_profile_and_shows_full_name(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
@@ -533,6 +545,74 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("user-profile", kwargs={"username": req.requested_username}))
         self.assertContains(resp, "Alice User")
+
+    def test_membership_requests_list_shows_deleted_user_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            # Simulate the target user having been deleted from FreeIPA.
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("membership-request-detail", args=[req.pk]))
+        self.assertContains(resp, req.requested_username)
+        self.assertContains(resp, "(deleted)")
+
+    def test_membership_request_detail_shows_deleted_user(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, req.requested_username)
+        self.assertContains(resp, "(deleted)")
 
     def test_profile_shows_status_note_to_membership_viewer(self) -> None:
         committee_cn = "membership-committee"

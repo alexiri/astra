@@ -165,7 +165,18 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
     page_numbers, show_first, show_last = _pagination_window(paginator, page_obj.number)
 
-    template_name = "core/_user_grid.html" if group_obj is None else "core/_member_grid.html"
+    template_name = "core/_widget_grid.html"
+
+    grid_items: list[dict[str, object]] = []
+    if group_obj is not None:
+        grid_items = cast(list[dict[str, object]], items_page or [])
+    elif users_page is not None:
+        grid_items = [
+            {"kind": "user", "username": getattr(u, "username", "")} for u in users_page if getattr(u, "username", "")
+        ]
+    elif usernames_page is not None:
+        grid_items = [{"kind": "user", "username": username} for username in usernames_page if username]
+
     template_context: dict[str, object] = {
         "title": title,
         "empty_label": empty_label,
@@ -177,14 +188,11 @@ def user_grid(context: Context, **kwargs: Any) -> str:
         "page_numbers": page_numbers,
         "show_first": show_first,
         "show_last": show_last,
+        "grid_items": grid_items,
         "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
         "member_manage_group_cn": member_manage_group_cn,
         "muted_usernames": muted_usernames,
     }
-    if group_obj is None:
-        template_context.update({"users": users_page, "usernames": usernames_page})
-    else:
-        template_context.update({"items": items_page})
 
     html = render_to_string(template_name, template_context, request=http_request)
     return mark_safe(html)

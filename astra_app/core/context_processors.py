@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from core.models import MembershipRequest
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
-from core.models import MembershipRequest, Organization
 
 
 def membership_review(request) -> dict[str, object]:
@@ -56,6 +56,5 @@ def organization_nav(request) -> dict[str, object]:
     if not username:
         return {"has_organizations": False}
 
-    return {
-        "has_organizations": Organization.objects.filter(representatives__contains=[username]).exists(),
-    }
+    # Users can self-serve creating organizations, so keep the navigation visible.
+    return {"has_organizations": True}
