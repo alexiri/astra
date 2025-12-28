@@ -291,10 +291,10 @@ _public_base_url_raw = str(PUBLIC_BASE_URL or "").strip()
 if "://" not in _public_base_url_raw:
     _public_base_url_raw = f"https://{_public_base_url_raw}"
 
-_public_base_url = urlsplit(_public_base_url_raw)
-AWS_S3_URL_PROTOCOL = f"{_public_base_url.scheme}:" if _public_base_url.scheme else "https:"
-_public_base_domain = (_public_base_url.netloc + _public_base_url.path.rstrip("/")).strip("/")
-AWS_S3_CUSTOM_DOMAIN = f"{_public_base_domain}/{AWS_STORAGE_BUCKET_NAME}" if _public_base_domain else None
+_aws_s3_domain = urlsplit(env("AWS_S3_DOMAIN"))
+AWS_S3_URL_PROTOCOL = f"{_aws_s3_domain.scheme}:"
+_aws_s3_base_domain = (_aws_s3_domain.netloc + _aws_s3_domain.path.rstrip("/")).strip("/")
+AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}" 
 
 # MinIO compatibility and predictable URLs.
 AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="path")
