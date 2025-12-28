@@ -45,18 +45,18 @@
       <table class="table table-striped mb-0">
         <thead>
           <tr>
-            <th>When</th>
-            <th>Actor</th>
-            <th>User</th>
-            <th>Membership</th>
+            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">When</th>
+            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Who</th>
+            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">User</th>
+            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Membership</th>
             <th>Action</th>
-            <th>Expires</th>
+            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Expires</th>
           </tr>
         </thead>
         <tbody>
           {% for l in logs %}
             <tr>
-              <td class="text-muted">{{ l.created_at|date:"r" }}</td>
+              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">{{ l.created_at|date:"r" }}</td>
               <td>{{ l.actor_username }}</td>
               <td>
                 <a href="{% url 'user-profile' l.target_username %}">{{ l.target_username }}</a>
@@ -84,7 +84,7 @@
                   </details>
                 {% endif %}
               </td>
-              <td class="text-muted">{% if l.expires_at %}{{ l.expires_at|date:"M j, Y" }}{% endif %}</td>
+              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">{% if l.expires_at %}{{ l.expires_at|date:"M j, Y" }}{% endif %}</td>
             </tr>
           {% empty %}
             <tr>

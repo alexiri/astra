@@ -235,36 +235,33 @@
             <div>
               <div class="font-weight-bold">{{ req.membership_type.name }}</div>
             </div>
-            <span class="badge badge-secondary">Pending</span>
+            <span class="badge badge-secondary">In Review</span>
           </li>
         {% endfor %}
 
-        {% if membership_can_view %}
+        {% if fu.fasstatusnote and membership_can_view %}
           <li class="list-group-item">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <strong>Membership Committee Notes</strong>
+            <details class="mt-1">
+              <summary class="small text-muted">Membership Committee Notes</summary>
+              <div class="mt-2">
+                {% if membership_can_add or membership_can_change or membership_can_delete %}
+                  <form method="post" action="{% url 'membership-status-note-update' fu.username %}">
+                    {% csrf_token %}
+                    <div class="form-group mb-2">
+                      <textarea
+                        name="fasstatusnote"
+                        class="form-control"
+                        rows="3"
+                        placeholder="Enter a note for this user"
+                      >{{ fu.fasstatusnote }}</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
+                  </form>
+                {% else %}
+                  <div class="text-muted" style="white-space: pre-wrap;">{{ fu.fasstatusnote }}</div>
+                {% endif %}
             </div>
-
-            {% if membership_can_add or membership_can_change or membership_can_delete %}
-              <form method="post" action="{% url 'membership-status-note-update' fu.username %}">
-                {% csrf_token %}
-                <div class="form-group mb-2">
-                  <textarea
-                    name="fasstatusnote"
-                    class="form-control"
-                    rows="3"
-                    placeholder="Enter a note for this user"
-                  >{{ fu.fasstatusnote }}</textarea>
-                </div>
-                <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
-              </form>
-            {% else %}
-              {% if fu.fasstatusnote %}
-                <div class="text-muted" style="white-space: pre-wrap;">{{ fu.fasstatusnote }}</div>
-              {% else %}
-                <div class="text-muted">No note.</div>
-              {% endif %}
-            {% endif %}
+            </details>          
           </li>
         {% endif %}
       </ul>
