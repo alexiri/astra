@@ -12,6 +12,11 @@
       <form method="post">
         {% csrf_token %}
 
+        <div class="mb-3 text-muted">
+          Membership is subject to confirmation of eligibility.
+          Your request will be reviewed by the Membership Committee.
+        </div>
+
         <div class="mb-3">
           {{ form.membership_type.label_tag }}
           <div class="mt-1">{{ form.membership_type }}</div>
@@ -56,9 +61,13 @@
           </div>
         </div>
 
-        <div class="mb-3 text-muted">
-          Membership is subject to confirmation of eligibility.
-          Your request will be reviewed by the Membership Committee.
+        <div class="mt-4 mb-3 text-muted">
+          By clicking the "Submit request" button below, you acknowledge and agree that, when accepted by
+          AlmaLinux OS Foundation, this application represents a binding contract between the parties
+          and commits the applicant to comply with all the terms and conditions of AlmaLinux OS
+          Foundation's Bylaws and such rules and policies as the Board of Directors and/or committees
+          may from time to time adopt. Additionally, the applicant hereby acknowledges and consents to
+          the terms set forth in the <a href="https://almalinux.org/p/privacy-policy/">AlmaLinux OS Foundation Privacy Policy</a>.
         </div>
 
         <button type="submit" class="btn btn-primary">Submit request</button>

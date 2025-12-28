@@ -106,7 +106,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Pending")
+        self.assertContains(resp, "In Review")
         self.assertContains(resp, "Individual")
 
     def test_profile_shows_all_pending_membership_requests(self) -> None:
@@ -148,7 +148,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Pending")
+        self.assertContains(resp, "In Review")
         self.assertContains(resp, "Individual")
         self.assertContains(resp, "Mirror")
 
@@ -701,6 +701,29 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         set_note.assert_called_once_with("alice", "Updated")
+
+    def test_membership_status_note_update_redirects_to_next(self) -> None:
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+
+        self._login_as_freeipa_user("reviewer")
+
+        next_url = reverse("membership-requests")
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAUser.set_status_note", autospec=True),
+        ):
+            resp = self.client.post(
+                reverse("membership-status-note-update", kwargs={"username": "alice"}),
+                data={
+                    "fasstatusnote": "Updated",
+                    "next": next_url,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], next_url)
 
     def test_membership_request_allows_individual_and_mirror_membership_types(self) -> None:
         from core.models import MembershipRequest, MembershipType

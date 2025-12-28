@@ -15,7 +15,8 @@ from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
@@ -288,16 +289,34 @@ def membership_status_note_update(request: HttpRequest, username: str) -> HttpRe
     if not target_username:
         raise Http404("User not found")
 
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
+    else:
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        redirect_to = referer or reverse("user-profile", kwargs={"username": target_username})
+
+        if redirect_to and not url_has_allowed_host_and_scheme(
+            url=redirect_to,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            redirect_to = reverse("user-profile", kwargs={"username": target_username})
+
     note = str(request.POST.get("fasstatusnote") or "")
     try:
         FreeIPAUser.set_status_note(target_username, note)
     except Exception:
         logger.exception("Failed to update fasstatusnote username=%s", target_username)
         messages.error(request, "Failed to update note.")
-        return redirect("user-profile", username=target_username)
+        return redirect(redirect_to)
 
     messages.success(request, "Note updated.")
-    return redirect("user-profile", username=target_username)
+    return redirect(redirect_to)
 
 
 @login_required(login_url="/login/")
