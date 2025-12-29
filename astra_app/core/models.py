@@ -637,6 +637,30 @@ class MembershipLog(models.Model):
         )
 
     @classmethod
+    def create_for_approval_at(
+        cls,
+        *,
+        actor_username: str,
+        target_username: str,
+        membership_type: MembershipType,
+        approved_at: datetime.datetime,
+        previous_expires_at: datetime.datetime | None = None,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username=target_username,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=cls.Action.approved,
+            expires_at=cls.expiry_for_approval_at(
+                approved_at=approved_at,
+                previous_expires_at=previous_expires_at,
+            ),
+        )
+
+    @classmethod
     def create_for_approval(
         cls,
         *,
@@ -646,15 +670,40 @@ class MembershipLog(models.Model):
         previous_expires_at: datetime.datetime | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        approved_at = timezone.now()
-        return cls.objects.create(
+        return cls.create_for_approval_at(
             actor_username=actor_username,
             target_username=target_username,
+            membership_type=membership_type,
+            approved_at=timezone.now(),
+            previous_expires_at=previous_expires_at,
+            membership_request=membership_request,
+        )
+
+    @classmethod
+    def create_for_org_approval_at(
+        cls,
+        *,
+        actor_username: str,
+        target_organization: Organization,
+        membership_type: MembershipType,
+        approved_at: datetime.datetime,
+        previous_expires_at: datetime.datetime | None = None,
+        membership_request: MembershipRequest | None = None,
+    ) -> MembershipLog:
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=target_organization,
+            target_organization_code=str(target_organization.pk),
+            target_organization_name=target_organization.name,
             membership_type=membership_type,
             membership_request=membership_request,
             requested_group_cn=membership_type.group_cn,
             action=cls.Action.approved,
-            expires_at=cls.expiry_for_approval_at(approved_at=approved_at, previous_expires_at=previous_expires_at),
+            expires_at=cls.expiry_for_approval_at(
+                approved_at=approved_at,
+                previous_expires_at=previous_expires_at,
+            ),
         )
 
     @classmethod
@@ -667,18 +716,13 @@ class MembershipLog(models.Model):
         previous_expires_at: datetime.datetime | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        approved_at = timezone.now()
-        return cls.objects.create(
+        return cls.create_for_org_approval_at(
             actor_username=actor_username,
-            target_username="",
             target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
             membership_type=membership_type,
+            approved_at=timezone.now(),
+            previous_expires_at=previous_expires_at,
             membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.approved,
-            expires_at=cls.expiry_for_approval_at(approved_at=approved_at, previous_expires_at=previous_expires_at),
         )
 
     @classmethod
@@ -891,3 +935,16 @@ class FreeIPAPermissionGrant(models.Model):
         self.permission = str(self.permission or "").strip().lower()
         self.principal_name = str(self.principal_name or "").strip().lower()
         super().save(*args, **kwargs)
+
+
+class MembershipCSVImportLink(MembershipType):
+    """Admin sidebar link for the one-time membership CSV importer.
+
+    Implemented as a proxy model so it shows up under the `core` app in the
+    Django admin sidebar without creating any new DB tables.
+    """
+
+    class Meta:
+        proxy = True
+        verbose_name = "Membership import (CSV)"
+        verbose_name_plural = "Membership import (CSV)"

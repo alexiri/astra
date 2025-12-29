@@ -20,8 +20,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from core.backends import FreeIPAUser
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username
+from core.membership_request_workflow import approve_membership_request, record_membership_request_created
 from core.models import (
-    Membership,
     MembershipLog,
     MembershipRequest,
     MembershipType,
@@ -34,7 +34,7 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
-from core.views_utils import _first, _normalize_str
+from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
 
@@ -62,40 +62,6 @@ def _pagination_context(*, paginator: Paginator, page_obj, page_url_prefix: str)
         "show_last": show_last,
         "page_url_prefix": page_url_prefix,
     }
-
-
-def _previous_expires_at_for_extension(*, username: str, membership_type: MembershipType) -> datetime.datetime | None:
-    """Return the previous expires_at to extend from, or None if approval should start now.
-
-    Membership expiration is sourced from the canonical membership state table.
-    If the membership was terminated, the state row will be absent.
-    """
-
-    current = Membership.objects.filter(target_username=username, membership_type=membership_type).first()
-    if current is None:
-        return None
-    if current.expires_at is None:
-        return None
-
-    # Only allow extensions of active memberships; if a row lingered past expiry,
-    # treat the next approval as a new membership term.
-    now = timezone.now()
-    if current.expires_at <= now:
-        return None
-    return current.expires_at
-
-
-def _previous_expires_at_for_org_extension(*, organization_id: int) -> datetime.datetime | None:
-    current = OrganizationSponsorship.objects.filter(organization_id=organization_id).first()
-    if current is None:
-        return None
-    if current.expires_at is None:
-        return None
-
-    now = timezone.now()
-    if current.expires_at <= now:
-        return None
-    return current.expires_at
 
 
 @login_required(login_url="/login/")
@@ -143,24 +109,11 @@ def membership_request(request: HttpRequest) -> HttpResponse:
                     status=MembershipRequest.Status.pending,
                     responses=responses,
                 )
-                MembershipLog.create_for_request(
-                    actor_username=username,
-                    target_username=username,
-                    membership_type=membership_type,
+                record_membership_request_created(
                     membership_request=mr,
+                    actor_username=username,
+                    send_submitted_email=True,
                 )
-
-                if fu.email:
-                    post_office.mail.send(
-                        recipients=[fu.email],
-                        sender=settings.DEFAULT_FROM_EMAIL,
-                        template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
-                        context={
-                            "username": username,
-                            "membership_type": membership_type.name,
-                            "membership_type_code": membership_type.code,
-                        },
-                    )
 
                 messages.success(request, "Membership request submitted.")
                 return redirect("user-profile", username=username)
@@ -494,26 +447,19 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
 
         if req.requested_username == "":
             org = req.requested_organization
+
             if action == "approve":
-                if org is None:
+                try:
+                    approve_membership_request(
+                        membership_request=req,
+                        actor_username=actor_username,
+                        send_approved_email=False,
+                    )
+                except Exception:
+                    logger.exception("Bulk approve failed for membership request pk=%s", req.pk)
                     failures += 1
                     continue
 
-                org.membership_level = membership_type
-                org.save(update_fields=["membership_level"])
-
-                MembershipLog.create_for_org_approval(
-                    actor_username=actor_username,
-                    target_organization=org,
-                    membership_type=membership_type,
-                    previous_expires_at=_previous_expires_at_for_org_extension(organization_id=org.pk),
-                    membership_request=req,
-                )
-
-                req.status = MembershipRequest.Status.approved
-                req.decided_at = timezone.now()
-                req.decided_by_username = actor_username
-                req.save(update_fields=["status", "decided_at", "decided_by_username"])
                 approved += 1
                 continue
 
@@ -575,50 +521,18 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
             continue
 
         if action == "approve":
-            if not membership_type.group_cn:
-                failures += 1
-                continue
-
-            target = FreeIPAUser.get(req.requested_username)
-            if target is None:
-                failures += 1
-                continue
-
             try:
-                target.add_to_group(group_name=membership_type.group_cn)
+                approve_membership_request(
+                    membership_request=req,
+                    actor_username=actor_username,
+                    send_approved_email=True,
+                )
             except Exception:
                 logger.exception("Bulk approve failed to add user to membership group")
                 failures += 1
                 continue
 
-            MembershipLog.create_for_approval(
-                actor_username=actor_username,
-                target_username=req.requested_username,
-                membership_type=membership_type,
-                previous_expires_at=_previous_expires_at_for_extension(
-                    username=req.requested_username,
-                    membership_type=membership_type,
-                ),
-                membership_request=req,
-            )
-            req.status = MembershipRequest.Status.approved
-            req.decided_at = timezone.now()
-            req.decided_by_username = actor_username
-            req.save(update_fields=["status", "decided_at", "decided_by_username"])
             approved += 1
-
-            if target.email:
-                post_office.mail.send(
-                    recipients=[target.email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
-                    context={
-                        "username": target.username,
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                        "group_cn": membership_type.group_cn,
-                    },
-                )
 
         elif action == "reject":
             target = FreeIPAUser.get(req.requested_username)
@@ -681,7 +595,6 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404("Not found")
 
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
-    membership_type = req.membership_type
 
     next_url = str(request.POST.get("next") or "").strip()
     if next_url and url_has_allowed_host_and_scheme(
@@ -700,78 +613,24 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         ):
             redirect_to = reverse("membership-requests")
 
+    try:
+        approve_membership_request(
+            membership_request=req,
+            actor_username=request.user.get_username(),
+            send_approved_email=True,
+        )
+    except Exception:
+        logger.exception("Failed to approve membership request pk=%s", req.pk)
+        messages.error(request, "Failed to approve the request.")
+        return redirect(redirect_to)
+
     if req.requested_username == "":
         org = req.requested_organization
-        if org is None:
-            messages.error(request, "Organization not found.")
-            return redirect(redirect_to)
-
-        org.membership_level = membership_type
-        org.save(update_fields=["membership_level"])
-
-        MembershipLog.create_for_org_approval(
-            actor_username=request.user.get_username(),
-            target_organization=org,
-            membership_type=membership_type,
-            previous_expires_at=_previous_expires_at_for_org_extension(organization_id=org.pk),
-            membership_request=req,
-        )
-
-        req.status = MembershipRequest.Status.approved
-        req.decided_at = timezone.now()
-        req.decided_by_username = request.user.get_username()
-        req.save(update_fields=["status", "decided_at", "decided_by_username"])
-
-        messages.success(request, f"Approved sponsorship level request for {org.name}.")
-
+        org_name = org.name if org is not None else (req.requested_organization_name or "organization")
+        messages.success(request, f"Approved sponsorship level request for {org_name}.")
         return redirect(redirect_to)
 
-    if not membership_type.group_cn:
-        messages.error(request, "This membership type is not linked to a group.")
-        return redirect(redirect_to)
-
-    target = FreeIPAUser.get(req.requested_username)
-    if target is None:
-        messages.error(request, "Unable to load the requested user from FreeIPA.")
-        return redirect(redirect_to)
-
-    try:
-        target.add_to_group(group_name=membership_type.group_cn)
-    except Exception:
-        logger.exception("Failed to add user to membership group")
-        messages.error(request, "Failed to add user to the group.")
-        return redirect(redirect_to)
-
-    MembershipLog.create_for_approval(
-        actor_username=request.user.get_username(),
-        target_username=req.requested_username,
-        membership_type=membership_type,
-        previous_expires_at=_previous_expires_at_for_extension(
-            username=req.requested_username,
-            membership_type=membership_type,
-        ),
-        membership_request=req,
-    )
-
-    req.status = MembershipRequest.Status.approved
-    req.decided_at = timezone.now()
-    req.decided_by_username = request.user.get_username()
-    req.save(update_fields=["status", "decided_at", "decided_by_username"])
-
-    if target.email:
-        post_office.mail.send(
-            recipients=[target.email],
-            sender=settings.DEFAULT_FROM_EMAIL,
-            template=settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
-            context={
-                "username": target.username,
-                "membership_type": membership_type.name,
-                "membership_type_code": membership_type.code,
-                "group_cn": membership_type.group_cn,
-            },
-        )
-
-    messages.success(request, f"Approved membership request for {target.username}.")
+    messages.success(request, f"Approved membership request for {req.requested_username}.")
     return redirect(redirect_to)
 
 

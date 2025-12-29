@@ -1,0 +1,255 @@
+{% extends "admin/import_export/import.html" %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    /*
+      import-export sets dark row backgrounds but doesn't always ensure
+      foreground/link contrast matches Django admin themes. Force readable
+      colors in the preview table.
+    */
+    /* table.import-preview {
+      font-size: 14px;
+      line-height: 1.35;
+      width: 100%;
+      table-layout: fixed;
+    }
+
+    table.import-preview th,
+    table.import-preview td {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: pre-wrap;
+      vertical-align: top;
+      color: var(--body-fg);
+    }
+
+    table.import-preview a,
+    table.import-preview a:visited {
+      color: var(--link-fg);
+    }
+
+    html[data-theme="dark"] table.import-preview tr.skip,
+    html[data-theme="dark"] table.import-preview tr.new,
+    html[data-theme="dark"] table.import-preview tr.update,
+    html[data-theme="dark"] table.import-preview tr.delete {
+      color: var(--body-fg);
+    }
+
+    html[data-theme="dark"] table.import-preview td ins {
+      background-color: #183a18 !important;
+      color: var(--body-fg) !important;
+    }
+
+    html[data-theme="dark"] table.import-preview td del {
+      background-color: #3a1818 !important;
+      color: var(--body-fg) !important;
+    }
+
+    table.import-preview {
+      display: block;
+      overflow-x: auto;
+    } */
+
+    table.import-preview tr.skip {
+        background-color: lightgray;
+    }
+    table.import-preview tr.new {
+        background-color: lightblue;
+    }
+    table.import-preview td ins {
+        background-color: initial !important;
+    }
+  </style>
+{% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script>
+    (function () {
+      function norm(value) {
+        return (value || "").toString().trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      }
+
+      function chooseDelimiter(line) {
+        const candidates = [",", ";", "\t", "|"];
+        let best = ",";
+        let bestCount = -1;
+        for (const d of candidates) {
+          const count = (line.split(d).length - 1);
+          if (count > bestCount) {
+            bestCount = count;
+            best = d;
+          }
+        }
+        return best;
+      }
+
+      function parseCsvRow(line, delimiter) {
+        const out = [];
+        let cur = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (line[i + 1] === '"') {
+                cur += '"';
+                i++;
+              } else {
+                inQuotes = false;
+              }
+            } else {
+              cur += ch;
+            }
+          } else {
+            if (ch === '"') {
+              inQuotes = true;
+            } else if (ch === delimiter) {
+              out.push(cur.trim());
+              cur = "";
+            } else {
+              cur += ch;
+            }
+          }
+        }
+        out.push(cur.trim());
+        return out.filter(Boolean);
+      }
+
+      function pickHeader(headers, preferredNorms) {
+        const byNorm = new Map();
+        for (const h of headers) {
+          byNorm.set(norm(h), h);
+        }
+        for (const token of preferredNorms) {
+          const found = byNorm.get(token);
+          if (found) {
+            return found;
+          }
+        }
+        return "";
+      }
+
+      function setSelectOptions(selectEl, headers) {
+        while (selectEl.options.length) {
+          selectEl.remove(0);
+        }
+        selectEl.add(new Option("Auto-detect", ""));
+        for (const h of headers) {
+          selectEl.add(new Option(h, h));
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        const fileInput = document.getElementById("id_import_file");
+        if (!fileInput) {
+          return;
+        }
+
+        const fields = {
+          email: document.getElementById("id_email_column"),
+          name: document.getElementById("id_name_column"),
+          active: document.getElementById("id_active_member_column"),
+          start: document.getElementById("id_membership_start_date_column"),
+          notes: document.getElementById("id_committee_notes_column"),
+          type: document.getElementById("id_membership_type_column"),
+        };
+
+        const headerList = document.getElementById("csv-header-preview");
+        const headerListItems = document.getElementById("csv-header-preview-items");
+
+        function applyHeaders(headers) {
+          const selects = Object.values(fields).filter(Boolean);
+          for (const sel of selects) {
+            setSelectOptions(sel, headers);
+          }
+
+          if (fields.email && !fields.email.value) {
+            fields.email.value = pickHeader(headers, ["email", "emailaddress", "mail"]);
+          }
+          if (fields.name && !fields.name.value) {
+            fields.name.value = pickHeader(headers, ["name", "fullname", "fullname", "displayname"]);
+          }
+          if (fields.active && !fields.active.value) {
+            fields.active.value = pickHeader(headers, ["activemember", "active", "status", "memberstatus"]);
+          }
+          if (fields.start && !fields.start.value) {
+            fields.start.value = pickHeader(headers, ["membershipstartdate", "startdate", "memberstartdate"]);
+          }
+          if (fields.notes && !fields.notes.value) {
+            fields.notes.value = pickHeader(headers, ["committeenotes", "notes", "committee"]);
+          }
+          if (fields.type && !fields.type.value) {
+            fields.type.value = pickHeader(headers, ["membershiptype", "type", "level"]);
+          }
+
+          if (headerList && headerListItems) {
+            headerListItems.textContent = headers.join(", ");
+            headerList.style.display = headers.length ? "block" : "none";
+          }
+        }
+
+        fileInput.addEventListener("change", function () {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) {
+            return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = function () {
+            const text = (reader.result || "").toString();
+            const lines = text.split(/\r\n|\n|\r/).filter(Boolean);
+            if (!lines.length) {
+              return;
+            }
+            const firstLine = lines[0].replace(/^\uFEFF/, "");
+            const delimiter = chooseDelimiter(firstLine);
+            const headers = parseCsvRow(firstLine, delimiter);
+            if (headers.length) {
+              applyHeaders(headers);
+            }
+          };
+          reader.readAsText(file);
+        });
+      });
+    })();
+  </script>
+{% endblock %}
+
+{% block import_form_additional_info %}
+  <div class="module aligned">
+    <h2>Expected CSV headers</h2>
+    <p>
+      Required: <strong>Email</strong>.
+      Recommended: <strong>Name</strong>, <strong>Active Member</strong>,
+      <strong>Membership Start Date</strong>, <strong>Membership Type</strong>,
+      <strong>Committee Notes</strong>.
+    </p>
+    <p>
+      Any additional columns (beyond the ones above) will be imported as membership
+      request responses.
+    </p>
+    <p class="help">
+      If your file uses different header names, fill in the optional “... column”
+      fields in the form to override auto-detection.
+    </p>
+  </div>
+
+  <div id="csv-header-preview" class="module aligned" style="display: none;">
+    <h2>Detected CSV headers</h2>
+    <p id="csv-header-preview-items" class="help"></p>
+  </div>
+{% endblock %}
+
+{% block content %}
+  {% if unmatched_download_url %}
+    <div class="messagelist">
+      <ul class="messagelist">
+        <li class="warning">Unmatched users export: <a href="{{ unmatched_download_url }}">download CSV</a></li>
+      </ul>
+    </div>
+  {% endif %}
+
+  {{ block.super }}
+{% endblock %}

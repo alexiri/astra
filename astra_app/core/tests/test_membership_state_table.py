@@ -74,8 +74,7 @@ class MembershipStateTableTests(TestCase):
             expires_at=now,
         )
 
-        state = Membership.objects.get(target_username="alice", membership_type_id="individual")
-        self.assertIsNotNone(state.expires_at)
-        assert state.expires_at is not None
-        self.assertLessEqual(state.expires_at, now)
+        # Termination removes the current-state row entirely.
+        with self.assertRaises(Membership.DoesNotExist):
+            Membership.objects.get(target_username="alice", membership_type_id="individual")
         self.assertEqual(get_valid_memberships_for_username("alice"), [])

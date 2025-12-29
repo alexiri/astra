@@ -213,8 +213,6 @@ class MembershipRequestsFlowTests(TestCase):
     def test_uninterrupted_extension_preserves_membership_created_at(self) -> None:
         import datetime
 
-        from django.utils import timezone
-
         from core.models import Membership, MembershipLog, MembershipType
 
         MembershipType.objects.update_or_create(

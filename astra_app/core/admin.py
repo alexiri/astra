@@ -12,14 +12,23 @@ from django.contrib.admin.utils import model_ngettext
 from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
+from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
+from import_export.admin import ImportMixin
 from python_freeipa import exceptions
 
 from core.agreements import missing_required_agreements_for_user_in_group
+from core.membership_csv_import import (
+    MembershipCSVConfirmImportForm,
+    MembershipCSVImportForm,
+    MembershipCSVImportResource,
+)
 from core.views_utils import _normalize_str
 
 from .backends import (
@@ -31,7 +40,15 @@ from .backends import (
     _invalidate_agreements_list_cache,
 )
 from .listbacked_queryset import _ListBackedQuerySet
-from .models import FreeIPAPermissionGrant, IPAFASAgreement, IPAGroup, IPAUser, MembershipType, Organization
+from .models import (
+    FreeIPAPermissionGrant,
+    IPAFASAgreement,
+    IPAGroup,
+    IPAUser,
+    MembershipCSVImportLink,
+    MembershipType,
+    Organization,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -804,6 +821,7 @@ class IPAUserAdmin(FreeIPAModelAdmin):
     search_fields = ("username", "displayname", "first_name", "last_name", "email")
     readonly_fields = ()
     change_form_template = "admin/core/ipauser/change_form.html"
+    change_list_template = "admin/core/ipauser/change_list.html"
 
     @override
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None) -> Any:
@@ -1224,6 +1242,156 @@ class MembershipTypeAdmin(admin.ModelAdmin):
         if obj is not None and "code" not in readonly:
             readonly.append("code")
         return tuple(readonly)
+
+
+@admin.register(MembershipCSVImportLink)
+class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
+    """Admin entry for the membership CSV importer (django-import-export)."""
+
+    import_form_class = MembershipCSVImportForm
+    confirm_form_class = MembershipCSVConfirmImportForm
+    import_template_name = "admin/core/membership_csv_import.html"
+    resource_classes = [MembershipCSVImportResource]
+
+    @override
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+
+    @override
+    def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+
+    @override
+    def has_view_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        # Keep it simple: if the user can access /admin/ at all, let them see
+        # this shortcut entry.
+        return bool(request.user.is_active and request.user.is_staff)
+
+    @override
+    def get_model_perms(self, request: HttpRequest) -> dict[str, bool]:
+        # Ensure the model appears in the app list/sidebar.
+        if not self.has_view_permission(request):
+            return {}
+        return {"view": True}
+
+    @override
+    def get_confirm_form_initial(self, request: HttpRequest, import_form: forms.Form) -> dict[str, Any]:
+        initial = super().get_confirm_form_initial(request, import_form)
+
+        # During the initial preview request, ImportMixin passes the validated
+        # upload form here so we can persist custom fields into the hidden
+        # confirmation form. During process_import(), this argument is None.
+        if import_form is None:
+            return initial
+
+        membership_type = import_form.cleaned_data.get("membership_type")
+        if membership_type is not None:
+            initial["membership_type"] = membership_type.pk
+
+        for key in (
+            "email_column",
+            "name_column",
+            "active_member_column",
+            "membership_start_date_column",
+            "committee_notes_column",
+            "membership_type_column",
+        ):
+            value = import_form.cleaned_data.get(key, "")
+            if value:
+                initial[key] = value
+        return initial
+
+    @override
+    def get_import_resource_kwargs(self, request: HttpRequest, **kwargs: Any) -> dict[str, Any]:
+        form = kwargs.get("form")
+        if form is None:
+            raise ValueError("Missing import form")
+
+        # ImportMixin.import_action() calls this even for the initial GET /import/
+        # page, where the form is unbound and has not been validated.
+        membership_type = None
+        cleaned_data = getattr(form, "cleaned_data", None)
+        if isinstance(cleaned_data, dict):
+            membership_type = cleaned_data.get("membership_type")
+        if membership_type is None:
+            membership_type = (
+                MembershipType.objects.filter(enabled=True)
+                .order_by("sort_order", "code")
+                .first()
+            )
+
+        extra: dict[str, Any] = {}
+        if isinstance(cleaned_data, dict):
+            for key in (
+                "email_column",
+                "name_column",
+                "active_member_column",
+                "membership_start_date_column",
+                "committee_notes_column",
+                "membership_type_column",
+            ):
+                value = cleaned_data.get(key, "")
+                if value:
+                    extra[key] = value
+
+        return {
+            "membership_type": membership_type,
+            "actor_username": request.user.get_username(),
+            **extra,
+        }
+
+    @override
+    def import_action(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        response = super().import_action(request, *args, **kwargs)
+        if isinstance(response, TemplateResponse):
+            result = response.context_data.get("result") if response.context_data else None
+            unmatched_url = getattr(result, "unmatched_download_url", "") if result is not None else ""
+            if unmatched_url:
+                response.context_data["unmatched_download_url"] = unmatched_url
+        return response
+
+    @override
+    def process_result(self, result: Any, request: HttpRequest) -> HttpResponse:
+        unmatched_url = getattr(result, "unmatched_download_url", "")
+        if unmatched_url:
+            messages.warning(
+                request,
+                mark_safe(f'Unmatched users export: <a href="{unmatched_url}">download CSV</a>'),
+            )
+        return super().process_result(result, request)
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "download-unmatched/<str:token>/",
+                self.admin_site.admin_view(self.download_unmatched_view),
+                name="core_membershipcsvimportlink_download_unmatched",
+            ),
+        ]
+        return custom + urls
+
+    def download_unmatched_view(self, request: HttpRequest, token: str) -> HttpResponse:
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+
+        cache_key = f"membership-import-unmatched:{token}"
+        content = cache.get(cache_key)
+        if content is None:
+            raise Http404("Export expired")
+
+        resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="unmatched_users.csv"'
+        return resp
+
+    @override
+    def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
+        return redirect("admin:core_membershipcsvimportlink_import")
 
 
 @admin.register(Organization)

@@ -1,0 +1,48 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <div class="content">
+    <h1>{{ title }}</h1>
+
+    {% if dry_run %}
+      <p><strong>Dry run</strong>: no changes were applied.</p>
+    {% else %}
+      <p><strong>Live run</strong>: changes were applied.</p>
+    {% endif %}
+
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <div><strong>Imported active memberships:</strong> {{ imported }}</div>
+      </div>
+      <div class="form-row">
+        <div><strong>Skipped (inactive rows):</strong> {{ skipped_inactive }}</div>
+      </div>
+      <div class="form-row">
+        <div><strong>Skipped (already has membership):</strong> {{ skipped_existing }}</div>
+      </div>
+      <div class="form-row">
+        <div><strong>Unmatched FreeIPA users:</strong> {{ unmatched_count }}</div>
+      </div>
+    </fieldset>
+
+    {% if download_url %}
+      <p>
+        <a class="button" href="{{ download_url }}">Download unmatched users CSV</a>
+      </p>
+    {% endif %}
+
+    {% if failures %}
+      <h2>Failures</h2>
+      <ul>
+        {% for f in failures %}
+          <li><code>{{ f }}</code></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:core_membershipcsvimportlink_import' %}">Run again</a>
+      <a class="button cancel-link" href="{% url 'admin:auth_ipauser_changelist' %}">Back to users</a>
+    </div>
+  </div>
+{% endblock %}
