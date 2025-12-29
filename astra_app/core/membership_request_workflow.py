@@ -260,6 +260,7 @@ def approve_membership_request(
     membership_request: MembershipRequest,
     actor_username: str,
     send_approved_email: bool,
+    approved_email_template_name: str | None = None,
     status_note: str = "",
     decided_at: datetime.datetime | None = None,
 ) -> MembershipLog:
@@ -351,6 +352,46 @@ def approve_membership_request(
                 org.pk,
             )
             raise
+
+        org_email = org.primary_contact_email()
+        if send_approved_email and org_email:
+            template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+            if membership_type.acceptance_template_id is not None:
+                template_name = membership_type.acceptance_template.name
+            if approved_email_template_name:
+                template_name = approved_email_template_name
+
+            logger.debug(
+                "approve_membership_request: sending approved email (org) request_id=%s org_id=%s membership_type=%s",
+                membership_request.pk,
+                org.pk,
+                membership_type.code,
+            )
+            try:
+                post_office.mail.send(
+                    recipients=[org_email],
+                    sender=settings.DEFAULT_FROM_EMAIL,
+                    template=template_name,
+                    context={
+                        "organization_name": org.name,
+                        "membership_type": membership_type.name,
+                        "membership_type_code": membership_type.code,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "approve_membership_request: sending approved email failed (org) request_id=%s org_id=%s",
+                    membership_request.pk,
+                    org.pk,
+                )
+                raise
+        else:
+            logger.debug(
+                "approve_membership_request: approved email skipped (org) request_id=%s send_approved_email=%s has_email=%s",
+                membership_request.pk,
+                send_approved_email,
+                bool(org_email),
+            )
 
         logger.debug(
             "approve_membership_request: done (org) request_id=%s log_id=%s",
@@ -488,6 +529,12 @@ def approve_membership_request(
         raise
 
     if send_approved_email and target.email:
+        template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+        if membership_type.acceptance_template_id is not None:
+            template_name = membership_type.acceptance_template.name
+        if approved_email_template_name:
+            template_name = approved_email_template_name
+
         logger.debug(
             "approve_membership_request: sending approved email request_id=%s target=%r membership_type=%s",
             membership_request.pk,
@@ -498,7 +545,7 @@ def approve_membership_request(
             post_office.mail.send(
                 recipients=[target.email],
                 sender=settings.DEFAULT_FROM_EMAIL,
-                template=settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
+                template=template_name,
                 context={
                     "username": target.username,
                     "membership_type": membership_type.name,

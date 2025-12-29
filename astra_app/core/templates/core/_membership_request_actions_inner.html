@@ -6,6 +6,13 @@ Expected context:
 - pk_str: str
 - membership_type_name: str
 - requester_display: str
+
+Email options (used for user requests):
+- approved_email_templates: list[EmailTemplate]
+- rejected_email_templates: list[EmailTemplate]
+- default_approve_template_name: str
+- default_reject_template_name: str
+- target_email: str
 {% endcomment %}
 
 <button
@@ -19,7 +26,13 @@ Expected context:
 {% with requester=requester_display|default:"(unknown)" %}
 {% with approve_modal_id="approve-modal-"|add:pk_str approve_title="Approve "|add:membership_type_name|add:" request" %}
   {% with approve_prefix="Approve "|add:membership_type_name|add:" request from" approve_suffix="?" %}
-    {% include 'core/_modal_confirm.html' with modal_id=approve_modal_id title=approve_title body_prefix=approve_prefix body_emphasis=requester body_suffix=approve_suffix action_url=approve_url submit_label="Approve" submit_class="btn-success" dialog_style="text-align: left;" %}
+    {% if target_email %}
+      {% with email_select_id="approve-email-template-"|add:pk_str skip_checkbox_id="approve-skip-email-"|add:pk_str %}
+        {% include 'core/_modal_confirm.html' with modal_id=approve_modal_id title=approve_title body_prefix=approve_prefix body_emphasis=requester body_suffix=approve_suffix action_url=approve_url submit_label="Approve" submit_class="btn-success" dialog_style="text-align: left;" form_fields_template='core/_membership_request_email_options.html' email_templates=approved_email_templates default_template_name=default_approve_template_name email_select_id=email_select_id skip_checkbox_id=skip_checkbox_id target_email=target_email %}
+      {% endwith %}
+    {% else %}
+      {% include 'core/_modal_confirm.html' with modal_id=approve_modal_id title=approve_title body_prefix=approve_prefix body_emphasis=requester body_suffix=approve_suffix action_url=approve_url submit_label="Approve" submit_class="btn-success" dialog_style="text-align: left;" %}
+    {% endif %}
   {% endwith %}
 {% endwith %}
 
@@ -32,7 +45,13 @@ Expected context:
 
 {% url 'membership-request-reject' membership_request.pk as reject_url %}
 {% with reject_modal_id="reject-modal-"|add:pk_str reject_title="Reject "|add:membership_type_name|add:" request" reject_reason_id="reject-reason-"|add:pk_str %}
-  {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" %}
+  {% if target_email %}
+    {% with email_select_id="reject-email-template-"|add:pk_str skip_checkbox_id="reject-skip-email-"|add:pk_str %}
+      {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" form_fields_template='core/_membership_request_email_options.html' email_templates=rejected_email_templates default_template_name=default_reject_template_name email_select_id=email_select_id skip_checkbox_id=skip_checkbox_id target_email=target_email %}
+    {% endwith %}
+  {% else %}
+    {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" %}
+  {% endif %}
 {% endwith %}
 
 <button
@@ -49,3 +68,36 @@ Expected context:
   {% endwith %}
 {% endwith %}
 {% endwith %}
+
+<script>
+  (function () {
+    if (window.__membership_request_email_options_wired) return;
+    window.__membership_request_email_options_wired = true;
+
+    function syncCheckbox(cb) {
+      if (!cb) return;
+      const selectId = cb.getAttribute('data-target-select') || '';
+      const select = selectId ? document.getElementById(selectId) : null;
+      if (!select) return;
+      select.disabled = !!cb.checked;
+    }
+
+    document.addEventListener('change', function (evt) {
+      const target = evt.target;
+      if (!target || !target.classList || !target.classList.contains('js-skip-auto-email')) return;
+      syncCheckbox(target);
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+      for (const cb of document.querySelectorAll('.js-skip-auto-email')) {
+        syncCheckbox(cb);
+      }
+    });
+
+    if (document.readyState !== 'loading') {
+      for (const cb of document.querySelectorAll('.js-skip-auto-email')) {
+        syncCheckbox(cb);
+      }
+    }
+  })();
+</script>

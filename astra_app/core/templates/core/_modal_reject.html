@@ -37,6 +37,10 @@ Optional:
           <div class="text-muted small mb-3">{{ help_text }}</div>
           {% endif %}
 
+          {% if form_fields_template %}
+            {% include form_fields_template %}
+          {% endif %}
+
           <div class="d-flex justify-content-between">
             <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
             <button type="submit" class="btn btn-danger">Reject</button>

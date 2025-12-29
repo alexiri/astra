@@ -208,7 +208,247 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["template"], "membership-request-approved-individual")
+
+    def test_committee_can_approve_request_skip_email_does_not_send(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"skip_email": "1"},
+                        follow=False,
+                    )
+
+        self.assertEqual(resp.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
+        add_mock.assert_called_once()
+        send_mock.assert_not_called()
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                action=MembershipLog.Action.approved,
+            ).exists()
+        )
+
+    def test_committee_can_approve_request_can_override_email_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-custom",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Custom approved template",
+            },
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"email_template": "membership-request-approved-custom"},
+                        follow=False,
+                    )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        self.assertEqual(kwargs["template"], "membership-request-approved-custom")
+
+    def test_committee_can_approve_org_request_sends_email_using_membership_type_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        template, _ = EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-silver",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Org approval template",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "",
+                "acceptance_template": template,
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-approve", args=[req.pk]),
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        self.assertEqual(kwargs["recipients"], ["cern@example.com"])
+        self.assertEqual(kwargs["template"], "membership-request-approved-silver")
+
+    def test_committee_can_approve_org_request_skip_email_does_not_send(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-approve", args=[req.pk]),
+                    data={"skip_email": "1"},
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
 
     def test_uninterrupted_extension_preserves_membership_created_at(self) -> None:
         import datetime
@@ -379,6 +619,191 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
         self.assertIn("Missing required info", kwargs["context"]["rejection_reason"])
+
+    def test_committee_can_reject_request_skip_email_does_not_send(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-reject", args=[req.pk]),
+                    data={"reason": "Nope", "skip_email": "1"},
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
+
+    def test_committee_can_reject_request_can_override_email_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        EmailTemplate.objects.update_or_create(
+            name="membership-request-rejected-custom",
+            defaults={
+                "subject": "Rejected",
+                "content": "Rejected",
+                "html_content": "<p>Rejected</p>",
+                "description": "Custom rejected template",
+            },
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-reject", args=[req.pk]),
+                    data={"reason": "Nope", "email_template": "membership-request-rejected-custom"},
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        self.assertEqual(kwargs["template"], "membership-request-rejected-custom")
+
+    def test_committee_can_reject_org_request_can_override_email_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        EmailTemplate.objects.update_or_create(
+            name="membership-request-rejected-custom",
+            defaults={
+                "subject": "Rejected",
+                "content": "Rejected",
+                "html_content": "<p>Rejected</p>",
+                "description": "Custom rejected template",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-reject", args=[req.pk]),
+                    data={
+                        "reason": "Nope",
+                        "email_template": "membership-request-rejected-custom",
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        self.assertEqual(kwargs["recipients"], ["cern@example.com"])
+        self.assertEqual(kwargs["template"], "membership-request-rejected-custom")
 
         def test_reject_requires_post(self) -> None:
             from core.models import MembershipRequest, MembershipType

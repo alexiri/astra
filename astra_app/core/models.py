@@ -120,6 +120,14 @@ class MembershipType(models.Model):
     description = models.TextField(blank=True, default="")
     votes = models.PositiveIntegerField(blank=True, default=0)
     group_cn = models.CharField(max_length=255, blank=True, default="", verbose_name="Group")
+    acceptance_template = models.ForeignKey(
+        "post_office.EmailTemplate",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="+",
+        help_text="Email template used when a membership request is approved.",
+    )
     isIndividual = models.BooleanField(default=False)
     isOrganization = models.BooleanField(default=False)
     sort_order = models.IntegerField(default=0)
@@ -174,6 +182,14 @@ class Organization(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name}"
+
+    def primary_contact_email(self) -> str:
+        return (
+            self.business_contact_email
+            or self.pr_marketing_contact_email
+            or self.technical_contact_email
+            or ""
+        )
 
     @override
     def save(self, *args, **kwargs) -> None:

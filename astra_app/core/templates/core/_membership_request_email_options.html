@@ -1,0 +1,49 @@
+{% comment %}
+Email controls for membership request Accept/Reject modals.
+
+Expected context:
+- email_templates: list[EmailTemplate]
+- default_template_name: str
+- email_select_id: str
+- skip_checkbox_id: str
+- target_email: str
+
+Optional:
+- template_field_name: str (default: email_template)
+- skip_field_name: str (default: skip_email)
+{% endcomment %}
+
+<div class="form-group">
+  <label for="{{ email_select_id }}">Email template</label>
+  <select
+    id="{{ email_select_id }}"
+    name="{{ template_field_name|default:'email_template' }}"
+    class="custom-select"
+    aria-label="Email template"
+  >
+    {% for tpl in email_templates %}
+      <option value="{{ tpl.name }}"{% if tpl.name == default_template_name %} selected{% endif %}>
+        {{ tpl.name }}{% if tpl.description %} — {{ tpl.description }}{% endif %}
+      </option>
+    {% endfor %}
+  </select>
+  <div class="text-muted small mt-1">Used for the automatic email.</div>
+</div>
+
+<div class="form-group form-check mb-3">
+  <input
+    type="checkbox"
+    class="form-check-input js-skip-auto-email"
+    id="{{ skip_checkbox_id }}"
+    name="{{ skip_field_name|default:'skip_email' }}"
+    value="1"
+    data-target-select="{{ email_select_id }}"
+  >
+  <label class="form-check-label" for="{{ skip_checkbox_id }}">
+    {% if target_email %}
+      Don't send the automatic email, I'll email <b>{{ target_email }}</b> myself
+    {% else %}
+      Don't send the automatic email, I'll email them myself
+    {% endif %}
+  </label>
+</div>

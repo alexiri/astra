@@ -167,7 +167,7 @@
 
               </td>
               <td class="text-right">
-                {% include 'core/_membership_request_actions.html' with request=r %}
+                {% include 'core/_membership_request_actions.html' with request=r target_email=row.target_email default_approve_template=row.default_approve_template default_reject_template=row.default_reject_template approved_email_templates=approved_email_templates rejected_email_templates=rejected_email_templates %}
               </td>
             </tr>
             {% endwith %}

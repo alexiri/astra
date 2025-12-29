@@ -43,6 +43,10 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
           {% csrf_token %}
           {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
 
+          {% if form_fields_template %}
+            {% include form_fields_template %}
+          {% endif %}
+
           <div class="d-flex justify-content-between">
             <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">{{ cancel_label|default:"Cancel" }}</button>
             <button type="submit" class="btn {{ submit_button_class|default:submit_class|default:'btn-primary' }}">{{ submit_label }}</button>

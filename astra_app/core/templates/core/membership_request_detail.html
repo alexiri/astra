@@ -63,7 +63,7 @@
       {% if req.status == 'pending' %}
         <hr>
         <div class="d-flex flex-wrap" style="gap: .5rem;">
-          {% include 'core/_membership_request_actions.html' with request=req %}
+          {% include 'core/_membership_request_actions.html' with request=req target_email=target_email default_approve_template=default_approve_template default_reject_template=default_reject_template approved_email_templates=approved_email_templates rejected_email_templates=rejected_email_templates %}
         </div>
       {% endif %}
     </div>
