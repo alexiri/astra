@@ -119,8 +119,33 @@ def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> No
     if action in {"group_add_member", "group_remove_member"} and isinstance(failed, dict):
         member = failed.get("member")
         if isinstance(member, dict):
+            user_bucket = member.get("user")
+
+            def _is_benign_group_member_message(value: object, *, is_add: bool) -> bool:
+                # FreeIPA can return human strings here such as:
+                # - add: "This entry is already a member"
+                # - remove: "This entry is not a member"
+                # Treat these as idempotent outcomes so membership sync/extension
+                # logic doesn't fail when state already matches the request.
+                text = str(value or "").strip().lower()
+                if not text:
+                    return True
+                if is_add:
+                    return "already" in text and "member" in text
+                return "not" in text and "member" in text
+
+            if isinstance(user_bucket, list) and user_bucket:
+                if action == "group_add_member" and all(
+                    _is_benign_group_member_message(v, is_add=True) for v in user_bucket
+                ):
+                    user_bucket = []
+                if action == "group_remove_member" and all(
+                    _is_benign_group_member_message(v, is_add=False) for v in user_bucket
+                ):
+                    user_bucket = []
+
             buckets = [
-                member.get("user"),
+                user_bucket,
                 member.get("group"),
                 member.get("service"),
                 member.get("idoverrideuser"),

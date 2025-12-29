@@ -620,6 +620,156 @@ class OrganizationUserViewsTests(TestCase):
             ).exists()
         )
 
+    def test_sponsorship_uninterrupted_extension_preserves_created_at(self) -> None:
+        import datetime
+
+        from core.models import MembershipLog, MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="gold")
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            membership_level_id="gold",
+            representatives=["bob"],
+        )
+
+        start_at = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
+        extend_at = datetime.datetime(2025, 2, 1, 12, 0, 0, tzinfo=datetime.UTC)
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
+            first_log = MembershipLog.create_for_org_approval(
+                actor_username="reviewer",
+                target_organization=org,
+                membership_type=membership_type,
+                previous_expires_at=None,
+                membership_request=None,
+            )
+
+        sponsorship = OrganizationSponsorship.objects.get(organization=org)
+        self.assertEqual(sponsorship.created_at, start_at)
+
+        previous_expires_at = first_log.expires_at
+        assert previous_expires_at is not None
+
+        # Simulate drift: current-state row missing, but the term is uninterrupted.
+        OrganizationSponsorship.objects.filter(organization=org).delete()
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=extend_at):
+            MembershipLog.create_for_org_approval(
+                actor_username="reviewer",
+                target_organization=org,
+                membership_type=membership_type,
+                previous_expires_at=previous_expires_at,
+                membership_request=None,
+            )
+
+        recreated = OrganizationSponsorship.objects.get(organization=org)
+        self.assertEqual(recreated.created_at, start_at)
+        self.assertGreater(recreated.expires_at, previous_expires_at)
+
+    def test_expired_sponsorship_starts_new_term_and_resets_created_at(self) -> None:
+        import datetime
+
+        from core.models import MembershipLog, MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="gold")
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            membership_level_id="gold",
+            representatives=["bob"],
+        )
+
+        start_at = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
+        after_expiry_at = datetime.datetime(2025, 7, 1, 12, 0, 0, tzinfo=datetime.UTC)
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
+            MembershipLog.create_for_org_approval(
+                actor_username="reviewer",
+                target_organization=org,
+                membership_type=membership_type,
+                previous_expires_at=None,
+                membership_request=None,
+            )
+
+        # Force an expired current-state row.
+        OrganizationSponsorship.objects.filter(organization=org).update(expires_at=start_at)
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=after_expiry_at):
+            MembershipLog.create_for_org_approval(
+                actor_username="reviewer",
+                target_organization=org,
+                membership_type=membership_type,
+                previous_expires_at=start_at,
+                membership_request=None,
+            )
+
+        current = OrganizationSponsorship.objects.get(organization=org)
+        self.assertEqual(current.created_at, after_expiry_at)
+
+    def test_representative_cannot_extend_expired_sponsorship(self) -> None:
+        import datetime
+
+        from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            membership_level_id="gold",
+            representatives=["bob"],
+        )
+
+        expired_at = timezone.now() - datetime.timedelta(days=1)
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=expired_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                status=MembershipRequest.Status.pending,
+            ).exists()
+        )
+
     def test_non_representative_cannot_view_org_detail(self) -> None:
         from core.models import MembershipType, Organization
 

@@ -412,13 +412,70 @@ class MembershipLog(models.Model):
             }:
                 return
 
-            OrganizationSponsorship.objects.update_or_create(
+            # OrganizationSponsorship is the current-state table for an org's sponsorship.
+            # We use created_at as the start time of the *current uninterrupted term*.
+            if self.action == self.Action.terminated:
+                OrganizationSponsorship.objects.filter(organization_id=self.target_organization_id).delete()
+                return
+
+            start_at = self.created_at
+
+            existing = (
+                OrganizationSponsorship.objects.filter(organization_id=self.target_organization_id)
+                .only("created_at", "expires_at")
+                .first()
+            )
+            if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
+                start_at = existing.created_at
+            else:
+                last_approved = (
+                    MembershipLog.objects.filter(
+                        target_organization_id=self.target_organization_id,
+                        membership_type=self.membership_type,
+                        action=self.Action.approved,
+                        created_at__lt=self.created_at,
+                    )
+                    .only("created_at", "expires_at")
+                    .order_by("-created_at")
+                    .first()
+                )
+
+                if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > self.created_at:
+                    last_terminated = (
+                        MembershipLog.objects.filter(
+                            target_organization_id=self.target_organization_id,
+                            membership_type=self.membership_type,
+                            action=self.Action.terminated,
+                            created_at__lt=self.created_at,
+                        )
+                        .only("created_at")
+                        .order_by("-created_at")
+                        .first()
+                    )
+
+                    approved_qs = MembershipLog.objects.filter(
+                        target_organization_id=self.target_organization_id,
+                        membership_type=self.membership_type,
+                        action=self.Action.approved,
+                    )
+                    if last_terminated is not None:
+                        approved_qs = approved_qs.filter(created_at__gt=last_terminated.created_at)
+
+                    first_term_approved = approved_qs.only("created_at").order_by("created_at").first()
+                    if first_term_approved is not None:
+                        start_at = first_term_approved.created_at
+
+            sponsorship, _created = OrganizationSponsorship.objects.update_or_create(
                 organization_id=self.target_organization_id,
                 defaults={
                     "membership_type": self.membership_type,
                     "expires_at": self.expires_at,
                 },
             )
+
+            # `created_at` is auto_now_add; ensure it reflects the uninterrupted term start.
+            if sponsorship.created_at != start_at:
+                OrganizationSponsorship.objects.filter(pk=sponsorship.pk).update(created_at=start_at)
             return
 
         if self.target_organization_code:
@@ -433,14 +490,82 @@ class MembershipLog(models.Model):
             return
 
         # Membership is the current-state table for a user+membership_type.
-        # Rows may be expired until the cleanup cron deletes them.
-        Membership.objects.update_or_create(
+        # We use created_at as the start time of the *current uninterrupted term*:
+        # - preserve it across extensions/expiry tweaks while the membership is active
+        # - reset it when the previous term has already expired at approval time
+        # - reset it across explicit termination by deleting the current-state row
+        if self.action == self.Action.terminated:
+            Membership.objects.filter(
+                target_username=self.target_username,
+                membership_type=self.membership_type,
+            ).delete()
+            return
+
+        start_at = self.created_at
+
+        existing = (
+            Membership.objects.filter(
+                target_username=self.target_username,
+                membership_type=self.membership_type,
+            )
+            .only("created_at", "expires_at")
+            .first()
+        )
+
+        if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
+            # Active membership: extending or changing expiry keeps the original start.
+            start_at = existing.created_at
+        else:
+            # Missing/expired row: consult logs to decide whether this approval is an
+            # uninterrupted extension or the start of a new term.
+            last_approved = (
+                MembershipLog.objects.filter(
+                    target_username=self.target_username,
+                    membership_type=self.membership_type,
+                    action=self.Action.approved,
+                    created_at__lt=self.created_at,
+                )
+                .only("created_at", "expires_at")
+                .order_by("-created_at")
+                .first()
+            )
+            if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > self.created_at:
+                last_terminated = (
+                    MembershipLog.objects.filter(
+                        target_username=self.target_username,
+                        membership_type=self.membership_type,
+                        action=self.Action.terminated,
+                        created_at__lt=self.created_at,
+                    )
+                    .only("created_at")
+                    .order_by("-created_at")
+                    .first()
+                )
+
+                approved_qs = MembershipLog.objects.filter(
+                    target_username=self.target_username,
+                    membership_type=self.membership_type,
+                    action=self.Action.approved,
+                )
+                if last_terminated is not None:
+                    approved_qs = approved_qs.filter(created_at__gt=last_terminated.created_at)
+
+                first_term_approved = approved_qs.only("created_at").order_by("created_at").first()
+                if first_term_approved is not None:
+                    start_at = first_term_approved.created_at
+
+        membership, _created = Membership.objects.update_or_create(
             target_username=self.target_username,
             membership_type=self.membership_type,
             defaults={
                 "expires_at": self.expires_at,
             },
         )
+
+        # `created_at` is auto_now_add, so Django will overwrite it on create.
+        # Update it explicitly to reflect the start of the uninterrupted term.
+        if membership.created_at != start_at:
+            Membership.objects.filter(pk=membership.pk).update(created_at=start_at)
 
     def __str__(self) -> str:
         if self.target_username == "":

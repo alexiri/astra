@@ -411,6 +411,10 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
         return redirect("organization-detail", organization_id=organization.pk)
 
     now = timezone.now()
+    if sponsorship.expires_at <= now:
+        messages.error(request, "This sponsorship has already expired and cannot be extended. Submit a new sponsorship request.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
     expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
     if sponsorship.expires_at > expiring_soon_by:
         messages.info(request, "This sponsorship is not expiring soon yet.")

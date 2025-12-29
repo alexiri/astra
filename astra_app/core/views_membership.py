@@ -74,12 +74,26 @@ def _previous_expires_at_for_extension(*, username: str, membership_type: Member
     current = Membership.objects.filter(target_username=username, membership_type=membership_type).first()
     if current is None:
         return None
+    if current.expires_at is None:
+        return None
+
+    # Only allow extensions of active memberships; if a row lingered past expiry,
+    # treat the next approval as a new membership term.
+    now = timezone.now()
+    if current.expires_at <= now:
+        return None
     return current.expires_at
 
 
 def _previous_expires_at_for_org_extension(*, organization_id: int) -> datetime.datetime | None:
     current = OrganizationSponsorship.objects.filter(organization_id=organization_id).first()
     if current is None:
+        return None
+    if current.expires_at is None:
+        return None
+
+    now = timezone.now()
+    if current.expires_at <= now:
         return None
     return current.expires_at
 

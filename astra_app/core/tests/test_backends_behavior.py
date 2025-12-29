@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, TestCase
 
-from core.backends import FreeIPAAuthBackend
+from core.backends import FreeIPAAuthBackend, FreeIPAUser
 
 
 class FreeIPABackendBehaviorTests(TestCase):
@@ -60,3 +60,39 @@ class FreeIPABackendBehaviorTests(TestCase):
         backend = FreeIPAAuthBackend()
         self.assertIsNone(backend.get_user(123))
         self.assertIsNone(backend.get_user("123"))
+
+    def test_add_to_group_is_idempotent_when_already_member(self) -> None:
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "memberof_group": ["almalinux-individual"],
+            },
+        )
+
+        # FreeIPA sometimes reports "already a member" as a structured failure.
+        # Extending an active membership should tolerate this and proceed.
+        freeipa_duplicate_member_response = {
+            "failed": {
+                "member": {
+                    "user": ["This entry is already a member"],
+                    "group": [],
+                    "service": [],
+                    "idoverrideuser": [],
+                }
+            }
+        }
+
+        with (
+            patch(
+                "core.backends._with_freeipa_service_client_retry",
+                autospec=True,
+                return_value=freeipa_duplicate_member_response,
+            ),
+            patch("core.backends._invalidate_user_cache", autospec=True),
+            patch("core.backends._invalidate_group_cache", autospec=True),
+            patch("core.backends._invalidate_groups_list_cache", autospec=True),
+            patch("core.backends.FreeIPAGroup.get", autospec=True),
+            patch("core.backends.FreeIPAUser.get", autospec=True, return_value=alice),
+        ):
+            alice.add_to_group("almalinux-individual")

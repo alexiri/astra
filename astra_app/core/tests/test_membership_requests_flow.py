@@ -210,6 +210,107 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME)
 
+    def test_uninterrupted_extension_preserves_membership_created_at(self) -> None:
+        import datetime
+
+        from django.utils import timezone
+
+        from core.models import Membership, MembershipLog, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="individual")
+
+        start_at = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
+        extend_at = datetime.datetime(2025, 2, 1, 12, 0, 0, tzinfo=datetime.UTC)
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
+            first_log = MembershipLog.create_for_approval(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type=membership_type,
+                previous_expires_at=None,
+                membership_request=None,
+            )
+
+        membership = Membership.objects.get(target_username="alice", membership_type=membership_type)
+        self.assertEqual(membership.created_at, start_at)
+
+        # Simulate a missing current-state row (e.g. sync drift) while the membership
+        # is still considered uninterrupted via logs.
+        previous_expires_at = first_log.expires_at
+        assert previous_expires_at is not None
+        Membership.objects.filter(target_username="alice", membership_type=membership_type).delete()
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=extend_at):
+            MembershipLog.create_for_approval(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type=membership_type,
+                previous_expires_at=previous_expires_at,
+                membership_request=None,
+            )
+
+        recreated = Membership.objects.get(target_username="alice", membership_type=membership_type)
+        self.assertEqual(recreated.created_at, start_at)
+        self.assertGreater(recreated.expires_at, previous_expires_at)
+
+    def test_expired_membership_starts_new_term_and_resets_created_at(self) -> None:
+        import datetime
+
+        from core.models import Membership, MembershipLog, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="individual")
+
+        start_at = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
+        after_expiry_at = datetime.datetime(2025, 7, 1, 12, 0, 0, tzinfo=datetime.UTC)
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
+            MembershipLog.create_for_approval(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type=membership_type,
+                previous_expires_at=None,
+                membership_request=None,
+            )
+
+        # Force an expired current-state row (simulating a lingering row from an old term).
+        Membership.objects.filter(target_username="alice", membership_type=membership_type).update(
+            expires_at=start_at,
+        )
+
+        with patch("django.utils.timezone.now", autospec=True, return_value=after_expiry_at):
+            MembershipLog.create_for_approval(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type=membership_type,
+                previous_expires_at=start_at,
+                membership_request=None,
+            )
+
+        current = Membership.objects.get(target_username="alice", membership_type=membership_type)
+        self.assertEqual(current.created_at, after_expiry_at)
+
     def test_committee_can_reject_request_logs_and_emails_with_reason(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
 
