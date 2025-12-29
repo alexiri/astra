@@ -740,29 +740,80 @@ class FreeIPAUser:
 
         # FreeIPA's RPC layer does not expose custom attributes as dedicated
         # keyword arguments. Use the standard setattr/delattr mechanism.
-        normalized_note = str(note or "")
+        raw_note = str(note or "")
+        normalized_note = raw_note.strip()
 
-        setattrs: list[str] = []
-        delattrs: list[str] = []
-        if normalized_note:
-            setattrs.append(f"fasstatusnote={normalized_note}")
-        else:
-            delattrs.append("fasstatusnote")
-
-        def _do(client: ClientMeta):
+        def _call_user_mod(
+            client: ClientMeta,
+            *,
+            setattr_values: list[str] | None,
+            delattr_values: list[str] | None,
+        ) -> object:
             try:
                 return client.user_mod(
                     normalized_username,
-                    o_setattr=setattrs or None,
-                    o_delattr=delattrs or None,
+                    o_setattr=setattr_values or None,
+                    o_delattr=delattr_values or None,
                 )
             except TypeError:
                 # Signature mismatch across python-freeipa versions.
                 return client.user_mod(
                     a_uid=normalized_username,
-                    o_setattr=setattrs or None,
-                    o_delattr=delattrs or None,
+                    o_setattr=setattr_values or None,
+                    o_delattr=delattr_values or None,
                 )
+
+        def _is_noop_badrequest(exc: Exception) -> bool:
+            # FreeIPA commonly returns BadRequest("no modifications to be performed")
+            # when the requested changes are already applied.
+            return "no modifications to be performed" in str(exc).lower()
+
+        def _do(client: ClientMeta) -> object:
+            if normalized_note:
+                return _call_user_mod(
+                    client,
+                    setattr_values=[f"fasstatusnote={normalized_note}"],
+                    delattr_values=None,
+                )
+
+            # Clearing notes is surprisingly inconsistent across server/client
+            # versions.
+            #
+            # Prefer setting an empty value (fasstatusnote=). This avoids the
+            # delattr validation requirement (name=value) and, in some IPA
+            # setups, avoids server-side errors when deleting custom attrs.
+            try:
+                return _call_user_mod(
+                    client,
+                    setattr_values=["fasstatusnote="],
+                    delattr_values=None,
+                )
+            except exceptions.BadRequest as exc:
+                if _is_noop_badrequest(exc):
+                    return {"result": "noop"}
+                # Some IPA setups error on setting empty custom attrs.
+                # Fall back to delattr variants below.
+                pass
+            except exceptions.FreeIPAError:
+                # Fall back to deleting the attribute.
+                pass
+
+            for del_value in ("fasstatusnote=", "fasstatusnote"):
+                try:
+                    return _call_user_mod(
+                        client,
+                        setattr_values=None,
+                        delattr_values=[del_value],
+                    )
+                except exceptions.BadRequest as exc:
+                    if _is_noop_badrequest(exc):
+                        return {"result": "noop"}
+                    continue
+                except exceptions.FreeIPAError:
+                    continue
+
+            # If we got here, we tried all known formats.
+            raise exceptions.BadRequest("unable to clear fasstatusnote", 400)
 
         _with_freeipa_service_client_retry(cls.get_client, _do)
 
