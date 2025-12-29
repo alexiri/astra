@@ -60,6 +60,16 @@ class MembershipRequestForm(forms.Form):
     q_pull_request = forms.CharField(required=False)
     q_additional_info = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4}))
 
+    @classmethod
+    def question_specs_for_membership_type(cls, membership_type: MembershipType) -> tuple[_QuestionSpec, ...]:
+        if membership_type.code == "mirror":
+            return cls._MIRROR_QUESTIONS
+        return cls._INDIVIDUAL_QUESTIONS
+
+    @classmethod
+    def all_question_specs(cls) -> tuple[_QuestionSpec, ...]:
+        return (*cls._INDIVIDUAL_QUESTIONS, *cls._MIRROR_QUESTIONS)
+
     def __init__(self, *args, username: str, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -70,7 +80,7 @@ class MembershipRequestForm(forms.Form):
         self.fields["q_additional_info"].widget.attrs.update({"class": "form-control w-100"})
 
         # Use titles as user-facing labels.
-        for spec in (*self._INDIVIDUAL_QUESTIONS, *self._MIRROR_QUESTIONS):
+        for spec in self.all_question_specs():
             self.fields[spec.field_name].label = spec.title
             self.fields[spec.field_name].required = False
 
@@ -105,10 +115,7 @@ class MembershipRequestForm(forms.Form):
         if membership_type is None:
             return cleaned
 
-        if membership_type.code == "mirror":
-            specs = self._MIRROR_QUESTIONS
-        else:
-            specs = self._INDIVIDUAL_QUESTIONS
+        specs = self.question_specs_for_membership_type(membership_type)
 
         for spec in specs:
             raw = cleaned.get(spec.field_name)
@@ -121,7 +128,7 @@ class MembershipRequestForm(forms.Form):
 
     def responses(self) -> list[dict[str, str]]:
         membership_type: MembershipType = self.cleaned_data["membership_type"]
-        specs = self._MIRROR_QUESTIONS if membership_type.code == "mirror" else self._INDIVIDUAL_QUESTIONS
+        specs = self.question_specs_for_membership_type(membership_type)
         out: list[dict[str, str]] = []
         for spec in specs:
             value = str(self.cleaned_data.get(spec.field_name) or "").strip()

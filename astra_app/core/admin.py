@@ -1303,6 +1303,15 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
             value = import_form.cleaned_data.get(key, "")
             if value:
                 initial[key] = value
+
+        for key, value in import_form.cleaned_data.items():
+            if (
+                isinstance(key, str)
+                and key.startswith("q_")
+                and key.endswith("_column")
+                and value
+            ):
+                initial[key] = value
         return initial
 
     @override
@@ -1337,6 +1346,20 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
                 value = cleaned_data.get(key, "")
                 if value:
                     extra[key] = value
+
+        question_column_overrides: dict[str, str] = {}
+        if isinstance(cleaned_data, dict):
+            for key, value in cleaned_data.items():
+                if (
+                    isinstance(key, str)
+                    and key.startswith("q_")
+                    and key.endswith("_column")
+                    and isinstance(value, str)
+                    and value
+                ):
+                    question_column_overrides[key] = value
+        if question_column_overrides:
+            extra["question_column_overrides"] = question_column_overrides
 
         return {
             "membership_type": membership_type,

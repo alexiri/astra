@@ -18,6 +18,7 @@ from tablib import Dataset
 
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.backends import FreeIPAUser
+from core.forms_membership import MembershipRequestForm
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
 from core.views_utils import _normalize_str
@@ -137,6 +138,32 @@ class MembershipCSVImportForm(ImportForm):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
+        # Always show question-mapping dropdowns on the initial form. Choices
+        # are populated client-side (via JS) and server-side (once a file is
+        # posted and headers are known).
+        for spec in MembershipRequestForm.all_question_specs():
+            field_name = f"{spec.field_name}_column"
+            if field_name not in self.fields:
+                self.fields[field_name] = forms.ChoiceField(
+                    required=False,
+                    choices=[("", "Auto-detect")],
+                    label=f"{spec.name} answer column",
+                    help_text=(
+                        "Optional: select which CSV column contains the answer for this membership question. "
+                        "Leave as Auto-detect to infer."
+                    ),
+                )
+            self.fields[field_name].widget.attrs["data-preferred-norms"] = "|".join(
+                filter(
+                    None,
+                    (
+                        _norm_header(spec.name),
+                        _norm_header(spec.field_name),
+                        _norm_header(spec.field_name.removeprefix("q_")),
+                    ),
+                )
+            )
+
         uploaded = self.files.get("import_file")
         if uploaded is None:
             return
@@ -161,6 +188,10 @@ class MembershipCSVImportForm(ImportForm):
         ):
             self.fields[field_name].choices = choices
 
+        for spec in MembershipRequestForm.all_question_specs():
+            field_name = f"{spec.field_name}_column"
+            self.fields[field_name].choices = choices
+
 
 class MembershipCSVConfirmImportForm(ConfirmImportForm):
     membership_type = forms.ModelChoiceField(
@@ -175,6 +206,16 @@ class MembershipCSVConfirmImportForm(ConfirmImportForm):
     membership_start_date_column = forms.CharField(required=False, widget=forms.HiddenInput)
     committee_notes_column = forms.CharField(required=False, widget=forms.HiddenInput)
     membership_type_column = forms.CharField(required=False, widget=forms.HiddenInput)
+
+    @override
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+        for spec in MembershipRequestForm.all_question_specs():
+            field_name = f"{spec.field_name}_column"
+            if field_name in self.fields:
+                continue
+            self.fields[field_name] = forms.CharField(required=False, widget=forms.HiddenInput)
 
 
 class MembershipCSVImportResource(resources.ModelResource):
@@ -215,6 +256,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         membership_start_date_column: str = "",
         committee_notes_column: str = "",
         membership_type_column: str = "",
+        question_column_overrides: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self._membership_type = membership_type
@@ -226,6 +268,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._membership_start_date_column_override = membership_start_date_column
         self._committee_notes_column_override = committee_notes_column
         self._membership_type_column_override = membership_type_column
+        self._question_column_overrides = question_column_overrides or {}
 
         self._headers: list[str] = []
         self._email_header: str | None = None
@@ -234,6 +277,8 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._start_header: str | None = None
         self._note_header: str | None = None
         self._type_header: str | None = None
+
+        self._question_header_by_name: dict[str, str | None] = {}
 
         self._email_to_usernames: dict[str, set[str]] = {}
         self._email_lookup_cache: dict[str, set[str]] = {}
@@ -356,6 +401,23 @@ class MembershipCSVImportResource(resources.ModelResource):
             header_by_norm.get("membershiptype") or header_by_norm.get("type")
         )
 
+        membership_type = self._membership_type
+        if membership_type is None:
+            raise ValueError("membership_type is required")
+
+        self._question_header_by_name = {}
+        for spec in MembershipRequestForm.question_specs_for_membership_type(membership_type):
+            key = f"{spec.field_name}_column"
+            override = self._question_column_overrides.get(key, "")
+            resolved = _resolve_override(override) if override else None
+            if resolved is None:
+                resolved = (
+                    header_by_norm.get(_norm_header(spec.name))
+                    or header_by_norm.get(_norm_header(spec.field_name))
+                    or header_by_norm.get(_norm_header(spec.field_name.removeprefix("q_")))
+                )
+            self._question_header_by_name[spec.name] = resolved
+
         if self._email_header is None:
             raise ValueError("CSV must include an Email column")
 
@@ -388,6 +450,13 @@ class MembershipCSVImportResource(resources.ModelResource):
             len(users),
             len(self._email_to_usernames),
         )
+
+        question_columns = {name: header for name, header in self._question_header_by_name.items() if header}
+        if question_columns:
+            logger.info(
+                "Membership CSV import: question_columns=%r",
+                question_columns,
+            )
 
         if self._active_header is None:
             logger.warning(
@@ -526,6 +595,21 @@ class MembershipCSVImportResource(resources.ModelResource):
         if not self._headers:
             return []
 
+        membership_type = self._membership_type
+        if membership_type is None:
+            raise ValueError("membership_type is required")
+
+        question_responses: list[dict[str, str]] = []
+        used_norms: set[str] = set()
+        for spec in MembershipRequestForm.question_specs_for_membership_type(membership_type):
+            header = self._question_header_by_name.get(spec.name)
+            if not header:
+                continue
+            used_norms.add(_norm_header(header))
+            value = _normalize_str(self._row_value(row, header))
+            if value or spec.required:
+                question_responses.append({spec.name: value})
+
         reserved_norms = {
             _norm_header(self._email_header) if self._email_header else "",
             _norm_header(self._name_header) if self._name_header else "",
@@ -535,7 +619,9 @@ class MembershipCSVImportResource(resources.ModelResource):
             _norm_header(self._type_header) if self._type_header else "",
         }
 
-        responses: list[dict[str, str]] = []
+        reserved_norms |= used_norms
+
+        responses: list[dict[str, str]] = list(question_responses)
         for header in self._headers:
             if not header or _norm_header(header) in reserved_norms:
                 continue
@@ -555,13 +641,13 @@ class MembershipCSVImportResource(resources.ModelResource):
         return ""
 
     def _record_unmatched(self, *, row: Any, reason: str) -> None:
-        self._unmatched.append(
-            {
-                "name": self._row_name(row),
-                "email": self._row_email(row),
-                "reason": reason,
-            }
-        )
+        item: dict[str, str] = {}
+        for header in self._headers:
+            if not header:
+                continue
+            item[header] = _normalize_str(self._row_value(row, header))
+        item["reason"] = reason
+        self._unmatched.append(item)
 
     @override
     def before_import_row(self, row: Any, **kwargs: Any) -> None:
@@ -936,9 +1022,15 @@ class MembershipCSVImportResource(resources.ModelResource):
             return
 
         out = Dataset()
-        out.headers = ["name", "email", "reason"]
+        headers = [h for h in self._headers if h]
+        reason_header = "reason"
+        if any(_norm_header(h) == "reason" for h in headers):
+            # Avoid clobbering an existing input column.
+            reason_header = "unmatched_reason"
+
+        out.headers = [*headers, reason_header]
         for item in self._unmatched:
-            out.append([item["name"], item["email"], item["reason"]])
+            out.append([*(item.get(h, "") for h in headers), item.get("reason", "")])
 
         token = secrets.token_urlsafe(16)
         cache_key = f"membership-import-unmatched:{token}"

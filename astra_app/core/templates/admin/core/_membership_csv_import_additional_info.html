@@ -1,0 +1,31 @@
+<div class="card mb-3 module aligned">
+  <div class="card-header">
+    <strong>Expected CSV headers</strong>
+  </div>
+  <div class="card-body">
+    <p class="mb-2">
+      Required: <strong>Email</strong>.
+      Recommended: <strong>Name</strong>, <strong>Active Member</strong>,
+      <strong>Membership Start Date</strong>, <strong>Membership Type</strong>,
+      <strong>Committee Notes</strong>.
+    </p>
+    <p class="mb-2">
+      Any additional columns (beyond the ones above) will be imported as membership
+      request responses. For membership questions (defined by the membership type), you can also
+      choose specific CSV columns to map into those questions.
+    </p>
+    <p class="help mb-0">
+      If your file uses different header names, fill in the optional “... column"
+      fields in the form to override auto-detection.
+    </p>
+  </div>
+</div>
+
+<div id="csv-header-preview" class="card mb-3 module aligned" style="display: none;">
+  <div class="card-header">
+    <strong>Detected CSV headers</strong>
+  </div>
+  <div class="card-body">
+    <p id="csv-header-preview-items" class="help mb-0"></p>
+  </div>
+</div>

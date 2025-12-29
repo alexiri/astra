@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import csv
+import io
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -168,6 +170,8 @@ class AdminImportMembershipsCSVTests(TestCase):
                     "format": "0",
                     "membership_type": "individual",
                     "import_file": uploaded,
+                    # Map the membership question to a specific CSV column.
+                    "q_contributions_column": "Why?",
                 },
                 follow=False,
             )
@@ -194,7 +198,7 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         # Request responses captured.
         req = MembershipRequest.objects.get(requested_username="alice", membership_type_id="individual")
-        self.assertEqual(req.responses, [{"Why?": "Because"}])
+        self.assertEqual(req.responses, [{"Contributions": "Because"}])
 
         # Committee note applied.
         set_note.assert_any_call("alice", "Imported note")
@@ -202,7 +206,121 @@ class AdminImportMembershipsCSVTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             download_resp = self.client.get(download_url)
         self.assertEqual(download_resp.status_code, 200)
-        self.assertIn("bob@example.org", download_resp.content.decode("utf-8"))
+
+        decoded = download_resp.content.decode("utf-8")
+        self.assertIn("bob@example.org", decoded)
+
+        reader = csv.DictReader(io.StringIO(decoded))
+        self.assertEqual(
+            reader.fieldnames,
+            [
+                "Name",
+                "Email",
+                "Active Member",
+                "Membership Start Date",
+                "Membership Type",
+                "Committee Notes",
+                "Why?",
+                "reason",
+            ],
+        )
+
+        rows = list(reader)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["Name"], "Bob")
+        self.assertEqual(rows[0]["Email"], "bob@example.org")
+        self.assertEqual(rows[0]["Active Member"], "Active Member")
+        self.assertEqual(rows[0]["Membership Start Date"], "2024-01-02")
+        self.assertEqual(rows[0]["Membership Type"], "individual")
+        self.assertEqual(rows[0]["Committee Notes"], "")
+        self.assertEqual(rows[0]["Why?"], "")
+        self.assertEqual(rows[0]["reason"], "No FreeIPA user with this email")
+
+    def test_live_import_mirror_question_columns_are_used(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": False,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Email,Active Member,Membership Start Date,Membership Type,Domain,Pull request,Additional info\n"
+            b"alice@example.org,Active Member,2024-01-02,mirror,mirror.example.org,https://github.com/AlmaLinux/mirrors/pull/1,Some notes\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "mirror",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "mirror"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+
+        req = MembershipRequest.objects.get(requested_username="alice", membership_type_id="mirror")
+        self.assertEqual(
+            req.responses,
+            [
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/1"},
+                {"Additional info": "Some notes"},
+            ],
+        )
 
     def test_live_import_without_active_member_column_imports_rows(self) -> None:
         MembershipType.objects.update_or_create(

@@ -848,6 +848,25 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         set_note.assert_called_once_with("alice", "Updated")
 
+    def test_membership_status_note_update_allows_clearing_note(self) -> None:
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAUser.set_status_note", autospec=True) as set_note,
+        ):
+            resp = self.client.post(
+                reverse("membership-status-note-update", kwargs={"username": "alice"}),
+                data={"fasstatusnote": ""},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        set_note.assert_called_once_with("alice", "")
+
     def test_membership_status_note_update_redirects_to_next(self) -> None:
         committee_cn = "membership-committee"
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])

@@ -64,6 +64,21 @@
 {% endblock %}
 
 {% block extrahead %}
+  <script>
+    // Jazzmin's scripts assume a global `django` object (typically present on
+    // stock Django admin pages). The import-export pages don't always provide
+    // it, which can crash initialization and prevent subsequent JS from running.
+    window.django = window.django || {};
+    if (!window.django.jQuery && window.jQuery) {
+      window.django.jQuery = window.jQuery;
+    }
+  </script>
+  <script type="text/javascript" src="{% url 'admin:jsi18n' %}"></script>
+  {% if confirm_form %}
+    {{ confirm_form.media }}
+  {% else %}
+    {{ form.media }}
+  {% endif %}
   {{ block.super }}
   <script>
     (function () {
@@ -141,10 +156,110 @@
         }
       }
 
-      document.addEventListener("DOMContentLoaded", function () {
-        const fileInput = document.getElementById("id_import_file");
-        if (!fileInput) {
-          return;
+      function initWhenReady() {
+        const membershipTypeSelect = document.getElementById("id_membership_type");
+        if (!membershipTypeSelect) {
+          return false;
+        }
+
+        function currentMembershipTypeValue() {
+          if (membershipTypeSelect && membershipTypeSelect.value) {
+            return membershipTypeSelect.value;
+          }
+
+          // Select2 can temporarily leave the underlying <select> with an empty
+          // value while it initializes. Fall back to the rendered selection.
+          const rendered = document.getElementById("select2-id_membership_type-container");
+          const renderedNorm = rendered ? norm(rendered.textContent) : "";
+          if (renderedNorm.includes("mirror")) {
+            return "mirror";
+          }
+          if (renderedNorm.includes("individual")) {
+            return "individual";
+          }
+          return "";
+        }
+
+        function fieldRowForId(fieldId) {
+          const el = document.getElementById(fieldId);
+          if (!el) {
+            return null;
+          }
+
+          // django-import-export's import template uses Django admin-ish markup,
+          // but not always the exact same wrappers. We want to hide/show the
+          // whole row (label + widget + help), not just the <select> wrapper.
+          const byClosest =
+            (el.closest && (el.closest(".form-row") || el.closest(".form-group"))) ||
+            null;
+          if (byClosest) {
+            return byClosest;
+          }
+
+          const label = document.querySelector("label[for='" + fieldId + "']");
+          if (label) {
+            const labelRow =
+              (label.closest && (label.closest(".form-row") || label.closest(".form-group"))) ||
+              null;
+            if (labelRow) {
+              return labelRow;
+            }
+            return label.parentElement;
+          }
+
+          return el.parentElement;
+        }
+
+        function toggleQuestionFields() {
+          if (!membershipTypeSelect) {
+            return;
+          }
+
+          const isMirror = currentMembershipTypeValue() === "mirror";
+
+          const contributionsRow = fieldRowForId("id_q_contributions_column");
+          const domainRow = fieldRowForId("id_q_domain_column");
+          const pullRequestRow = fieldRowForId("id_q_pull_request_column");
+          const additionalInfoRow = fieldRowForId("id_q_additional_info_column");
+
+          if (contributionsRow) {
+            contributionsRow.style.display = isMirror ? "none" : "";
+          }
+          if (domainRow) {
+            domainRow.style.display = isMirror ? "" : "none";
+          }
+          if (pullRequestRow) {
+            pullRequestRow.style.display = isMirror ? "" : "none";
+          }
+          if (additionalInfoRow) {
+            additionalInfoRow.style.display = isMirror ? "" : "none";
+          }
+        }
+
+        function questionFieldVisibilityIsConsistent() {
+          const isMirror = currentMembershipTypeValue() === "mirror";
+          const contributionsRow = fieldRowForId("id_q_contributions_column");
+          const domainRow = fieldRowForId("id_q_domain_column");
+          const pullRequestRow = fieldRowForId("id_q_pull_request_column");
+          const additionalInfoRow = fieldRowForId("id_q_additional_info_column");
+
+          // If fields aren't present on this page, don't block.
+          if (!contributionsRow && !domainRow && !pullRequestRow && !additionalInfoRow) {
+            return true;
+          }
+
+          if (isMirror) {
+            const mirrorRows = [domainRow, pullRequestRow, additionalInfoRow].filter(Boolean);
+            if (!mirrorRows.length) {
+              return true;
+            }
+            return mirrorRows.every((r) => r.style.display !== "none");
+          }
+
+          if (contributionsRow) {
+            return contributionsRow.style.display !== "none";
+          }
+          return true;
         }
 
         const fields = {
@@ -160,7 +275,7 @@
         const headerListItems = document.getElementById("csv-header-preview-items");
 
         function applyHeaders(headers) {
-          const selects = Object.values(fields).filter(Boolean);
+          const selects = Array.from(document.querySelectorAll("select[id$='_column']"));
           for (const sel of selects) {
             setSelectOptions(sel, headers);
           }
@@ -184,65 +299,114 @@
             fields.type.value = pickHeader(headers, ["membershiptype", "type", "level"]);
           }
 
+          for (const sel of selects) {
+            if (sel.value) {
+              continue;
+            }
+            const preferred = (sel.dataset && sel.dataset.preferredNorms) ? sel.dataset.preferredNorms : "";
+            const preferredNorms = preferred.split("|").map(norm).filter(Boolean);
+            if (preferredNorms.length) {
+              sel.value = pickHeader(headers, preferredNorms);
+            }
+          }
+
           if (headerList && headerListItems) {
             headerListItems.textContent = headers.join(", ");
             headerList.style.display = headers.length ? "block" : "none";
           }
         }
 
-        fileInput.addEventListener("change", function () {
-          const file = fileInput.files && fileInput.files[0];
-          if (!file) {
-            return;
-          }
-
-          const reader = new FileReader();
-          reader.onload = function () {
-            const text = (reader.result || "").toString();
-            const lines = text.split(/\r\n|\n|\r/).filter(Boolean);
-            if (!lines.length) {
+        const fileInput = document.getElementById("id_import_file");
+        if (fileInput) {
+          fileInput.addEventListener("change", function () {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) {
               return;
             }
-            const firstLine = lines[0].replace(/^\uFEFF/, "");
-            const delimiter = chooseDelimiter(firstLine);
-            const headers = parseCsvRow(firstLine, delimiter);
-            if (headers.length) {
-              applyHeaders(headers);
-            }
-          };
-          reader.readAsText(file);
-        });
-      });
+
+            const reader = new FileReader();
+            reader.onload = function () {
+              const text = (reader.result || "").toString();
+              const lines = text.split(/\r\n|\n|\r/).filter(Boolean);
+              if (!lines.length) {
+                return;
+              }
+              const firstLine = lines[0].replace(/^\uFEFF/, "");
+              const delimiter = chooseDelimiter(firstLine);
+              const headers = parseCsvRow(firstLine, delimiter);
+              if (headers.length) {
+                applyHeaders(headers);
+              }
+            };
+            reader.readAsText(file);
+          });
+        }
+
+        membershipTypeSelect.addEventListener("change", toggleQuestionFields);
+
+        // If Select2 is present, it emits events via jQuery rather than the DOM.
+        if (window.jQuery) {
+          try {
+            window.jQuery(membershipTypeSelect).on("change select2:select select2:clear", toggleQuestionFields);
+          } catch (e) {
+            // If jQuery is present but can't bind for any reason, ignore.
+          }
+        }
+
+        toggleQuestionFields();
+
+        // Also re-run once Select2 has had a chance to initialize the original
+        // <select> value from the rendered selection.
+        setTimeout(toggleQuestionFields, 0);
+        setTimeout(toggleQuestionFields, 250);
+
+        // Select2 initialization timing is inconsistent across admin themes.
+        // Keep re-applying the toggle briefly until the UI matches the selected
+        // membership type.
+        let toggleAttempts = 0;
+        const toggleTimer = setInterval(function () {
+          toggleAttempts += 1;
+          toggleQuestionFields();
+
+          if (questionFieldVisibilityIsConsistent() || toggleAttempts >= 30) {
+            clearInterval(toggleTimer);
+          }
+        }, 100);
+
+        return true;
+      }
+
+      function boot() {
+        // If this script executes after DOMContentLoaded, we still need to
+        // initialize. Retry briefly until the form fields exist.
+        let attempts = 0;
+        const timer = setInterval(function () {
+          attempts += 1;
+          if (initWhenReady() || attempts >= 50) {
+            clearInterval(timer);
+          }
+        }, 50);
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", boot);
+      } else {
+        boot();
+      }
     })();
   </script>
 {% endblock %}
 
 {% block import_form_additional_info %}
-  <div class="module aligned">
-    <h2>Expected CSV headers</h2>
-    <p>
-      Required: <strong>Email</strong>.
-      Recommended: <strong>Name</strong>, <strong>Active Member</strong>,
-      <strong>Membership Start Date</strong>, <strong>Membership Type</strong>,
-      <strong>Committee Notes</strong>.
-    </p>
-    <p>
-      Any additional columns (beyond the ones above) will be imported as membership
-      request responses.
-    </p>
-    <p class="help">
-      If your file uses different header names, fill in the optional “... column”
-      fields in the form to override auto-detection.
-    </p>
-  </div>
-
-  <div id="csv-header-preview" class="module aligned" style="display: none;">
-    <h2>Detected CSV headers</h2>
-    <p id="csv-header-preview-items" class="help"></p>
-  </div>
+  {% include "admin/core/_membership_csv_import_additional_info.html" %}
 {% endblock %}
 
 {% block content %}
+  {% if not confirm_form %}
+    {# Jazzmin's import-export template doesn't render `import_form_additional_info`. #}
+    {% include "admin/core/_membership_csv_import_additional_info.html" %}
+  {% endif %}
+
   {% if unmatched_download_url %}
     <div class="messagelist">
       <ul class="messagelist">
