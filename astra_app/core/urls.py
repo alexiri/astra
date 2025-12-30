@@ -2,6 +2,7 @@ from django.urls import path
 
 from core import (
     views_groups,
+    views_mailmerge,
     views_membership,
     views_organizations,
     views_search,
@@ -48,6 +49,18 @@ urlpatterns = [
     ),
 
     path("search/", views_search.global_search, name="global-search"),
+
+    path("email-tools/mail-merge/", views_mailmerge.mail_merge, name="mail-merge"),
+    path(
+        "email-tools/mail-merge/render-preview/",
+        views_mailmerge.mail_merge_render_preview,
+        name="mail-merge-render-preview",
+    ),
+    path(
+        "email-tools/mail-merge/templates/<int:template_id>/",
+        views_mailmerge.mail_merge_template_json,
+        name="mail-merge-template-json",
+    ),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),

@@ -1,0 +1,239 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Mail Merge{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Mail Merge</h1>
+{% endblock %}
+
+{% block content %}
+  <style>
+    #mailmerge-extra-options-toggle .mailmerge-collapse-chevron {
+      display: inline-block;
+      transition: transform 150ms ease-in-out;
+    }
+
+    #mailmerge-extra-options-toggle[aria-expanded="true"] .mailmerge-collapse-chevron {
+      transform: rotate(90deg);
+    }
+  </style>
+
+  <form method="post" enctype="multipart/form-data" id="mailmerge-form">
+    {% csrf_token %}
+
+    <input type="hidden" name="action" id="mailmerge-action" value="" />
+    <input type="hidden" name="save_as_name" id="mailmerge-save-as-name" value="" />
+    <input type="hidden" name="recipient_mode" id="mailmerge-recipient-mode" value="" />
+    <input type="hidden" id="mailmerge-has-saved-csv" value="{% if has_saved_csv_recipients %}1{% else %}0{% endif %}" />
+
+    <div class="row">
+      <div class="col-lg-12">
+        <div class="card card-outline card-primary">
+          <div class="card-header">
+            <h3 class="card-title">Recipients</h3>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="accordion" id="mailmerge-recipients-accordion">
+                  <div class="card">
+                    <div class="card-header" id="mailmerge-heading-group">
+                      <h2 class="mb-0">
+                        <button class="btn btn-link" type="button" data-toggle="collapse" data-target="#mailmerge-collapse-group" aria-expanded="true" aria-controls="mailmerge-collapse-group">
+                          Recipients from Group
+                        </button>
+                      </h2>
+                    </div>
+
+                    <div id="mailmerge-collapse-group" class="collapse show" aria-labelledby="mailmerge-heading-group" data-parent="#mailmerge-recipients-accordion">
+                      <div class="card-body">
+                        <div class="form-group mb-0">
+                          <label for="id_group_cn">Group</label>
+                          {{ form.group_cn }}
+                          <small class="form-text text-muted">Includes nested group members.</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="card">
+                    <div class="card-header" id="mailmerge-heading-csv">
+                      <h2 class="mb-0">
+                        <button class="btn btn-link collapsed" type="button" data-toggle="collapse" data-target="#mailmerge-collapse-csv" aria-expanded="false" aria-controls="mailmerge-collapse-csv">
+                          Recipients from CSV file
+                        </button>
+                      </h2>
+                    </div>
+
+                    <div id="mailmerge-collapse-csv" class="collapse" aria-labelledby="mailmerge-heading-csv" data-parent="#mailmerge-recipients-accordion">
+                      <div class="card-body">
+                        <div class="form-group mb-0">
+                          <label for="id_csv_file">Upload CSV</label>
+                          {{ form.csv_file }}
+                          <small class="form-text text-muted">CSV should include an Email column. If you previously uploaded a CSV, you can leave this blank to reuse it.</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-2">
+                  <a class="text-muted" id="mailmerge-extra-options-toggle" data-toggle="collapse" href="#mailmerge-extra-options" role="button" aria-expanded="false" aria-controls="mailmerge-extra-options">
+                    <span aria-hidden="true" class="mr-1 mailmerge-collapse-chevron">▸</span>
+                    Additional recipients
+                  </a>
+                  <div class="collapse mt-2" id="mailmerge-extra-options">
+                    <div class="card card-body">
+                      <div class="form-group">
+                        <label for="id_cc">CC</label>
+                        {{ form.cc }}
+                        <small class="form-text text-muted">Comma-separated email addresses.</small>
+                      </div>
+                      <div class="form-group mb-0">
+                        <label for="id_bcc">BCC</label>
+                        {{ form.bcc }}
+                        <small class="form-text text-muted">Comma-separated email addresses.</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <button type="submit" class="mt-2 btn btn-primary" id="mailmerge-load-recipients-btn" onclick="document.getElementById('mailmerge-action').value='preview'">
+                  Load recipients
+                </button>
+
+                <div class="alert alert-warning mt-2 d-none" id="mailmerge-recipients-inline-warning" role="alert"></div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="alert alert-info mb-3">
+                  <strong>Recipient count:</strong>
+                  {% if preview %}
+                    {{ preview.recipient_count }}
+                  {% else %}
+                    0
+                  {% endif %}
+                </div>
+
+                {% if preview %}
+                  <div class="card bg-dark">
+                    <div class="card-header">
+                      <h3 class="card-title">Available variables</h3>
+                    </div>
+                    <div class="card-body p-0">
+                      <table class="table table-dark table-striped mb-0">
+                        <thead>
+                          <tr>
+                            <th style="width: 45%">Variable</th>
+                            <th>Example (first recipient)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for var, example in preview.variables %}
+                            <tr>
+                              <td>
+                                <code>{% templatetag openvariable %} {{ var }} {% templatetag closevariable %}</code>
+                              </td>
+                              <td><span class="text-monospace">{{ example }}</span></td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                {% else %}
+                  <div class="text-muted">Select a group or upload a CSV to see available variables.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-12">
+        <div class="card card-outline card-success">
+          <div class="card-header">
+            <h3 class="card-title">Compose email</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group col-md-6">
+                <label for="id_email_template_id">Email template</label>
+                <select class="form-control" name="email_template_id" id="id_email_template_id">
+                  <option value="">(None)</option>
+                  {% for t in templates %}
+                    <option value="{{ t.pk }}" {% if form.data.email_template_id == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
+                  {% endfor %}
+                </select>
+                <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
+
+                <div class="mt-2">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="mailmerge-restore-btn" disabled>Restore</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-btn">Save</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-as-btn">Save as…</button>
+                </div>
+              </div>
+
+              <div class="form-group col-md-6">
+                <label for="id_subject">Subject</label>
+                {{ form.subject }}
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <label for="id_html_content">HTML content</label>
+                {{ form.html_content }}
+              </div>
+              <div class="col-md-6">
+                <label for="id_text_content">Text content</label>
+                {{ form.text_content }}
+              </div>
+            </div>
+
+            <hr />
+
+            <div class="row">
+              <div class="col-md-6">
+                <h5>Rendered preview (HTML, first recipient)</h5>
+                <div class="border rounded p-2 bg-white" style="min-height: 140px;" id="mailmerge-preview-html">
+                  {% if rendered_preview.html %}
+                    {{ rendered_preview.html|safe }}
+                  {% else %}
+                    <span class="text-muted">No preview yet.</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="col-md-6">
+                <h5>Rendered preview (text, first recipient)</h5>
+                <pre class="border rounded p-2 bg-light" style="min-height: 140px; white-space: pre-wrap;" id="mailmerge-preview-text">{% if rendered_preview.text %}{{ rendered_preview.text }}{% else %}No preview yet.{% endif %}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-12">
+        <div class="card card-outline card-danger">
+          <div class="card-header">
+            <h3 class="card-title">Send emails</h3>
+          </div>
+          <div class="card-body d-flex align-items-center justify-content-center flex-wrap">
+            <div>
+              <button type="submit" class="btn btn-danger" onclick="document.getElementById('mailmerge-action').value='send'" {% if not preview or preview.recipient_count == 0 %}disabled{% endif %}>
+                Send {% if preview %}<b>{{ preview.recipient_count }}</b>{% else %}0{% endif %} Email{% if preview %}{{ preview.recipient_count|pluralize }}{% else %}s{% endif %}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <script src="{% static 'core/js/mailmerge.js' %}"></script>
+{% endblock %}
