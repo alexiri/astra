@@ -154,66 +154,7 @@
 
     <div class="row">
       <div class="col-lg-12">
-        <div class="card card-outline card-success">
-          <div class="card-header">
-            <h3 class="card-title">Compose email</h3>
-          </div>
-          <div class="card-body">
-            <div class="form-row">
-              <div class="form-group col-md-6">
-                <label for="id_email_template_id">Email template</label>
-                <select class="form-control" name="email_template_id" id="id_email_template_id">
-                  <option value="">(None)</option>
-                  {% for t in templates %}
-                    <option value="{{ t.pk }}" {% if form.data.email_template_id == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
-                  {% endfor %}
-                </select>
-                <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
-
-                <div class="mt-2">
-                  <button type="button" class="btn btn-outline-secondary btn-sm" id="mailmerge-restore-btn" disabled>Restore</button>
-                  <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-btn">Save</button>
-                  <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-as-btn">Save as…</button>
-                </div>
-              </div>
-
-              <div class="form-group col-md-6">
-                <label for="id_subject">Subject</label>
-                {{ form.subject }}
-              </div>
-            </div>
-
-            <div class="row">
-              <div class="col-md-6">
-                <label for="id_html_content">HTML content</label>
-                {{ form.html_content }}
-              </div>
-              <div class="col-md-6">
-                <label for="id_text_content">Text content</label>
-                {{ form.text_content }}
-              </div>
-            </div>
-
-            <hr />
-
-            <div class="row">
-              <div class="col-md-6">
-                <h5>Rendered preview (HTML, first recipient)</h5>
-                <div class="border rounded p-2 bg-white" style="min-height: 140px;" id="mailmerge-preview-html">
-                  {% if rendered_preview.html %}
-                    {{ rendered_preview.html|safe }}
-                  {% else %}
-                    <span class="text-muted">No preview yet.</span>
-                  {% endif %}
-                </div>
-              </div>
-              <div class="col-md-6">
-                <h5>Rendered preview (text, first recipient)</h5>
-                <pre class="border rounded p-2 bg-light" style="min-height: 140px; white-space: pre-wrap;" id="mailmerge-preview-text">{% if rendered_preview.text %}{{ rendered_preview.text }}{% else %}No preview yet.{% endif %}</pre>
-              </div>
-            </div>
-          </div>
-        </div>
+        {% include "core/_templated_email_compose.html" with card_title="Compose email" templates=templates form=form rendered_preview=rendered_preview %}
       </div>
     </div>
 
