@@ -812,7 +812,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                     send_submitted_email=False,
                 )
 
-            approval_log = approve_membership_request(
+            approve_membership_request(
                 membership_request=instance,
                 actor_username=self._actor_username,
                 send_approved_email=False,

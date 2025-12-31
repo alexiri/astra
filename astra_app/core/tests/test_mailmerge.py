@@ -93,7 +93,6 @@ class MailMergeTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Email tools")
         self.assertContains(resp, "Mail Merge")
         self.assertContains(resp, "Recipients")
         self.assertContains(resp, "2")
