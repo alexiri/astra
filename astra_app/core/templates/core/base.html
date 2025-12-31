@@ -167,7 +167,7 @@
               </li>
             {% endif %}
 
-            {% if membership_can_add or membership_can_view %}
+            {% if membership_can_add or membership_can_view or mailmerge_can_add%}
               <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}menu-open{% endif %}">
                 <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}active{% endif %}">
                   <i class="nav-icon fas fa-users-gear mt-1"></i>
@@ -200,27 +200,15 @@
                       </a>
                     </li>
                   {% endif %}
-                </ul>
-              </li>
-            {% endif %}
 
-            {% if mailmerge_can_add %}
-              <li class="nav-item {% if current_url_name == 'mail-merge' %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'mail-merge' %}active{% endif %}">
-                  <i class="nav-icon fas fa-envelope mt-1"></i>
-                  <p class="mb-0 ml-2 flex-grow-1">
-                    Email tools
-                    <i class="right fas fa-angle-left"></i>
-                  </p>
-                </a>
-
-                <ul class="nav nav-treeview" {% if current_url_name == 'mail-merge' %}style="display: block;"{% endif %}>
-                  <li class="nav-item">
-                    <a href="{% url 'mail-merge' %}" class="nav-link {% if current_url_name == 'mail-merge' %}active{% endif %}">
-                      <i class="nav-icon fas fa-wand-magic-sparkles"></i>
-                      <p>Mail Merge</p>
-                    </a>
-                  </li>
+                  {% if mailmerge_can_add %}
+                    <li class="nav-item">
+                      <a href="{% url 'mail-merge' %}" class="nav-link {% if current_url_name == 'mail-merge' %}active{% endif %}">
+                        <i class="nav-icon fas fa-envelope"></i>
+                        <p>Mail Merge</p>
+                      </a>
+                    </li>
+                  {% endif %}
                 </ul>
               </li>
             {% endif %}
