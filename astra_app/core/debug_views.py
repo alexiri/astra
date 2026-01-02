@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.decorators import user_passes_test
 from django.core.cache import caches
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
@@ -35,7 +35,6 @@ def _list_keys_from_backend(backend) -> list[str] | None:
 
 
 @require_GET
-@login_required(login_url="/admin/login/")
 @user_passes_test(lambda u: bool(getattr(u, "is_superuser", False)), login_url="/admin/login/")
 def cache_debug_view(request):
     """Superuser-only cache inspection endpoint.

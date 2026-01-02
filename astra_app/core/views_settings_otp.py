@@ -10,7 +10,6 @@ import pyotp
 import qrcode
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from python_freeipa import ClientMeta, exceptions
@@ -27,7 +26,6 @@ OTP_KEY_LENGTH = 35
 type TokenDict = dict[str, Any]
 
 
-@login_required(login_url="/login/")
 def settings_otp(request: HttpRequest) -> HttpResponse:
     """Noggin-style OTP management."""
 
@@ -182,7 +180,6 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings_otp.html", context)
 
 
-@login_required(login_url="/login/")
 def otp_enable(request: HttpRequest) -> HttpResponse:
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -199,7 +196,6 @@ def otp_enable(request: HttpRequest) -> HttpResponse:
     return redirect("settings-otp")
 
 
-@login_required(login_url="/login/")
 def otp_disable(request: HttpRequest) -> HttpResponse:
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -216,7 +212,6 @@ def otp_disable(request: HttpRequest) -> HttpResponse:
     return redirect("settings-otp")
 
 
-@login_required(login_url="/login/")
 def otp_delete(request: HttpRequest) -> HttpResponse:
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -238,7 +233,6 @@ def otp_delete(request: HttpRequest) -> HttpResponse:
     return redirect("settings-otp")
 
 
-@login_required(login_url="/login/")
 def otp_rename(request: HttpRequest) -> HttpResponse:
     form = OTPTokenRenameForm(request.POST or None)
     if request.method == "POST" and form.is_valid():

@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.contrib.auth import get_user as django_get_user
 from django.contrib.auth.models import AnonymousUser
+from django.http import JsonResponse
+from django.shortcuts import redirect
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 
@@ -148,3 +150,58 @@ class FreeIPAServiceClientReuseMiddleware:
         finally:
             if not settings.FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS:
                 clear_freeipa_service_client_cache()
+
+
+class LoginRequiredMiddleware:
+    """Require an authenticated user for most pages.
+
+    Exemptions:
+    - Auth flows (login/logout/password reset)
+    - Registration flow
+    - Health checks and the SES webhook
+    - Django admin and static/media
+    - Election public exports (ballots/audit JSON)
+
+    For JSON endpoints, return a JSON 403 instead of redirecting.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+        self._allowed_prefixes: tuple[str, ...] = (
+            settings.STATIC_URL,
+            settings.MEDIA_URL,
+            "/admin/",
+            "/login/",
+            "/logout/",
+            "/otp/sync/",
+            "/password-reset/",
+            "/password-expired/",
+            "/register/",
+            "/elections/ballot/verify/",
+            "/healthz/",
+            "/readyz/",
+            "/ses/event-webhook/",
+        )
+
+    def __call__(self, request):
+        path = request.path
+
+        # Allow health/webhook/static/admin and auth-related URLs.
+        if any(path.startswith(p) for p in self._allowed_prefixes):
+            return self.get_response(request)
+
+        # Keep election public exports public (auditable public artifacts).
+        if path.startswith("/elections/") and "/public/" in path and path.endswith(".json"):
+            return self.get_response(request)
+
+        if request.user.is_authenticated:
+            return self.get_response(request)
+
+        # For JSON endpoints, avoid redirecting (clients expect JSON).
+        accept = str(request.headers.get("Accept") or "")
+        content_type = str(request.content_type or "")
+        if path.endswith(".json") or "application/json" in accept or content_type.startswith("application/json"):
+            return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
+
+        return redirect(f"{settings.LOGIN_URL}?next={request.get_full_path()}")

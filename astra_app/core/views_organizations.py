@@ -6,11 +6,11 @@ from typing import override
 from django import forms
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
 from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
@@ -19,19 +19,17 @@ from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
+    json_permission_required_any,
 )
 from core.views_utils import _normalize_str
 
 
 def _can_access_organization(request: HttpRequest, organization: Organization) -> bool:
-    if not request.user.is_authenticated:
-        return False
-
     username = str(request.user.get_username() or "").strip()
     if not username:
         return False
 
-    if hasattr(request.user, "has_perm") and request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
+    if request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
         return True
 
     reps = organization.representatives if isinstance(organization.representatives, list) else []
@@ -45,9 +43,6 @@ def _require_organization_access(request: HttpRequest, organization: Organizatio
 
 
 def _require_representative(request: HttpRequest, organization: Organization) -> None:
-    if not request.user.is_authenticated:
-        raise Http404
-
     username = str(request.user.get_username() or "").strip()
     if not username:
         raise Http404
@@ -58,10 +53,7 @@ def _require_representative(request: HttpRequest, organization: Organization) ->
 
 
 def _can_edit_organization(request: HttpRequest, organization: Organization) -> bool:
-    if not request.user.is_authenticated:
-        return False
-
-    if hasattr(request.user, "has_perm") and any(
+    if any(
         request.user.has_perm(p)
         for p in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP)
     ):
@@ -221,7 +213,6 @@ class OrganizationCommitteeNotesForm(forms.ModelForm):
         self.fields["notes"].widget.attrs.setdefault("class", "form-control")
 
 
-@login_required
 def organizations(request: HttpRequest) -> HttpResponse:
     username = str(request.user.get_username() or "").strip()
     if not username:
@@ -262,13 +253,12 @@ def organizations(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
 def organization_create(request: HttpRequest) -> HttpResponse:
     username = str(request.user.get_username() or "").strip()
     if not username:
         raise Http404
 
-    can_select_representatives = bool(hasattr(request.user, "has_perm") and request.user.has_perm(ASTRA_ADD_MEMBERSHIP))
+    can_select_representatives = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
 
     if request.method == "POST":
         form = OrganizationEditForm(
@@ -314,15 +304,9 @@ def organization_create(request: HttpRequest) -> HttpResponse:
     )
 
 
+@require_GET
+@json_permission_required_any({ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP})
 def organization_representatives_search(request: HttpRequest) -> HttpResponse:
-    if not request.user.is_authenticated:
-        return redirect("users")
-
-    if not hasattr(request.user, "has_perm") or not (
-        request.user.has_perm(ASTRA_ADD_MEMBERSHIP) or request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP)
-    ):
-        return redirect("users")
-
     q = _normalize_str(request.GET.get("q"))
     if not q:
         return JsonResponse({"results": []})
@@ -350,7 +334,6 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
     return JsonResponse({"results": results})
 
 
-@login_required
 def organization_detail(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
@@ -388,7 +371,6 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     )
 
 
-@login_required
 def organization_sponsorship_extend(request: HttpRequest, organization_id: int) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
@@ -454,11 +436,10 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     return redirect("organization-detail", organization_id=organization.pk)
 
 
-@login_required
 def organization_committee_notes_update(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
 
-    if not hasattr(request.user, "has_perm") or not request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
+    if not request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
         raise Http404
 
     can_edit = any(
@@ -480,16 +461,13 @@ def organization_committee_notes_update(request: HttpRequest, organization_id: i
     return redirect("organization-detail", organization_id=organization.pk)
 
 
-@login_required
 def organization_edit(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_edit_access(request, organization)
 
     original_membership_level_id = organization.membership_level_id
 
-    can_select_representatives = bool(
-        hasattr(request.user, "has_perm") and request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP)
-    )
+    can_select_representatives = request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP)
 
     initial: dict[str, object] = {}
     if can_select_representatives and isinstance(organization.representatives, list):

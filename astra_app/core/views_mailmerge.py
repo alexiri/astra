@@ -10,19 +10,24 @@ from dataclasses import dataclass
 
 from django import forms
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.decorators import permission_required
 from django.core.validators import validate_email
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.template import Context, Template
-from django.template.exceptions import TemplateSyntaxError
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
 from post_office import mail
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.permissions import ASTRA_ADD_MAILMERGE
+from core.permissions import ASTRA_ADD_MAILMERGE, json_permission_required
+from core.templated_email import (
+    create_email_template_unique,
+    render_template_string,
+    render_templated_email_preview,
+    render_templated_email_preview_response,
+    update_email_template,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +65,6 @@ def _unique_identifiers(names: Iterable[str]) -> list[str]:
             out.append(f"{base}_{n + 1}")
         seen[base] = n + 1
     return out
-
-
-def _render_template_string(value: str, context: dict[str, str]) -> str:
-    try:
-        return Template(value or "").render(Context(context))
-    except TemplateSyntaxError as e:
-        raise ValueError(str(e)) from e
 
 
 def _context_for_freeipa_user(user: FreeIPAUser) -> dict[str, str]:
@@ -286,7 +284,6 @@ class MailMergeForm(forms.Form):
             raise forms.ValidationError(f"Invalid BCC address list: {e}") from e
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
 def mail_merge(request: HttpRequest) -> HttpResponse:
     templates = list(EmailTemplate.objects.all().order_by("name"))
@@ -352,10 +349,12 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                 selected_template = EmailTemplate.objects.filter(pk=selected_template_id).first()
 
             if action == "save" and selected_template is not None:
-                selected_template.subject = subject
-                selected_template.html_content = html_content
-                selected_template.content = text_content
-                selected_template.save()
+                update_email_template(
+                    template=selected_template,
+                    subject=subject,
+                    html_content=html_content,
+                    text_content=text_content,
+                )
                 messages.success(request, f"Saved template: {selected_template.name}.")
             elif action == "save" and selected_template is None:
                 messages.error(request, "Select a template to save, or use Save as.")
@@ -365,17 +364,11 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                 if not raw_name:
                     messages.error(request, "Provide a template name for Save as.")
                 else:
-                    name = raw_name
-                    suffix = 2
-                    while EmailTemplate.objects.filter(name=name).exists():
-                        name = f"{raw_name}-{suffix}"
-                        suffix += 1
-
-                    selected_template = EmailTemplate.objects.create(
-                        name=name,
+                    selected_template = create_email_template_unique(
+                        raw_name=raw_name,
                         subject=subject,
                         html_content=html_content,
-                        content=text_content,
+                        text_content=text_content,
                     )
                     messages.success(request, f"Created template: {selected_template.name}.")
 
@@ -392,9 +385,9 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                         try:
                             mail.send(
                                 recipients=[to_email],
-                                subject=_render_template_string(subject, recipient),
-                                message=_render_template_string(text_content, recipient),
-                                html_message=_render_template_string(html_content, recipient),
+                                subject=render_template_string(subject, recipient),
+                                message=render_template_string(text_content, recipient),
+                                html_message=render_template_string(html_content, recipient),
                                 cc=cc,
                                 bcc=bcc,
                             )
@@ -432,9 +425,14 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
     rendered_preview = {"subject": "", "html": "", "text": ""}
     if first_context and form.is_bound and form.is_valid():
         try:
-            rendered_preview["subject"] = _render_template_string(str(form.cleaned_data.get("subject") or ""), first_context)
-            rendered_preview["html"] = _render_template_string(str(form.cleaned_data.get("html_content") or ""), first_context)
-            rendered_preview["text"] = _render_template_string(str(form.cleaned_data.get("text_content") or ""), first_context)
+            rendered_preview.update(
+                render_templated_email_preview(
+                    subject=str(form.cleaned_data.get("subject") or ""),
+                    html_content=str(form.cleaned_data.get("html_content") or ""),
+                    text_content=str(form.cleaned_data.get("text_content") or ""),
+                    context=first_context,
+                )
+            )
         except ValueError as e:
             messages.error(request, f"Template error: {e}")
 
@@ -453,8 +451,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
-@login_required(login_url="/login/")
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
+@json_permission_required(ASTRA_ADD_MAILMERGE)
 def mail_merge_render_preview(request: HttpRequest) -> JsonResponse:
     raw_context = request.session.get(_PREVIEW_CONTEXT_SESSION_KEY)
     if not raw_context:
@@ -468,35 +465,7 @@ def mail_merge_render_preview(request: HttpRequest) -> JsonResponse:
     if not isinstance(context, dict):
         return JsonResponse({"error": "Preview context is invalid."}, status=400)
 
-    subject = str(request.POST.get("subject") or "")
-    html_content = str(request.POST.get("html_content") or "")
-    text_content = str(request.POST.get("text_content") or "")
-
-    try:
-        return JsonResponse(
-            {
-                "subject": _render_template_string(subject, {str(k): str(v) for k, v in context.items()}),
-                "html": _render_template_string(html_content, {str(k): str(v) for k, v in context.items()}),
-                "text": _render_template_string(text_content, {str(k): str(v) for k, v in context.items()}),
-            }
-        )
-    except ValueError as e:
-        return JsonResponse({"error": f"Template error: {e}"}, status=400)
-
-
-@login_required(login_url="/login/")
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
-def mail_merge_template_json(request: HttpRequest, template_id: int) -> JsonResponse:
-    template = EmailTemplate.objects.filter(pk=template_id).first()
-    if template is None:
-        raise Http404("Template not found")
-
-    return JsonResponse(
-        {
-            "id": template.pk,
-            "name": template.name,
-            "subject": template.subject or "",
-            "html_content": template.html_content or "",
-            "text_content": template.content or "",
-        }
+    return render_templated_email_preview_response(
+        request=request,
+        context={str(k): str(v) for k, v in context.items()},
     )

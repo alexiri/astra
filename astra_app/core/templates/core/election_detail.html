@@ -1,0 +1,387 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block title %}Election{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">{{ election.name }}</h1>
+{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-lg-8">
+      <div class="card card-outline card-primary">
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-4">Status</dt>
+            <dd class="col-sm-8">{{ election.status }}</dd>
+            <dt class="col-sm-4">Voting window</dt>
+              <dd class="col-sm-8">{{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}</dd>
+            <dt class="col-sm-4">Seats</dt>
+            <dd class="col-sm-8">{{ election.number_of_seats }}</dd>
+          </dl>
+          
+          {% if election.description %}
+            <p>{{ election.description }}</p>
+          {% endif %}
+
+          {% if election.url %}
+            <p class="mb-2">
+              <strong>URL:</strong>
+              <a href="{{ election.url }}" target="_blank" rel="noopener noreferrer">{{ election.url }}</a>
+            </p>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card card-outline card-info">
+        <div class="card-header">
+          <h3 class="card-title">Actions</h3>
+        </div>
+        <div class="card-body">
+          {% if election.status == 'open' %}
+            {% if can_vote %}
+              <a class="btn btn-primary btn-block" href="{% url 'election-vote' election.id %}">Vote</a>
+              {% if request.user.email %}
+                <p class="text-muted small mb-0">You'll need your voting credential, which was sent to <b>{{ request.user.email }}</b>.</p>
+              {% else %}
+                <p class="text-muted small mb-0 mt-2">You'll need your voting credential.</p>
+              {% endif %}
+            {% else %}
+              <p class="mb-2"><strong>You're not eligible to vote in this election.</strong></p>
+              <p class="text-muted small mb-2">Eligibility is based on memberships/sponsorships of the AlmaLinux OS Foundation.</p>
+              <ul class="text-muted small pl-3 mb-2">
+                <li>Hold an active individual membership</li>
+                <li>Or be a representative of a sponsoring organization</li>
+                <li>And it must have started at least {{ eligibility_min_membership_age_days }} day{{ eligibility_min_membership_age_days|pluralize }} before the election start</li>
+              </ul>
+              <a class="btn btn-outline-primary btn-block" href="/membership/request/">Request membership</a>
+            {% endif %}
+          {% elif election.status == 'closed' or election.status == 'tallied' %}
+            <a class="btn btn-outline-primary btn-block" href="{% url 'election-audit-log' election.id %}">View audit log</a>
+            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}">Download ballots (JSON)</a>
+            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}">Download audit log (JSON)</a>
+          {% endif %}
+
+          {% if can_manage_elections and election.status == 'open' %}
+            <hr class="my-3" />
+            <button
+              type="button"
+              class="btn btn-danger btn-block"
+              data-toggle="modal"
+              data-target="#conclude-election-modal"
+            >
+              Conclude Election
+            </button>
+
+            <div
+              class="modal fade"
+              id="conclude-election-modal"
+              tabindex="-1"
+              role="dialog"
+              aria-labelledby="conclude-election-modal-label"
+              aria-hidden="true"
+            >
+              <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                  <form method="post" action="{% url 'election-conclude' election.id %}">
+                    {% csrf_token %}
+                    <div class="modal-header">
+                      <h5 class="modal-title" id="conclude-election-modal-label">Conclude election?</h5>
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                      </button>
+                    </div>
+                    <div class="modal-body">
+                      <p class="mb-3">This will close the election and prevent further voting.</p>
+                      <div class="custom-control custom-checkbox">
+                        <input
+                          type="checkbox"
+                          class="custom-control-input"
+                          id="conclude-skip-tally"
+                          name="skip_tally"
+                        >
+                        <label class="custom-control-label" for="conclude-skip-tally">
+                          Close election, but do not tally votes
+                        </label>
+                      </div>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+                      <button type="submit" class="btn btn-danger">Conclude Election</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if can_manage_elections and turnout_stats and election.status == 'open' %}
+    <div class="row">
+      <div class="col-12">
+        <div class="card card-outline card-secondary">
+          <div class="card-header">
+            <h3 class="card-title">Turnout so far</h3>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="col-12 col-lg-5">
+                <div class="mb-2">
+                  <strong>Number of voters</strong>
+                  —
+                  {{ turnout_stats.ballots_cast }} / {{ turnout_stats.eligible_voters }} ({{ turnout_stats.ballots_pct }}%)
+                </div>
+
+                <div class="progress mb-2">
+                  <div
+                    class="progress-bar bg-success"
+                    role="progressbar"
+                    aria-valuenow="{{ turnout_stats.ballots_cast }}"
+                    aria-valuemin="0"
+                    aria-valuemax="{{ turnout_stats.eligible_voters }}"
+                    style="width: {{ turnout_stats.ballots_pct }}%"
+                  >
+                    <span class="sr-only">{{ turnout_stats.ballots_pct }}% Complete</span>
+                  </div>
+                </div>
+
+                <div class="mb-3 text-muted">
+                  Quorum:
+                  {{ turnout_stats.quorum_voters }} voters (50%)
+                  {% if turnout_stats.quorum_met %}
+                    <span class="ml-1 badge badge-success">met</span>
+                  {% else %}
+                    <span class="ml-1 badge badge-danger">not met</span>
+                  {% endif %}
+                </div>
+
+                <div class="mb-2">
+                  <strong>Votes cast (weight)</strong>
+                  —
+                  {{ turnout_stats.votes_cast }} / {{ turnout_stats.eligible_votes }} ({{ turnout_stats.votes_pct }}%)
+                </div>
+                <div class="progress mb-0">
+                  <div
+                    class="progress-bar bg-info"
+                    role="progressbar"
+                    aria-valuenow="{{ turnout_stats.votes_cast }}"
+                    aria-valuemin="0"
+                    aria-valuemax="{{ turnout_stats.eligible_votes }}"
+                    style="width: {{ turnout_stats.votes_pct }}%"
+                  >
+                    <span class="sr-only">{{ turnout_stats.votes_pct }}% Complete</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12 col-lg-7 mt-3 mt-lg-0">
+                <p class="mb-2"><strong>Ballots submitted over time (including superseded ballots)</strong></p>
+                {{ turnout_chart_data|json_script:"election-turnout-chart-data" }}
+                <div class="chart">
+                  <canvas id="election-turnout-chart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if election.status == 'tallied' %}
+    <div class="row">
+      <div class="col-12">
+        <div class="card  card-success">
+          <div class="card-header">
+            <h3 class="card-title">Results</h3>
+          </div>
+          <div class="card-body">
+            {% if tally_winners %}
+              <h5 class="mb-2"><strong>Elected</strong></h5>
+              <ol class="mb-3">
+                {% for w in tally_winners %}
+                  <li>
+                    {{ w.full_name }}
+                    (<a href="{% url 'user-profile' w.username %}">{{ w.username }}</a>)
+                  </li>
+                {% endfor %}
+              </ol>
+            {% endif %}
+
+            {% if results_stats.ballots_cast is not None %}
+              <h5 class="mb-2"><strong>Participation</strong></h5>
+              <dl class="row mb-3">
+                <dt class="col-sm-5">Ballots cast</dt>
+                <dd class="col-sm-7 mb-0">{{ results_stats.ballots_cast }}</dd>
+                <dt class="col-sm-5">Votes cast (weight)</dt>
+                <dd class="col-sm-7 mb-0">{{ results_stats.votes_cast }}</dd>
+                <dt class="col-sm-5">Eligible voters</dt>
+                <dd class="col-sm-7 mb-0">{{ results_stats.eligible_voters }}</dd>
+                <dt class="col-sm-5">Eligible votes (weight)</dt>
+                <dd class="col-sm-7 mb-0">{{ results_stats.eligible_votes }}</dd>
+              </dl>
+
+              {% if results_stats.eligible_breakdown %}
+                <p class="mb-2"><strong>Eligibility by membership type</strong></p>
+                <p class="text-muted small mb-2">Users with multiple memberships may appear in multiple rows.</p>
+                <div class="table-responsive">
+                  <table class="table table-sm table-striped mb-3">
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th class="text-right">Votes each</th>
+                        <th class="text-right">Eligible voters</th>
+                        <th class="text-right">Eligible votes (weight)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in results_stats.eligible_breakdown %}
+                        <tr>
+                          <td>{{ row.membership_type__name }} ({{ row.membership_type__code }})</td>
+                          <td class="text-right">{{ row.membership_type__votes }}</td>
+                          <td class="text-right">{{ row.voters }}</td>
+                          <td class="text-right">{{ row.vote_weight_total }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="row">
+    <div class="col-12">
+      <div class="card card-outline card-success">
+        <div class="card-header">
+          <h3 class="card-title">Candidates</h3>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            {% for item in candidate_cards %}
+              <div class="col-12 col-md-6 col-xl-6 mb-3">
+                <div class="card card-primary h-100">
+                    <div class="card-header">
+                      <h3 class="card-title mb-0">
+                        {% if item.candidate_user %}
+                          {{ item.candidate_user.get_full_name }}
+                        {% endif %}
+                        (<a href="{% url 'user-profile' item.candidate.freeipa_username %}">{{ item.candidate.freeipa_username }}</a>)
+                      </h3>
+                    </div>
+                    <div class="card-body">
+                      {% if item.candidate.description %}
+                        <p class="mb-2">{{ item.candidate.description|linebreaksbr }}</p>
+                      {% endif %}
+
+                      {% if item.candidate.url %}
+                        <p class="mb-2">
+                          <a href="{{ item.candidate.url }}" target="_blank" rel="noopener noreferrer">{{ item.candidate.url }}</a>
+                        </p>
+                      {% endif %}
+
+                      <hr />
+                      <p class="mb-0">
+                        <strong>Nominated by</strong>
+                          —
+                          {{ item.nominator_user.get_full_name }}
+                          (<a href="{% url 'user-profile' item.nominator_user.username %}">{{ item.nominator_user.username }}</a>)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+            {% endfor %}
+          </div>
+
+          {% if exclusion_group_messages %}
+            <div class="card card-outline card-danger mt-3">
+              <div class="card-body">
+                {% for msg in exclusion_group_messages %}
+                  <p class="mb-0{% if not forloop.last %} mb-2{% endif %}">
+                    {{ msg }}
+                  </p>
+                {% endfor %}
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if can_manage_elections %}
+    <div class="row">
+      <div class="col-12">
+        <div class="card card-outline card-primary collapsed-card">
+          <div class="card-header">
+            <h3 class="card-title">Eligible voters</h3>
+
+            <div class="card-tools">
+              <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                <i class="fas fa-plus"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="card-body" style="display: none;">
+            {% if election.status == 'open' %}
+              <div class="mb-3">
+                <form method="post" action="{% url 'election-resend-credentials' election.id %}" class="mb-3">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-outline-primary btn-sm">Resend all credentials</button>
+                </form>
+
+                <form method="post" action="{% url 'election-resend-credentials' election.id %}" class="mb-0">
+                  {% csrf_token %}
+                  <label class="sr-only" for="resend-credential-username">Username</label>
+                  <div class="input-group input-group-sm">
+                    <input
+                      id="resend-credential-username"
+                      type="text"
+                      name="username"
+                      class="form-control"
+                      placeholder="username"
+                      list="eligible-voter-usernames"
+                      autocomplete="off"
+                    >
+                    <div class="input-group-append">
+                      <button type="submit" class="btn btn-outline-primary">Resend voting credential</button>
+                    </div>
+                  </div>
+                  {% if eligible_voter_usernames %}
+                    <datalist id="eligible-voter-usernames">
+                      {% for u in eligible_voter_usernames %}
+                        <option value="{{ u }}"></option>
+                      {% endfor %}
+                    </datalist>
+                  {% endif %}
+                </form>
+              </div>
+            {% endif %}
+
+            {% include 'core/_widget_grid.html' %}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  {% if can_manage_elections and turnout_stats and election.status == 'open' %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="{% static 'core/js/election_turnout_chart.js' %}"></script>
+  {% endif %}
+{% endblock %}

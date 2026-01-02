@@ -24,6 +24,14 @@ from import_export.admin import ImportMixin
 from python_freeipa import exceptions
 
 from core.agreements import missing_required_agreements_for_user_in_group
+from core.elections_services import (
+    ElectionError,
+    close_election,
+    issue_voting_credentials_from_memberships,
+    issue_voting_credentials_from_memberships_detailed,
+    send_voting_credential_email,
+    tally_election,
+)
 from core.membership_csv_import import (
     MembershipCSVConfirmImportForm,
     MembershipCSVImportForm,
@@ -41,6 +49,12 @@ from .backends import (
 )
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import (
+    AuditLogEntry,
+    Ballot,
+    Candidate,
+    Election,
+    ExclusionGroup,
+    ExclusionGroupCandidate,
     FreeIPAPermissionGrant,
     IPAFASAgreement,
     IPAGroup,
@@ -48,6 +62,7 @@ from .models import (
     MembershipCSVImportLink,
     MembershipType,
     Organization,
+    VotingCredential,
 )
 
 logger = logging.getLogger(__name__)
@@ -1242,6 +1257,207 @@ class MembershipTypeAdmin(admin.ModelAdmin):
         if obj is not None and "code" not in readonly:
             readonly.append("code")
         return tuple(readonly)
+
+
+class CandidateInline(admin.TabularInline):
+    model = Candidate
+    extra = 0
+    fields = ("freeipa_username", "nominated_by", "url", "description", "ordering")
+    ordering = ("ordering", "id")
+
+
+@admin.register(Election)
+class ElectionAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "status",
+        "url",
+        "start_datetime",
+        "end_datetime",
+        "number_of_seats",
+    )
+    list_filter = ("status",)
+    search_fields = ("name",)
+    inlines = (CandidateInline,)
+    actions = (
+        "issue_credentials_from_memberships_action",
+        "issue_and_email_credentials_from_memberships_action",
+        "close_elections_action",
+        "tally_elections_action",
+    )
+
+    def issue_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
+        for election in queryset:
+            try:
+                affected = issue_voting_credentials_from_memberships(election=election)
+            except ElectionError as exc:
+                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
+                continue
+            self.message_user(
+                request,
+                f"{election}: issued/updated {affected} credential(s) from memberships.",
+                level=messages.SUCCESS,
+            )
+
+    issue_credentials_from_memberships_action.short_description = "Issue credentials from memberships"  # type: ignore[attr-defined]
+
+    def issue_and_email_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
+        for election in queryset:
+            try:
+                credentials = issue_voting_credentials_from_memberships_detailed(election=election)
+            except ElectionError as exc:
+                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
+                continue
+
+            emailed = 0
+            skipped = 0
+            failures = 0
+            for cred in credentials:
+                username = str(cred.freeipa_username or "").strip()
+                if not username:
+                    skipped += 1
+                    continue
+
+                try:
+                    user = FreeIPAUser.get(username)
+                except Exception:
+                    failures += 1
+                    continue
+
+                if user is None or not user.email:
+                    skipped += 1
+                    continue
+
+                try:
+                    send_voting_credential_email(
+                        request=request,
+                        election=election,
+                        username=username,
+                        email=user.email,
+                        credential_public_id=str(cred.public_id),
+                    )
+                except Exception:
+                    failures += 1
+                    continue
+                emailed += 1
+
+            if emailed:
+                self.message_user(
+                    request,
+                    f"{election}: emailed {emailed} credential(s).",
+                    level=messages.SUCCESS,
+                )
+            if skipped:
+                self.message_user(
+                    request,
+                    f"{election}: skipped {skipped} credential(s) (missing username/email).",
+                    level=messages.WARNING,
+                )
+            if failures:
+                self.message_user(
+                    request,
+                    f"{election}: failed to email {failures} credential(s).",
+                    level=messages.ERROR,
+                )
+
+    issue_and_email_credentials_from_memberships_action.short_description = (
+        "Issue credentials from memberships and email voters"
+    )  # type: ignore[attr-defined]
+
+    def close_elections_action(self, request: HttpRequest, queryset) -> None:
+        for election in queryset:
+            try:
+                close_election(election=election)
+            except ElectionError as exc:
+                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
+                continue
+            self.message_user(request, f"{election}: closed.", level=messages.SUCCESS)
+
+    close_elections_action.short_description = "Close election(s)"  # type: ignore[attr-defined]
+
+    def tally_elections_action(self, request: HttpRequest, queryset) -> None:
+        for election in queryset:
+            try:
+                tally_election(election=election)
+            except ElectionError as exc:
+                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
+                continue
+            self.message_user(request, f"{election}: tallied.", level=messages.SUCCESS)
+
+    tally_elections_action.short_description = "Tally election(s)"  # type: ignore[attr-defined]
+
+
+@admin.register(Candidate)
+class CandidateAdmin(admin.ModelAdmin):
+    list_display = ("freeipa_username", "nominated_by", "election", "ordering")
+    list_filter = ("election",)
+    search_fields = ("freeipa_username", "nominated_by", "election__name")
+    ordering = ("election", "ordering", "id")
+
+
+class ExclusionGroupCandidateInline(admin.TabularInline):
+    model = ExclusionGroupCandidate
+    extra = 0
+    autocomplete_fields = ("candidate",)
+
+
+@admin.register(ExclusionGroup)
+class ExclusionGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "election", "max_elected")
+    list_filter = ("election",)
+    search_fields = ("name", "election__name")
+    ordering = ("election", "name", "id")
+    inlines = (ExclusionGroupCandidateInline,)
+
+
+@admin.register(VotingCredential)
+class VotingCredentialAdmin(admin.ModelAdmin):
+    list_display = ("election", "public_id", "freeipa_username", "weight", "created_at")
+    list_filter = ("election",)
+    search_fields = ("public_id", "freeipa_username")
+    ordering = ("-created_at", "id")
+
+
+@admin.register(Ballot)
+class BallotAdmin(admin.ModelAdmin):
+    list_display = ("election", "credential_public_id", "weight", "ballot_hash", "created_at")
+    list_filter = ("election",)
+    search_fields = ("credential_public_id", "ballot_hash")
+    ordering = ("-created_at", "id")
+    readonly_fields = ("election", "credential_public_id", "ranking", "weight", "ballot_hash", "created_at", "chain_hash", "previous_chain_hash")
+
+    @override
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+    
+    @override
+    def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+    
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: Any | None = ...) -> bool:
+        return False
+
+
+@admin.register(AuditLogEntry)
+class AuditLogEntryAdmin(admin.ModelAdmin):
+    list_display = ("election", "timestamp", "event_type", "is_public")
+    list_filter = ("election", "is_public", "event_type")
+    search_fields = ("event_type",)
+    ordering = ("-timestamp", "id")
+    readonly_fields = ("election", "timestamp", "event_type", "payload", "is_public")
+
+    @override
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    @override
+    def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+    
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: Any | None = ...) -> bool:
+        return False
 
 
 @admin.register(MembershipCSVImportLink)

@@ -1,0 +1,174 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block title %}Vote{% endblock %}
+
+{% block extra_head %}
+  <script src="{% static 'core/js/election_vote.js' %}" defer></script>
+{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Vote: {{ election.name }}</h1>
+  <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}">Back to election detail</a>
+{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="card card-primary">
+        <div class="card-header">
+          <h3 class="card-title">Ballot</h3>
+        </div>
+        <div class="card-body">
+          <form id="election-vote-form" method="post" action="{% url 'election-vote-submit' election.id %}">
+            {% csrf_token %}
+            <div class="form-group">
+              <label for="election-credential">Voting credential</label>
+              <input id="election-credential" class="form-control" type="text" name="credential_public_id" autocomplete="off" required />
+              <small class="form-text text-muted">Paste the credential you received. Keep it private.</small>
+              <small class="form-text text-muted mb-3">Submitting again with the same credential replaces your previous ballot.</small>
+              {% if voter_votes is not None %}
+                {% if voter_votes > 0 %}
+                  <p class="form-text mb-0">
+                    You have <strong>{{ voter_votes }}</strong> vote{{ voter_votes|pluralize }} for this election.
+                  </p>
+                  {% if voter_votes > 1 %}
+                    <small class="text-muted">
+                      These votes are applied as extra weight to your single ranked ballot.
+                    </small>
+                  {% endif %}
+                {% else %}
+                  <p class="form-text">You do not appear to be eligible for this election.</p>
+                {% endif %}
+              {% endif %}
+            </div>
+
+            <div class="form-group">
+              <label>Ranking</label>
+              <div id="election-ranking-list" class="mb-2"></div>
+              <input type="hidden" id="election-ranking-input" name="ranking" value="" />
+              <div class="text-danger small d-none" id="election-ranking-error" role="alert"></div>
+              <div class="text-muted small" id="election-ranking-hint">Add a candidate to your ranking from the "Candidates" box.</div>
+              <div class="text-muted small d-none" id="election-ranking-order">Use the buttons on the right to order your ranking.</div>
+            </div>
+
+            <div class="alert d-none" id="election-vote-result" role="alert"></div>
+
+            <div class="d-none" id="election-receipt-box">
+              <label class="text-muted" for="election-receipt">Receipt</label>
+              <div class="input-group">
+                <input id="election-receipt" class="form-control" type="text" readonly />
+                <div class="input-group-append">
+                  <button type="button" class="btn btn-outline-secondary" id="election-receipt-copy">Copy</button>
+                </div>
+              </div>
+
+              <div class="mt-2">
+                <label class="text-muted" for="election-nonce">Ballot Nonce</label>
+                <input id="election-nonce" class="form-control" type="text" readonly />
+                <div class="form-text text-muted">Save this together with your receipt.</div>
+              </div>
+
+              <div class="mt-2">
+                <label class="text-muted" for="election-previous-chain-hash">Previous chain hash</label>
+                <input id="election-previous-chain-hash" class="form-control" type="text" readonly />
+              </div>
+
+              <div class="mt-2">
+                <label class="text-muted" for="election-chain-hash">Chain hash</label>
+                <input id="election-chain-hash" class="form-control" type="text" readonly />
+              </div>
+            </div>
+
+            <button id="election-submit-button" type="submit" class="btn btn-primary btn-block" {% if not can_submit_vote %}disabled aria-disabled="true"{% endif %}>Submit vote</button>
+
+            <div class="mt-3">
+              <details>
+                <summary class="text-muted">No-JS fallback</summary>
+                <p class="text-muted mb-2">If you can't use the ranking UI, enter usernames as comma-separated values (first choice first).</p>
+                <input class="form-control" type="text" name="ranking_usernames" placeholder="e.g. alice,bob,charlie" />
+              </details>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card card-primary">
+        <div class="card-header">
+          <h3 class="card-title">Candidates</h3>
+        </div>
+        <div class="card-body">
+          {% for item in candidates %}
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <div class="text-truncate pr-2">
+                <div class="font-weight-bold">{{ item.label }}</div>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-primary"
+                data-action="election-add"
+                data-candidate-id="{{ item.candidate.id }}"
+                data-candidate-label="{{ item.label }}"
+              >
+                Add to ranking
+              </button>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-12 col-md-6">
+        <div class="card card-outline card-info">
+          <div class="card-header">
+            <h3 class="card-title">How ranking works</h3>
+          </div>
+          <div class="card-body">
+            <p class="mb-2">Rank candidates in order of preference.</p>
+            <ul>
+              <li>Your 1st choice counts first.</li>
+              <li>If your top choice is elected with enough support, or is eliminated, your vote can transfer to your next ranked choice.</li>
+              <li>If you stop ranking, your vote will no longer transfer.</li>
+              <li>All rankings are treated equally — ranking additional candidates does not disadvantage your higher preferences.</li>
+            </ul>
+
+            <p class="mt-2 mb-0">Votes are weighted according to membership or sponsorship level. You submit one ranked ballot, and all rankings follow the same rules.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-md-6">
+        <div class="card card-outline card-info">
+          <div class="card-header">
+            <h3 class="card-title">How winners are chosen</h3>
+          </div>
+
+          <div class="card-body">
+            <p class="mb-2">
+              This election uses a ranked-choice system called
+              <strong><a href="https://en.wikipedia.org/wiki/Single_transferable_vote">Single Transferable Vote (STV)</a></strong>,
+              designed to select multiple winners fairly.
+            </p>
+
+            <ul class="mb-3">
+              <li>Candidates are elected once they have enough total support.</li>
+              <li>If a candidate has more support than needed, the extra portion of votes is shared with voters' next choices.</li>
+              <li>If a candidate is eliminated, their votes are transferred to the next ranked candidates.</li>
+              <li>This process continues until all open seats are filled.</li>
+            </ul>
+
+            <p class="mb-0">
+              Votes are counted using the <strong><a href="https://en.wikipedia.org/wiki/Counting_single_transferable_votes#Meek">Meek STV method</a></strong>,
+              which uses a proportional quota and fractional transfers. Vote transfers are adjusted gradually, and parts of a vote
+              may be shared between candidates, so that elected candidates receive exactly the amount of support needed and remaining
+              support follows voter preferences. This ensures accurate results that do not depend on counting order.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

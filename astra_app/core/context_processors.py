@@ -24,12 +24,18 @@ def membership_review(request) -> dict[str, object]:
 
     user = request.user
 
-    has_has_perm = hasattr(user, "has_perm")
-    membership_can_add = bool(has_has_perm and user.has_perm(ASTRA_ADD_MEMBERSHIP))
-    membership_can_change = bool(has_has_perm and user.has_perm(ASTRA_CHANGE_MEMBERSHIP))
-    membership_can_delete = bool(has_has_perm and user.has_perm(ASTRA_DELETE_MEMBERSHIP))
-    membership_can_view = bool(has_has_perm and user.has_perm(ASTRA_VIEW_MEMBERSHIP))
-    mailmerge_can_add = bool(has_has_perm and user.has_perm(ASTRA_ADD_MAILMERGE))
+    try:
+        membership_can_add = bool(user.has_perm(ASTRA_ADD_MEMBERSHIP))
+        membership_can_change = bool(user.has_perm(ASTRA_CHANGE_MEMBERSHIP))
+        membership_can_delete = bool(user.has_perm(ASTRA_DELETE_MEMBERSHIP))
+        membership_can_view = bool(user.has_perm(ASTRA_VIEW_MEMBERSHIP))
+        mailmerge_can_add = bool(user.has_perm(ASTRA_ADD_MAILMERGE))
+    except Exception:
+        membership_can_add = False
+        membership_can_change = False
+        membership_can_delete = False
+        membership_can_view = False
+        mailmerge_can_add = False
 
     # Requests UI + approve/reject/ignore is guarded by "add".
     pending_count = (
@@ -51,12 +57,12 @@ def organization_nav(request) -> dict[str, object]:
         return {"has_organizations": False}
 
     user = request.user
-    if not hasattr(user, "is_authenticated") or not user.is_authenticated:
+    try:
+        if not user.is_authenticated:
+            return {"has_organizations": False}
+        username = str(user.get_username() or "").strip()
+    except Exception:
         return {"has_organizations": False}
-    if not hasattr(user, "get_username"):
-        return {"has_organizations": False}
-
-    username = str(user.get_username() or "").strip()
     if not username:
         return {"has_organizations": False}
 

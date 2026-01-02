@@ -192,3 +192,35 @@ class MailMergeTests(TestCase):
         self.assertEqual(kwargs["html_message"], "<p>Hi Alice User</p>")
         self.assertEqual(kwargs["cc"], ["cc1@example.com", "cc2@example.com"])
         self.assertEqual(kwargs["bcc"], ["bcc1@example.com"])
+
+
+class UnifiedEmailPreviewMailMergeTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def setUp(self) -> None:
+        super().setUp()
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_MAILMERGE,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name="membership-committee",
+        )
+
+    def test_unified_preview_requires_loaded_recipients(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("mail-merge-render-preview"),
+                data={
+                    "subject": "Hello {{ displayname }}",
+                    "html_content": "<p>{{ displayname }}</p>",
+                    "text_content": "{{ displayname }}",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Load recipients", resp.json().get("error", ""))

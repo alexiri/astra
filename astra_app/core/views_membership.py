@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import post_office.mail
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Q
@@ -69,7 +69,6 @@ def _pagination_context(*, paginator: Paginator, page_obj, page_url_prefix: str)
     }
 
 
-@login_required(login_url="/login/")
 def membership_request(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     if not username:
@@ -134,7 +133,6 @@ def membership_request(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_audit_log(request: HttpRequest) -> HttpResponse:
     q = _normalize_str(request.GET.get("q"))
@@ -193,7 +191,6 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_audit_log_organization(request: HttpRequest, organization_id: int) -> HttpResponse:
     q = _normalize_str(request.GET.get("q"))
@@ -240,7 +237,6 @@ def membership_audit_log_organization(request: HttpRequest, organization_id: int
     )
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_audit_log_user(request: HttpRequest, username: str) -> HttpResponse:
     username = _normalize_str(username)
@@ -285,7 +281,6 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
     )
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
     approved_email_templates = _membership_request_email_templates(name_prefix="membership-request-approved")
@@ -346,7 +341,6 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
@@ -392,7 +386,6 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
-@login_required(login_url="/login/")
 def membership_status_note_update(request: HttpRequest, username: str) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
@@ -442,7 +435,6 @@ def membership_status_note_update(request: HttpRequest, username: str) -> HttpRe
     return redirect(redirect_to)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
@@ -630,7 +622,6 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     return redirect("membership-requests")
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
@@ -689,7 +680,6 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(redirect_to)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
@@ -834,7 +824,6 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(redirect_to)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
@@ -908,7 +897,6 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(redirect_to)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_set_expiry(request: HttpRequest, username: str, membership_type_code: str) -> HttpResponse:
     if request.method != "POST":
@@ -951,7 +939,6 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
     return redirect("user-profile", username=username)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_terminate(request: HttpRequest, username: str, membership_type_code: str) -> HttpResponse:
     if request.method != "POST":
@@ -988,7 +975,6 @@ def membership_terminate(request: HttpRequest, username: str, membership_type_co
     return redirect("user-profile", username=username)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
 def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
     if request.method != "POST":
@@ -1045,7 +1031,6 @@ def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: i
     return redirect(redirect_to)
 
 
-@login_required(login_url="/login/")
 @permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
 def organization_sponsorship_terminate(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
     if request.method != "POST":

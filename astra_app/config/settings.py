@@ -77,6 +77,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'core.middleware.FreeIPAServiceClientReuseMiddleware',
     'core.middleware.FreeIPAAuthenticationMiddleware',
+    'core.middleware.LoginRequiredMiddleware',
     'core.middleware_admin_log.AdminShadowUserLogEntryMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -132,6 +133,12 @@ DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
 # context). Example: https://accounts.almalinux.org
 PUBLIC_BASE_URL = env("PUBLIC_BASE_URL", default="http://localhost:8000")
 
+# Elections
+ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = env.int(
+    "ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS",
+    default=0 if DEBUG else 90,
+)
+
 # Membership workflow
 MEMBERSHIP_EXPIRING_SOON_DAYS = env.int("MEMBERSHIP_EXPIRING_SOON_DAYS", default=60)
 MEMBERSHIP_VALIDITY_DAYS = env.int("MEMBERSHIP_VALIDITY_DAYS", default=365)
@@ -169,6 +176,16 @@ PASSWORD_RESET_EMAIL_TEMPLATE_NAME = env(
 PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME = env(
     "PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME",
     default="password-reset-success",
+)
+
+ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME = env(
+    "ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME",
+    default="election-voting-credential",
+)
+
+ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME = env(
+    "ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME",
+    default="election-vote-receipt",
 )
 
 # Queue all Django mail through django-post_office.

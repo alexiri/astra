@@ -196,7 +196,7 @@
     if (!templateId) return;
 
     try {
-      var url = '/email-tools/mail-merge/templates/' + encodeURIComponent(templateId) + '/';
+      var url = '/email-tools/templates/' + encodeURIComponent(templateId) + '/json/';
       var resp = await window.fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       var payload = await resp.json();
@@ -234,6 +234,20 @@
     if (saveBtn) {
       saveBtn.addEventListener('click', function (e) {
         e.preventDefault();
+        var jq = window.jQuery;
+        if (jq && jq.fn && typeof jq.fn.modal === 'function') {
+          jq('#templated-email-save-modal').modal('show');
+          return;
+        }
+
+        // Fallback if Bootstrap modal isn't available.
+        var ok = false;
+        try {
+          ok = window.confirm('Overwrite the selected email template with the current subject and contents?');
+        } catch (_e) {
+          ok = false;
+        }
+        if (!ok) return;
         setAction('save');
         var form = $('mailmerge-form');
         if (form) form.submit();
@@ -244,13 +258,70 @@
     if (saveAsBtn) {
       saveAsBtn.addEventListener('click', function (e) {
         e.preventDefault();
-        var name = window.prompt('New template name:');
+        var jq = window.jQuery;
+        if (jq && jq.fn && typeof jq.fn.modal === 'function') {
+          var nameEl = $('templated-email-save-as-name');
+          if (nameEl) nameEl.value = '';
+          jq('#templated-email-save-as-modal').modal('show');
+          try {
+            jq('#templated-email-save-as-modal').one('shown.bs.modal', function () {
+              var el = document.getElementById('templated-email-save-as-name');
+              if (el && el.focus) el.focus();
+            });
+          } catch (_e) {
+            // Ignore.
+          }
+          return;
+        }
+
+        // Fallback if Bootstrap modal isn't available.
+        var name = '';
+        try {
+          name = String(window.prompt('New template name:') || '').trim();
+        } catch (_e) {
+          name = '';
+        }
         if (!name) return;
-        $('mailmerge-save-as-name').value = String(name).trim();
+        $('mailmerge-save-as-name').value = name;
         setAction('save_as');
         var form = $('mailmerge-form');
         if (form) form.submit();
       });
+    }
+
+    // Wire modal confirm forms.
+    var saveModal = $('templated-email-save-modal');
+    if (saveModal) {
+      var formEl = saveModal.querySelector('form');
+      if (formEl) {
+        formEl.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var jq = window.jQuery;
+          if (jq && jq.fn && typeof jq.fn.modal === 'function') jq('#templated-email-save-modal').modal('hide');
+          setAction('save');
+          var form = $('mailmerge-form');
+          if (form) form.submit();
+        });
+      }
+    }
+
+    var saveAsModal = $('templated-email-save-as-modal');
+    if (saveAsModal) {
+      var formEl2 = saveAsModal.querySelector('form');
+      if (formEl2) {
+        formEl2.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var nameEl = $('templated-email-save-as-name');
+          var name = nameEl ? String(nameEl.value || '').trim() : '';
+          if (!name) return;
+          $('mailmerge-save-as-name').value = name;
+          var jq = window.jQuery;
+          if (jq && jq.fn && typeof jq.fn.modal === 'function') jq('#templated-email-save-as-modal').modal('hide');
+          setAction('save_as');
+          var form = $('mailmerge-form');
+          if (form) form.submit();
+        });
+      }
     }
 
     var htmlEl = $('id_html_content');

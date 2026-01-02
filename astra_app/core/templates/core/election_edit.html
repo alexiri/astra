@@ -1,0 +1,335 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block title %}Election edit{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+  <style>
+    /* Select2 default theme needs small tweaks to match AdminLTE/Bootstrap form-control sizing. */
+    .select2-container {
+      width: 100% !important;
+    }
+
+    .select2-container--default .select2-selection--single {
+      height: calc(2.25rem + 2px);
+      padding: 0.375rem 0.75rem;
+      border: 1px solid #ced4da;
+      border-radius: 0.25rem;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+      line-height: 1.5;
+      padding-left: 0;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__arrow {
+      height: calc(2.25rem + 2px);
+      top: 0;
+      right: 0.5rem;
+    }
+
+    #exclusion-groups-toggle .exclusion-groups-collapse-chevron {
+      display: inline-block;
+      transition: transform 150ms ease-in-out;
+    }
+
+    #exclusion-groups-toggle[aria-expanded="true"] .exclusion-groups-collapse-chevron {
+      transform: rotate(90deg);
+    }
+  </style>
+{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">{% if is_create %}New election{% else %}Election edit{% endif %}</h1>
+{% endblock %}
+
+{% block content %}
+  <form method="post" id="election-edit-form">
+    {% csrf_token %}
+    <input type="hidden" name="action" id="election-edit-action" value="" />
+    <input type="hidden" name="email_save_mode" id="election-edit-email-save-mode" value="" />
+    <input type="hidden" id="election-edit-has-election" value="{% if election %}1{% else %}0{% endif %}" />
+    <input type="hidden" id="election-edit-election-status" value="{% if election %}{{ election.status }}{% else %}draft{% endif %}" />
+    <input type="hidden" id="election-edit-original-email-template-id" value="{% if election and election.voting_email_template_id %}{{ election.voting_email_template_id }}{% else %}{% endif %}" />
+
+    <div class="row">
+      <div class="col-lg-9">
+        <div class="card card-outline card-primary">
+          <div class="card-header">
+            <h3 class="card-title">Election details</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="{{ details_form.name.id_for_label }}">Name</label>
+              {{ details_form.name }}
+              {% if details_form.name.errors %}<div class="text-danger small">{{ details_form.name.errors }}</div>{% endif %}
+            </div>
+
+            <div class="form-group">
+              <label for="{{ details_form.description.id_for_label }}">Description</label>
+              {{ details_form.description }}
+              {% if details_form.description.errors %}<div class="text-danger small">{{ details_form.description.errors }}</div>{% endif %}
+            </div>
+
+            <div class="form-group">
+              <label for="{{ details_form.url.id_for_label }}">URL</label>
+              {{ details_form.url }}
+              {% if details_form.url.errors %}<div class="text-danger small">{{ details_form.url.errors }}</div>{% endif %}
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-md-6">
+                <label for="{{ details_form.start_datetime.id_for_label }}">Start</label>
+                {{ details_form.start_datetime }}
+                {% if details_form.start_datetime.errors %}<div class="text-danger small">{{ details_form.start_datetime.errors }}</div>{% endif %}
+              </div>
+              <div class="form-group col-md-6">
+                <label for="{{ details_form.end_datetime.id_for_label }}">End</label>
+                {{ details_form.end_datetime }}
+                {% if details_form.end_datetime.errors %}<div class="text-danger small">{{ details_form.end_datetime.errors }}</div>{% endif %}
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-md-6">
+                <label for="{{ details_form.number_of_seats.id_for_label }}">Number of seats</label>
+                {{ details_form.number_of_seats }}
+                {% if details_form.number_of_seats.errors %}<div class="text-danger small">{{ details_form.number_of_seats.errors }}</div>{% endif %}
+              </div>
+              <div class="form-group col-md-6">
+                <label>Status</label>
+                <input class="form-control" type="text" value="{% if election %}{{ election.status }}{% else %}draft{% endif %}" readonly />
+              </div>
+            </div>
+
+            {% if details_form.non_field_errors %}<div class="text-danger">{{ details_form.non_field_errors }}</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-3">
+        <div class="card card-outline card-secondary">
+          <div class="card-header">
+            <h3 class="card-title">Actions</h3>
+          </div>
+          <div class="card-body">
+            <button type="submit" class="btn btn-primary btn-block" onclick="document.getElementById('election-edit-action').value='save_draft'">
+              Save Draft
+            </button>
+
+            <button
+              type="button"
+              class="btn btn-success btn-block"
+              {% if not election or election.status != 'draft' %}disabled{% endif %}
+              {% if election and election.status == 'draft' %}data-toggle="modal" data-target="#start-election-modal"{% endif %}
+            >
+              Start Election
+            </button>
+
+            <div class="text-muted small mt-2">
+              Starting an election sends credential emails to all eligible voters and disables edits.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="start-election-modal" tabindex="-1" role="dialog" aria-labelledby="start-election-modal-label" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="start-election-modal-label">Start election?</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-2">This will open the election and email voting credentials to all eligible voters.</p>
+            <p class="small mb-0">Eligible voters: <strong>{{ eligible_usernames_count }}</strong></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'">Start election &amp; send credentials</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-12">
+        <div class="card card-outline card-warning">
+          <div class="card-header">
+            <h3 class="card-title">Candidates &amp; exclusion groups</h3>
+          </div>
+          <div class="card-body">
+            <div class="text-muted mb-3">Eligible members: {{ eligible_usernames_count }}</div>
+
+            {{ candidate_formset.management_form }}
+
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th style="width: 18%">Candidate</th>
+                    <th style="width: 18%">Nominated by</th>
+                    <th>Blurb</th>
+                    <th style="width: 22%">URL</th>
+                    <th style="width: 6%">Remove</th>
+                  </tr>
+                </thead>
+                <tbody id="candidates-formset-body">
+                  {% for f in candidate_formset.forms %}
+                    <tr class="candidate-form-row">
+                      <td>
+                        {{ f.id }}
+                        {{ f.freeipa_username }}
+                        {% if f.freeipa_username.errors %}<div class="text-danger small">{{ f.freeipa_username.errors }}</div>{% endif %}
+                      </td>
+                      <td>
+                        {{ f.nominated_by }}
+                        {% if f.nominated_by.errors %}<div class="text-danger small">{{ f.nominated_by.errors }}</div>{% endif %}
+                      </td>
+                      <td>
+                        {{ f.description }}
+                        {% if f.description.errors %}<div class="text-danger small">{{ f.description.errors }}</div>{% endif %}
+                      </td>
+                      <td>
+                        {{ f.url }}
+                        {% if f.url.errors %}<div class="text-danger small">{{ f.url.errors }}</div>{% endif %}
+                      </td>
+                      <td class="text-center">
+                        <div class="d-none">{{ f.DELETE }}</div>
+                        <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+
+            <button type="button" class="btn btn-outline-primary btn-sm" id="candidates-add-row">Add candidate</button>
+
+            <template id="candidates-empty-form">
+              <tr class="candidate-form-row">
+                <td>
+                  {{ candidate_formset.empty_form.id }}
+                  {{ candidate_formset.empty_form.freeipa_username }}
+                </td>
+                <td>{{ candidate_formset.empty_form.nominated_by }}</td>
+                <td>{{ candidate_formset.empty_form.description }}</td>
+                <td>{{ candidate_formset.empty_form.url }}</td>
+                <td class="text-center">
+                  <div class="d-none">{{ candidate_formset.empty_form.DELETE }}</div>
+                  <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                </td>
+              </tr>
+            </template>
+
+            <hr />
+
+            <a class="text-muted" id="exclusion-groups-toggle" data-toggle="collapse" href="#exclusion-groups-collapse" role="button" aria-expanded="false" aria-controls="exclusion-groups-collapse">
+              <span aria-hidden="true" class="mr-1 exclusion-groups-collapse-chevron">▸</span>
+              Configure exclusion groups
+            </a>
+
+            <div class="collapse mt-2" id="exclusion-groups-collapse">
+              <div class="card card-body">
+                {{ group_formset.management_form }}
+
+                <div class="table-responsive">
+                  <table class="table table-sm mb-2">
+                    <thead>
+                      <tr>
+                        <th style="width: 30%">Name</th>
+                        <th style="width: 12%">Max elected</th>
+                        <th>Candidates</th>
+                        <th style="width: 6%">Remove</th>
+                      </tr>
+                    </thead>
+                    <tbody id="groups-formset-body">
+                      {% for g in group_formset.forms %}
+                        <tr class="group-form-row">
+                          <td>
+                            {{ g.id }}
+                            {{ g.name }}
+                            {% if g.name.errors %}<div class="text-danger small">{{ g.name.errors }}</div>{% endif %}
+                          </td>
+                          <td>
+                            {{ g.max_elected }}
+                            {% if g.max_elected.errors %}<div class="text-danger small">{{ g.max_elected.errors }}</div>{% endif %}
+                          </td>
+                          <td>
+                            {{ g.candidate_usernames }}
+                            {% if g.candidate_usernames.errors %}<div class="text-danger small">{{ g.candidate_usernames.errors }}</div>{% endif %}
+                            {% if g.candidate_usernames.help_text %}<div class="text-muted small">{{ g.candidate_usernames.help_text }}</div>{% endif %}
+                          </td>
+                          <td class="text-center">
+                            <div class="d-none">{{ g.DELETE }}</div>
+                            <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button type="button" class="btn btn-outline-primary btn-sm" id="groups-add-row">Add exclusion group</button>
+
+                <template id="groups-empty-form">
+                  <tr class="group-form-row">
+                    <td>
+                      {{ group_empty_form.id }}
+                      {{ group_empty_form.name }}
+                    </td>
+                    <td>{{ group_empty_form.max_elected }}</td>
+                    <td>{{ group_empty_form.candidate_usernames }}</td>
+                    <td class="text-center">
+                      <div class="d-none">{{ group_empty_form.DELETE }}</div>
+                      <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                    </td>
+                  </tr>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-12">
+        {% include "core/_templated_email_compose.html" with card_title="Voting credential email" templates=templates form=email_form rendered_preview=rendered_preview %}
+      </div>
+    </div>
+
+    <div class="modal fade" id="edit-template-changed-modal" tabindex="-1" role="dialog" aria-labelledby="edit-template-changed-modal-label" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="edit-template-changed-modal-label">Email template changed</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-0">You changed the email template selection. Do you want to save the new template + contents to this election, or keep the previously saved email configuration?</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-outline-primary" id="edit-keep-existing-email-btn">Keep previously saved email</button>
+            <button type="button" class="btn btn-primary" id="edit-save-email-btn">Save template + contents</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
+  <script src="{% static 'core/js/election_edit.js' %}"></script>
+{% endblock %}

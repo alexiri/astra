@@ -1,0 +1,369 @@
+from __future__ import annotations
+
+import datetime
+from unittest.mock import patch
+
+from django.test import TestCase, override_settings
+from django.urls import reverse
+from django.utils import timezone
+
+from core.backends import FreeIPAUser
+from core.models import (
+    Candidate,
+    Election,
+    ExclusionGroup,
+    ExclusionGroupCandidate,
+    FreeIPAPermissionGrant,
+    Membership,
+    MembershipType,
+)
+from core.permissions import ASTRA_ADD_ELECTION
+
+
+class ElectionsListNewElectionButtonTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_elections_list_hides_new_button_without_permission(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "displayname": ["Viewer User"], "memberof_group": []})
+
+        now = timezone.now()
+        Election.objects.create(
+            name="Some election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("elections"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, reverse("election-edit", args=[0]))
+
+    def test_elections_list_shows_new_button_with_permission(self) -> None:
+        self._login_as_freeipa_user("admin")
+
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        Election.objects.create(
+            name="Some election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        resp = self.client.get(reverse("elections"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("election-edit", args=[0]))
+
+
+class ElectionEditPermissionTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_new_election_requires_permission(self) -> None:
+        self._login_as_freeipa_user("viewer")
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        # We expect either 403 or redirect-to-users; either blocks access.
+        self.assertIn(resp.status_code, {302, 403})
+
+    def test_eligible_users_search_requires_permission_returns_json_403(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(
+                reverse("election-eligible-users-search", args=[0]),
+                data={"q": "al"},
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json().get("error"), "Permission denied.")
+
+    def test_new_election_allows_permissioned_user(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+    def test_new_election_post_save_draft_creates_election(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        resp = self.client.post(
+            reverse("election-edit", args=[0]),
+            data={
+                "action": "save_draft",
+                "name": "New draft",
+                "description": "",
+                "url": "",
+                "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": "1",
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+                # Candidate formset: empty extra form.
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "0",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": "",
+                "candidates-0-freeipa_username": "",
+                "candidates-0-nominated_by": "",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                # No exclusion groups.
+                "groups-TOTAL_FORMS": "0",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Election.objects.filter(name="New draft", status=Election.Status.draft).count(), 1)
+
+    def test_new_election_includes_scripts_in_correct_order_for_select2(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        jquery_i = html.find("admin/js/vendor/jquery/jquery.js")
+        select2_i = html.find("admin/js/vendor/select2/select2.full.js")
+        election_js_i = html.find("core/js/election_edit.js")
+
+        self.assertNotEqual(jquery_i, -1)
+        self.assertNotEqual(select2_i, -1)
+        self.assertNotEqual(election_js_i, -1)
+        self.assertLess(jquery_i, select2_i)
+        self.assertLess(select2_i, election_js_i)
+
+    def test_new_election_empty_form_has_ajax_url_for_dynamic_rows(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # New rows are built from the <template id="candidates-empty-form"> contents.
+        self.assertIn('id="candidates-empty-form"', html)
+        self.assertIn("data-ajax-url", html)
+
+
+class ElectionEditExclusionGroupsSelectTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_groups_empty_form_includes_candidate_options(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alex",
+            nominated_by="alex",
+            description="",
+            url="",
+            ordering=1,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="andreberry",
+            nominated_by="alex",
+            description="",
+            url="",
+            ordering=2,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        start = html.find('id="groups-empty-form"')
+        self.assertNotEqual(start, -1)
+
+        end = html.find("</template>", start)
+        self.assertNotEqual(end, -1)
+
+        tmpl = html[start:end]
+        self.assertIn('value="alex"', tmpl)
+        self.assertIn('value="andreberry"', tmpl)
+
+    def test_groups_empty_form_has_ajax_url_for_candidate_search(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alex",
+            nominated_by="alex",
+            description="",
+            url="",
+            ordering=1,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        start = html.find('id="groups-empty-form"')
+        self.assertNotEqual(start, -1)
+
+        end = html.find("</template>", start)
+        self.assertNotEqual(end, -1)
+
+        tmpl = html[start:end]
+        self.assertNotIn("data-ajax-url", tmpl)
+        self.assertNotIn("/candidates/search/", tmpl)
+        self.assertNotIn("alx-select2", tmpl)
+
+
+@override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+class ElectionEditCreateModeGroupSelectionTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_create_mode_save_draft_allows_group_candidate_selection_before_first_save(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+        membership = Membership.objects.create(
+            target_username="alex",
+            membership_type=mt,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
+
+        resp = self.client.post(
+            reverse("election-edit", args=[0]),
+            data={
+                "action": "save_draft",
+                "name": "New draft",
+                "description": "",
+                "url": "",
+                "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": "1",
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+                # Candidate formset
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "0",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": "",
+                "candidates-0-freeipa_username": "alex",
+                "candidates-0-nominated_by": "alex",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                # Exclusion groups formset
+                "groups-TOTAL_FORMS": "1",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+                "groups-0-id": "",
+                "groups-0-name": "Employees of X",
+                "groups-0-max_elected": "1",
+                "groups-0-candidate_usernames": ["alex"],
+                "groups-0-DELETE": "",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        election = Election.objects.get(name="New draft")
+        self.assertEqual(Candidate.objects.filter(election=election, freeipa_username="alex").count(), 1)
+        group = ExclusionGroup.objects.get(election=election, name="Employees of X")
+        candidate = Candidate.objects.get(election=election, freeipa_username="alex")
+        self.assertEqual(
+            ExclusionGroupCandidate.objects.filter(exclusion_group=group, candidate=candidate).count(),
+            1,
+        )

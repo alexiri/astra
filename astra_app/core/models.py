@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
+import secrets
+import uuid
 from io import BytesIO
 from typing import override
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -910,6 +915,229 @@ class MembershipLog(models.Model):
             action=cls.Action.ignored,
             expires_at=None,
         )
+
+
+class Election(models.Model):
+    class Status(models.TextChoices):
+        draft = "draft", "Draft"
+        open = "open", "Open"
+        closed = "closed", "Closed"
+        tallied = "tallied", "Tallied"
+
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    url = models.URLField(blank=True, default="", max_length=2048)
+    start_datetime = models.DateTimeField()
+    end_datetime = models.DateTimeField()
+    number_of_seats = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.draft)
+
+    # Published machine-readable tally output.
+    tally_result = models.JSONField(blank=True, default=dict)
+
+    # Per-election voting credential email configuration.
+    # We snapshot the subject/body at election configuration time so the election can
+    # send the exact content the admin reviewed, even if the underlying template changes.
+    voting_email_template = models.ForeignKey(
+        "post_office.EmailTemplate",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="+",
+    )
+    voting_email_subject = models.TextField(blank=True, default="")
+    voting_email_html = models.TextField(blank=True, default="")
+    voting_email_text = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-start_datetime", "id")
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Candidate(models.Model):
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="candidates")
+    freeipa_username = models.CharField(max_length=255)
+    nominated_by = models.CharField(
+        max_length=255,
+        help_text="FreeIPA username of the person who nominated this candidate.",
+    )
+    description = models.TextField(blank=True, default="")
+    url = models.URLField(blank=True, default="", max_length=2048)
+    ordering = models.PositiveIntegerField(default=0)
+    tiebreak_uuid = models.UUIDField(default=uuid.uuid4, editable=False)
+
+    class Meta:
+        ordering = ("ordering", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["election", "freeipa_username"],
+                name="uniq_candidate_election_username",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.freeipa_username} ({self.election_id})"
+
+
+class ExclusionGroup(models.Model):
+    """A constraint on how many candidates in a set may be elected."""
+
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="exclusion_groups")
+    name = models.CharField(max_length=255)
+    max_elected = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Maximum number of candidates from this group that may be elected.",
+    )
+    public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    candidates = models.ManyToManyField(Candidate, through="ExclusionGroupCandidate", related_name="exclusion_groups")
+
+    class Meta:
+        ordering = ("election", "name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["election", "name"],
+                name="uniq_exclusiongroup_election_name",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.election_id}:{self.name}"
+
+
+class ExclusionGroupCandidate(models.Model):
+    exclusion_group = models.ForeignKey(ExclusionGroup, on_delete=models.CASCADE, related_name="group_candidates")
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name="candidate_groups")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["exclusion_group", "candidate"],
+                name="uniq_exclusiongroupcandidate_group_candidate",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.exclusion_group_id}:{self.candidate_id}"
+
+
+class VotingCredential(models.Model):
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="credentials")
+    public_id = models.CharField(max_length=128, unique=True, db_index=True)
+
+    # Nullable so we can remove the link post-close to improve privacy.
+    freeipa_username = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    weight = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["election", "freeipa_username"],
+                name="uniq_credential_election_username",
+                condition=Q(freeipa_username__isnull=False),
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.election_id}:{self.public_id}"
+
+    @classmethod
+    def generate_public_id(cls) -> str:
+        return secrets.token_urlsafe(32)
+
+
+class Ballot(models.Model):
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="ballots")
+
+    # Intentionally not a FK to avoid coupling ballots to any user-identifying row.
+    credential_public_id = models.CharField(max_length=128, db_index=True)
+
+    # Ordered list of Candidate PKs.
+    ranking = models.JSONField(blank=True, default=list)
+    weight = models.PositiveIntegerField(default=0)
+
+    superseded_by = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="supersedes",
+    )
+    is_counted = models.BooleanField(default=True)
+
+    ballot_hash = models.CharField(max_length=64, db_index=True)
+
+    previous_chain_hash = models.CharField(max_length=64)
+    chain_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["election", "credential_public_id"],
+                name="uniq_ballot_final_election_credential",
+                condition=Q(superseded_by__isnull=True),
+            ),
+            models.UniqueConstraint(
+                fields=["election", "credential_public_id"],
+                name="uniq_ballot_counted_election_credential",
+                condition=Q(is_counted=True),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["election", "created_at"], name="ballot_el_at"),
+        ]
+
+    def __str__(self) -> str:
+        return f"ballot:{self.election_id}:{self.ballot_hash[:12]}"
+
+    @classmethod
+    def compute_hash(
+        cls,
+        *,
+        election_id: int,
+        credential_public_id: str,
+        ranking: list[int],
+        weight: int,
+        nonce: str,
+    ) -> str:
+        payload: dict[str, object] = {
+            "election_id": election_id,
+            "credential_public_id": credential_public_id,
+            "ranking": ranking,
+            "weight": weight,
+            "nonce": nonce,
+        }
+
+        data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(data).hexdigest()
+
+
+class AuditLogEntry(models.Model):
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="audit_log")
+    timestamp = models.DateTimeField(auto_now_add=True)
+    event_type = models.CharField(max_length=64)
+    payload = models.JSONField(blank=True, default=dict)
+    is_public = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name_plural = "Audit log entries"
+        ordering = ("timestamp", "id")
+        indexes = [
+            models.Index(fields=["election", "timestamp"], name="audit_el_ts"),
+            models.Index(fields=["election", "is_public"], name="audit_el_pub"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.election_id}:{self.event_type}"
 
 
 class FreeIPAPermissionGrant(models.Model):

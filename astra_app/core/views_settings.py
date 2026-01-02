@@ -7,7 +7,6 @@ from urllib.parse import quote
 import post_office.mail
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -109,7 +108,6 @@ def _avatar_manage_url_for_provider(provider_path: str | None) -> str | None:
     return None
 
 
-@login_required(login_url="/login/")
 def avatar_manage(request: HttpRequest) -> HttpResponse:
     """Redirect the user to the appropriate place to manage their avatar."""
 
@@ -122,7 +120,6 @@ def avatar_manage(request: HttpRequest) -> HttpResponse:
     return redirect("settings-profile")
 
 
-@login_required(login_url="/login/")
 def settings_profile(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     fu = _get_full_user(username)
@@ -284,7 +281,6 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings_profile.html", context)
 
 
-@login_required(login_url="/login/")
 def settings_emails(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     fu = _get_full_user(username)
@@ -386,7 +382,6 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings_emails.html", context)
 
 
-@login_required(login_url="/login/")
 def settings_email_validate(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     token_string = _normalize_str(request.GET.get("token"))
@@ -452,7 +447,6 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url="/login/")
 def settings_keys(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     fu = _get_full_user(username)
@@ -534,7 +528,6 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings_keys.html", context)
 
 
-@login_required(login_url="/login/")
 def settings_password(request: HttpRequest) -> HttpResponse:
     username = request.user.get_username()
     form = PasswordChangeFreeIPAForm(request.POST or None)
@@ -580,7 +573,6 @@ def settings_password(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings_password.html", context)
 
 
-@login_required(login_url="/login/")
 def settings_agreements(request: HttpRequest) -> HttpResponse:
     username = _normalize_str(request.user.get_username())
     if not username:
@@ -633,7 +625,6 @@ def settings_agreements(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings_agreements.html", context)
 
 
-@login_required(login_url="/login/")
 def settings_agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
     username = _normalize_str(request.user.get_username())
     if not username:

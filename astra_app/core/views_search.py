@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.views_utils import _normalize_str
 
 
-@login_required(login_url="/login/")
 def global_search(request: HttpRequest) -> JsonResponse:
     q = _normalize_str(request.GET.get("q"))
     if not q:

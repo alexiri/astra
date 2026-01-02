@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -176,7 +175,6 @@ def _profile_context_for_user(
     }
 
 
-@login_required(login_url="/login/")
 def home(request: HttpRequest) -> HttpResponse:
     username = _normalize_str(request.user.get_username())
     if not username:
@@ -185,7 +183,6 @@ def home(request: HttpRequest) -> HttpResponse:
     return redirect("user-profile", username=username)
 
 
-@login_required(login_url="/login/")
 def user_profile(request: HttpRequest, username: str) -> HttpResponse:
     username = _normalize_str(username)
     if not username:
@@ -204,7 +201,6 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
     return render(request, "core/user_profile.html", context)
 
 
-@login_required(login_url="/login/")
 def users(request: HttpRequest) -> HttpResponse:
     users_list = FreeIPAUser.all()
     q = _normalize_str(request.GET.get("q"))

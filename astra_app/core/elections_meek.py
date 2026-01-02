@@ -1,0 +1,847 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from decimal import Decimal, localcontext
+
+
+@dataclass(frozen=True, slots=True)
+class _Candidate:
+    id: int
+    name: str
+    tiebreak_uuid: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ExclusionGroup:
+    public_id: str
+    max_elected: int
+    name: str
+    candidate_ids: frozenset[int]
+
+
+def _decimal(value: int | str | Decimal) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _ballot_ranking(ballot: Mapping[str, object]) -> list[int]:
+    ranking = ballot.get("ranking")
+    if not isinstance(ranking, list):
+        return []
+    return [int(x) for x in ranking]
+
+
+def _distribute_votes(
+    *,
+    ballots: Iterable[Mapping[str, object]],
+    retention: Mapping[int, Decimal],
+    continuing_ids: frozenset[int],
+) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+    incoming: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
+    retained: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
+
+    for ballot in ballots:
+        remaining = _decimal(int(ballot.get("weight") or 0))
+        if remaining <= 0:
+            continue
+
+        for cid in _ballot_ranking(ballot):
+            if remaining <= 0:
+                break
+            if cid not in continuing_ids:
+                continue
+
+            r = retention[cid]
+            if r <= 0:
+                continue
+
+            incoming[cid] += remaining
+            portion = remaining * r
+            if portion:
+                retained[cid] += portion
+                remaining -= portion
+
+    return incoming, retained
+
+
+def _first_preferences(*, ballots: Iterable[Mapping[str, object]], continuing_ids: frozenset[int]) -> dict[int, Decimal]:
+    first: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
+    for ballot in ballots:
+        w = _decimal(int(ballot.get("weight") or 0))
+        if w <= 0:
+            continue
+        for cid in _ballot_ranking(ballot):
+            if cid in continuing_ids:
+                first[cid] += w
+                break
+    return first
+
+
+def _format_candidate_list(
+    candidate_ids: Iterable[int],
+    *,
+    candidate_name_by_id: Mapping[int, str],
+) -> str:
+    named: list[str] = []
+    unnamed_count = 0
+    for cid in candidate_ids:
+        name = candidate_name_by_id.get(cid, "").strip()
+        if name:
+            named.append(name)
+        else:
+            unnamed_count += 1
+
+    if not named and unnamed_count == 0:
+        return "none"
+
+    items = list(named)
+    if unnamed_count == 1:
+        items.append("an unnamed candidate")
+    elif unnamed_count > 1:
+        items.append(f"{unnamed_count} unnamed candidates")
+
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def generate_meek_round_explanations(
+    round_data: Mapping[str, object],
+    *,
+    quota: Decimal,
+    candidate_name_by_id: Mapping[int, str] | None = None,
+) -> dict[str, str]:
+    """Generate public-facing explanations for a single Meek STV iteration.
+
+    This is intended for governance / organizational elections:
+    - Accurate and deterministic (same input -> same text)
+    - Neutral (describes outcomes and constraints without editorializing)
+    - Human-friendly (avoids internal implementation details)
+
+    Input is one iteration dict from the audit log / tally output.
+    Output includes:
+    - audit_text: structured prose suitable for public release
+    - summary_text: a compact single-sentence summary
+    """
+    names = candidate_name_by_id or {}
+
+    iteration_obj = round_data.get("iteration")
+    iteration = iteration_obj if isinstance(iteration_obj, int) else 0
+
+    elected_obj = round_data.get("elected")
+    elected: list[int] = [int(x) for x in elected_obj] if isinstance(elected_obj, list) else []
+
+    quota_reached_obj = round_data.get("quota_reached")
+    quota_reached: list[int] = [int(x) for x in quota_reached_obj] if isinstance(quota_reached_obj, list) else []
+
+    eliminated_obj = round_data.get("eliminated")
+    eliminated: int | None = eliminated_obj if isinstance(eliminated_obj, int) else None
+
+    forced_exclusions_obj = round_data.get("forced_exclusions")
+    forced_exclusions: list[Mapping[str, object]] = (
+        [x for x in forced_exclusions_obj if isinstance(x, Mapping)] if isinstance(forced_exclusions_obj, list) else []
+    )
+
+    retention_factors_obj = round_data.get("retention_factors")
+    retention_factors: Mapping[str, object] = retention_factors_obj if isinstance(retention_factors_obj, Mapping) else {}
+
+    converged = bool(round_data.get("converged"))
+
+    tie_breaks_obj = round_data.get("tie_breaks")
+    tie_breaks: list[Mapping[str, object]] = (
+        [x for x in tie_breaks_obj if isinstance(x, Mapping)] if isinstance(tie_breaks_obj, list) else []
+    )
+
+    eligible_obj = round_data.get("eligible_candidates")
+    eligible_candidates: list[int] = [int(x) for x in eligible_obj] if isinstance(eligible_obj, list) else []
+    if not eligible_candidates and retention_factors:
+        # Backstop for older round payloads: infer eligibility from retention factors.
+        # This intentionally avoids exposing numeric IDs by relying on `candidate_name_by_id`.
+        inferred: list[int] = []
+        for cid_str, r in retention_factors.items():
+            try:
+                cid = int(cid_str)
+            except (TypeError, ValueError):
+                continue
+            if cid in elected:
+                continue
+            if eliminated is not None and cid == eliminated:
+                continue
+            if str(r) == "0":
+                continue
+            inferred.append(cid)
+        eligible_candidates = inferred
+
+    eligible_candidates.sort(key=lambda cid: (names.get(cid, "").casefold(), cid))
+
+    quota_reached_str = _format_candidate_list(quota_reached, candidate_name_by_id=names)
+    elected_str = _format_candidate_list(elected, candidate_name_by_id=names)
+
+    audit_parts: list[str] = [f"Iteration {iteration} summary", ""]
+
+    for tie_break in tie_breaks:
+        kind = str(tie_break.get("type") or "").strip()
+        candidate_ids_obj = tie_break.get("candidate_ids")
+        tied_candidate_ids: list[int] = (
+            [int(x) for x in candidate_ids_obj] if isinstance(candidate_ids_obj, list) else []
+        )
+        if not tied_candidate_ids:
+            continue
+
+        tied_str = _format_candidate_list(tied_candidate_ids, candidate_name_by_id=names)
+
+        if kind == "elimination":
+            audit_parts.append(f"Candidates {tied_str} were tied under the election's elimination criteria.")
+            audit_parts.append("")
+            audit_parts.append(
+                "Vote-based tie-breaking rules could not distinguish between the candidates. "
+                "The tie was therefore resolved using a predefined deterministic rule established at election setup."
+            )
+
+            selected_obj = tie_break.get("selected")
+            selected = int(selected_obj) if isinstance(selected_obj, int) else None
+            if selected is not None:
+                selected_str = _format_candidate_list([selected], candidate_name_by_id=names)
+                audit_parts.append(f"Under this rule, candidate {selected_str} was selected for elimination.")
+            audit_parts.append("")
+            audit_parts.append(
+                "This selection was used only to resolve the tie and does not imply a difference in vote totals."
+            )
+        else:
+            audit_parts.append(f"Candidates {tied_str} were tied under the election's ordering criteria.")
+            audit_parts.append("")
+
+            ordered_obj = tie_break.get("ordered")
+            ordered: list[int] = [int(x) for x in ordered_obj] if isinstance(ordered_obj, list) else []
+            if len(ordered) == 2:
+                first = _format_candidate_list([ordered[0]], candidate_name_by_id=names)
+                second = _format_candidate_list([ordered[1]], candidate_name_by_id=names)
+                audit_parts.append(
+                    "Vote-based tie-breaking rules could not distinguish between the candidates. "
+                    "The tie was therefore resolved using a predefined deterministic ordering established at election setup, "
+                    f"which placed candidate {first} ahead of candidate {second}."
+                )
+            elif len(ordered) > 2:
+                audit_parts.append(
+                    "Vote-based tie-breaking rules could not distinguish between the candidates. "
+                    "The tie was therefore resolved using a predefined deterministic ordering established at election setup, "
+                    "which ordered the candidates as "
+                    + _format_candidate_list(ordered, candidate_name_by_id=names)
+                    + "."
+                )
+            else:
+                audit_parts.append(
+                    "Vote-based tie-breaking rules could not distinguish between the candidates. "
+                    "The tie was therefore resolved using a predefined deterministic ordering established at election setup."
+                )
+
+            audit_parts.append("")
+            audit_parts.append(
+                "This ordering was used only to determine processing order and does not imply a difference in vote totals."
+            )
+
+        audit_parts.append("")
+
+    if quota_reached:
+        if len(quota_reached) == 1:
+            audit_parts.append(f"During this iteration, candidate {quota_reached_str} reached the election quota ({quota:.4f}).")
+        else:
+            both = " both" if len(quota_reached) == 2 else ""
+            audit_parts.append(
+                f"During this iteration, candidates {quota_reached_str}{both} reached the election quota ({quota:.4f})."
+            )
+        audit_parts.append("")
+
+    if elected:
+        if len(elected) == 1:
+            elected_name = _format_candidate_list([elected[0]], candidate_name_by_id=names)
+            audit_parts.append(
+                f"Candidate {elected_name} reached or exceeded the election quota and was elected."
+            )
+            audit_parts.append("")
+            audit_parts.append(
+                f"In accordance with the Meek STV method, {elected_name}’s retained vote total was reduced to exactly the quota. "
+                "Any surplus votes will be redistributed in subsequent iterations."
+            )
+        else:
+            audit_parts.append(
+                f"Candidates {elected_str} reached or exceeded the election quota and were elected."
+            )
+            audit_parts.append("")
+            audit_parts.append(
+                "In accordance with the Meek STV method, each elected candidate’s retained vote total was reduced to exactly the quota. "
+                "Any surplus votes will be redistributed in subsequent iterations."
+            )
+        audit_parts.append("")
+
+    if forced_exclusions:
+        # Group forced exclusions by group name (fallback to public_id).
+        excluded_ids_by_group: dict[str, list[int]] = {}
+        triggered_by_by_group: dict[str, int] = {}
+        for fx in forced_exclusions:
+            group_name = str(fx.get("group_name") or "").strip()
+            if not group_name:
+                group_name = str(fx.get("group_public_id") or "").strip()
+
+            candidate_id = fx.get("candidate_id")
+            if not isinstance(candidate_id, int):
+                continue
+
+            excluded_ids_by_group.setdefault(group_name, []).append(candidate_id)
+
+            triggered_by_obj = fx.get("triggered_by")
+            if isinstance(triggered_by_obj, int) and group_name not in triggered_by_by_group:
+                triggered_by_by_group[group_name] = int(triggered_by_obj)
+
+        if excluded_ids_by_group:
+            for group_name, excluded_ids in excluded_ids_by_group.items():
+                # Safety: do not describe any elected candidate as excluded.
+                excluded_ids = [cid for cid in excluded_ids if cid not in elected]
+                excluded_reached_quota = [cid for cid in excluded_ids if cid in quota_reached]
+
+                triggered_by = triggered_by_by_group.get(group_name)
+                if triggered_by is not None:
+                    trigger_name = _format_candidate_list([triggered_by], candidate_name_by_id=names)
+                    audit_parts.append(
+                        f"Because candidate {trigger_name}’s election satisfied an exclusion group constraint, no additional candidates from that group could be elected (group: \"{group_name}\")."
+                    )
+                else:
+                    audit_parts.append(
+                        f"Because an exclusion group constraint was satisfied, no additional candidates from that group could be elected (group: \"{group_name}\")."
+                    )
+
+                if excluded_reached_quota:
+                    excluded_str = _format_candidate_list(excluded_reached_quota, candidate_name_by_id=names)
+                    verb = "was" if len(excluded_reached_quota) == 1 else "were"
+                    audit_parts.append(
+                        f"As a result, candidate {excluded_str} could not be elected despite reaching the quota and {verb} excluded from further consideration under the election rules. "
+                        "This exclusion was rule-based and not the result of a vote comparison."
+                    )
+                else:
+                    excluded_str = _format_candidate_list(excluded_ids, candidate_name_by_id=names)
+                    audit_parts.append(
+                        f"As a result, candidate {excluded_str} was excluded from further consideration under the election rules. "
+                        "This exclusion was rule-based and not the result of a vote comparison."
+                    )
+
+                audit_parts.append("")
+
+    if eliminated is not None:
+        eliminated_str = _format_candidate_list([eliminated], candidate_name_by_id=names)
+        audit_parts.append(f"Candidate {eliminated_str} had the lowest vote total and was eliminated from the count.")
+        audit_parts.append("")
+        audit_parts.append(
+            f"{eliminated_str}’s votes will be redistributed to remaining candidates according to voter preferences under the counting method."
+        )
+        audit_parts.append("")
+
+    if eligible_candidates:
+        eligible_str = _format_candidate_list(eligible_candidates, candidate_name_by_id=names)
+        if len(eligible_candidates) == 1:
+            audit_parts.append(f"Candidate {eligible_str} remains eligible and will continue to receive redistributed votes.")
+        else:
+            audit_parts.append(f"Candidates {eligible_str} remain eligible and will continue to receive redistributed votes.")
+    else:
+        audit_parts.append("No candidates remain eligible.")
+    audit_parts.append("")
+
+    if converged:
+        audit_parts.append("The count has converged.")
+    else:
+        audit_parts.append("The count has not yet converged. Further iterations are required to determine the final outcome.")
+
+    audit_text = "\n".join(audit_parts).strip() + "\n"
+
+    summary_bits: list[str] = []
+    if tie_breaks:
+        summary_bits.append("tie resolved deterministically")
+    if elected:
+        summary_bits.append(f"elected {elected_str}")
+    if eliminated is not None:
+        summary_bits.append(f"eliminated {_format_candidate_list([eliminated], candidate_name_by_id=names)}")
+    summary_bits.append("count converged" if converged else "further iterations required")
+    summary_text = f"Iteration {iteration}: " + "; ".join(summary_bits) + "."
+
+    return {"audit_text": audit_text, "summary_text": summary_text}
+
+
+def tally_meek(
+    *,
+    ballots: list[dict[str, object]],
+    candidates: list[dict[str, object]],
+    seats: int,
+    exclusion_groups: list[dict[str, object]] | None = None,
+    epsilon: Decimal = Decimal("1e-28"),
+    max_iterations: int = 200,
+) -> dict[str, object]:
+    """Tally an STV election using Meek STV.
+
+    Design goals:
+    - Deterministic: tie-breaks are fully specified and stable.
+    - Auditable: the returned rounds include per-iteration retained totals and retention factors.
+    - Privacy-preserving: operates on anonymous ballots and candidate IDs only.
+
+    Notes:
+    - Quota is the Meek quota: total / (seats + 1).
+    - Ballots are distributed fractionally using per-candidate retention factors.
+    - Elected candidates remain in circulation with retention adjusted towards quota.
+    - If no new elections occur after convergence, the lowest candidate is eliminated.
+    - Exclusion groups force-exclude candidates once a group reaches its max elected.
+    """
+
+    if seats <= 0:
+        raise ValueError("seats must be positive")
+
+    parsed_candidates: list[_Candidate] = []
+    for c in candidates:
+        cid = int(c["id"])
+        name = str(c.get("name") or "")
+        tiebreak_uuid = str(c.get("tiebreak_uuid") or "")
+        parsed_candidates.append(_Candidate(id=cid, name=name, tiebreak_uuid=tiebreak_uuid))
+
+    candidate_name_by_id: dict[int, str] = {c.id: c.name for c in parsed_candidates if c.name}
+
+    all_candidate_ids = frozenset(c.id for c in parsed_candidates)
+
+    groups: list[_ExclusionGroup] = []
+    for g in exclusion_groups or []:
+        groups.append(
+            _ExclusionGroup(
+                public_id=str(g.get("public_id") or ""),
+                name=str(g.get("name") or ""),
+                max_elected=int(g.get("max_elected") or 0),
+                candidate_ids=frozenset(int(x) for x in (g.get("candidate_ids") or [])),
+            )
+        )
+
+    with localcontext() as ctx:
+        ctx.prec = 80
+
+        total_weight = sum((_decimal(int(b.get("weight") or 0)) for b in ballots), start=Decimal(0))
+        quota = total_weight / Decimal(seats + 1)
+
+        retention: dict[int, Decimal] = {cid: Decimal(1) for cid in all_candidate_ids}
+        elected: list[int] = []
+        eliminated: list[int] = []
+        forced_excluded: list[int] = []
+
+        continuing_ids: set[int] = set(all_candidate_ids)
+        first_pref = _first_preferences(ballots=ballots, continuing_ids=frozenset(continuing_ids))
+        previous_totals: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
+
+        rounds: list[dict[str, object]] = []
+
+        retention_uuid: dict[int, str] = {c.id: c.tiebreak_uuid for c in parsed_candidates}
+
+        def eligible_candidates_list() -> list[int]:
+            elected_set = set(elected)
+            eligible = [cid for cid in continuing_ids if cid not in elected_set]
+            eligible.sort(key=lambda cid: (candidate_name_by_id.get(cid, "").casefold(), cid))
+            return eligible
+
+        def _tie_break_rules_trace(
+            *,
+            candidate_ids: list[int],
+            prefer_highest: bool,
+            prior_round_retained: Mapping[int, Decimal],
+            cumulative_support: Mapping[int, Decimal],
+            first_preferences: Mapping[int, Decimal],
+        ) -> tuple[list[int], list[dict[str, object]]]:
+            ordered = sorted(candidate_ids)
+            trace: list[dict[str, object]] = []
+
+            def _trace_step(*, rule: int, title: str, values: dict[int, object], remaining: list[int]) -> None:
+                trace.append(
+                    {
+                        "rule": rule,
+                        "title": title,
+                        "values": {str(cid): str(values[cid]) for cid in ordered},
+                        "remaining": remaining,
+                    }
+                )
+
+            remaining = ordered
+
+            values1: dict[int, Decimal] = {cid: prior_round_retained.get(cid, Decimal(0)) for cid in remaining}
+            pick1 = max(values1.values()) if prefer_highest else min(values1.values())
+            remaining = [cid for cid in remaining if values1[cid] == pick1]
+            _trace_step(
+                rule=1,
+                title="Prior round performance",
+                values={cid: values1.get(cid, Decimal(0)) for cid in ordered},
+                remaining=remaining,
+            )
+            if len(remaining) == 1:
+                trace[-1]["result"] = "resolved"
+                return ordered, trace
+            trace[-1]["result"] = "tied"
+
+            values2: dict[int, Decimal] = {cid: cumulative_support.get(cid, Decimal(0)) for cid in remaining}
+            pick2 = max(values2.values()) if prefer_highest else min(values2.values())
+            remaining = [cid for cid in remaining if values2[cid] == pick2]
+            _trace_step(
+                rule=2,
+                title="Cumulative support",
+                values={cid: cumulative_support.get(cid, Decimal(0)) for cid in ordered},
+                remaining=remaining,
+            )
+            if len(remaining) == 1:
+                trace[-1]["result"] = "resolved"
+                return ordered, trace
+            trace[-1]["result"] = "tied"
+
+            values3: dict[int, Decimal] = {cid: first_preferences.get(cid, Decimal(0)) for cid in remaining}
+            pick3 = max(values3.values()) if prefer_highest else min(values3.values())
+            remaining = [cid for cid in remaining if values3[cid] == pick3]
+            _trace_step(
+                rule=3,
+                title="First-preference count",
+                values={cid: first_preferences.get(cid, Decimal(0)) for cid in ordered},
+                remaining=remaining,
+            )
+            if len(remaining) == 1:
+                trace[-1]["result"] = "resolved"
+                return ordered, trace
+            trace[-1]["result"] = "tied"
+
+            # Rule 4: deterministic lexical fallback; highest UUID wins.
+            values4: dict[int, str] = {cid: retention_uuid.get(cid, "") for cid in remaining}
+            pick4 = max(values4.values()) if prefer_highest else min(values4.values())
+            remaining = [cid for cid in remaining if values4[cid] == pick4]
+            _trace_step(
+                rule=4,
+                title="Deterministic lexical fallback (tiebreak_uuid)",
+                values={cid: retention_uuid.get(cid, "") for cid in ordered},
+                remaining=remaining,
+            )
+            trace[-1]["result"] = "resolved" if len(remaining) == 1 else "unresolved"
+
+            # Ensure deterministic output even if UUIDs were missing or duplicated.
+            ordered.sort(
+                key=lambda cid: (
+                    prior_round_retained.get(cid, Decimal(0)),
+                    cumulative_support.get(cid, Decimal(0)),
+                    first_preferences.get(cid, Decimal(0)),
+                    retention_uuid.get(cid, ""),
+                ),
+                reverse=prefer_highest,
+            )
+            return ordered, trace
+
+        def apply_exclusions(*, triggered_by: int) -> list[dict[str, object]]:
+            forced_events: list[dict[str, object]] = []
+            nonlocal continuing_ids
+
+            elected_set = set(elected)
+            for group in groups:
+                if group.max_elected <= 0:
+                    continue
+
+                elected_in_group = len(elected_set & group.candidate_ids)
+                if elected_in_group < group.max_elected:
+                    continue
+
+                for cid in sorted(group.candidate_ids):
+                    if cid in elected_set:
+                        continue
+                    if cid not in continuing_ids:
+                        continue
+
+                    continuing_ids.remove(cid)
+                    retention[cid] = Decimal(0)
+                    forced_excluded.append(cid)
+                    forced_events.append(
+                        {
+                            "candidate_id": cid,
+                            "group_public_id": group.public_id,
+                            "group_name": group.name,
+                            "triggered_by": triggered_by,
+                            "reason": "exclusion_group_max_reached",
+                        }
+                    )
+
+            return forced_events
+
+        while len(elected) < seats and continuing_ids:
+            # Fixed-point iteration for current continuing set.
+            for iter_idx in range(1, max_iterations + 1):
+                incoming_totals, retained_totals = _distribute_votes(
+                    ballots=ballots,
+                    retention=retention,
+                    continuing_ids=frozenset(continuing_ids),
+                )
+
+                newly_elected = [
+                    cid
+                    for cid in continuing_ids
+                    if cid not in elected and retained_totals.get(cid, Decimal(0)) >= quota - epsilon
+                ]
+
+                quota_reached = list(newly_elected)
+
+                # Primary ordering is by current retained total (highest first). Tie-break rules only
+                # apply within groups tied on that retained total.
+                newly_elected.sort(key=lambda cid: retained_totals.get(cid, Decimal(0)), reverse=True)
+
+                tie_breaks: list[dict[str, object]] = []
+                if len(newly_elected) > 1:
+                    reordered: list[int] = []
+                    idx = 0
+                    while idx < len(newly_elected):
+                        cid = newly_elected[idx]
+                        retained_key = retained_totals.get(cid, Decimal(0))
+                        group: list[int] = [cid]
+                        idx += 1
+                        while idx < len(newly_elected) and retained_totals.get(newly_elected[idx], Decimal(0)) == retained_key:
+                            group.append(newly_elected[idx])
+                            idx += 1
+
+                        if len(group) == 1:
+                            reordered.extend(group)
+                            continue
+
+                        ordered_group, rule_trace = _tie_break_rules_trace(
+                            candidate_ids=group,
+                            prefer_highest=True,
+                            prior_round_retained=previous_totals,
+                            cumulative_support=incoming_totals,
+                            first_preferences=first_pref,
+                        )
+                        reordered.extend(ordered_group)
+                        tie_breaks.append(
+                            {
+                                "type": "election_order",
+                                "candidate_ids": sorted(group),
+                                "ordered": ordered_group,
+                                "rule_trace": rule_trace,
+                            }
+                        )
+
+                    newly_elected = reordered
+
+                forced_events: list[dict[str, object]] = []
+                elected_this_iteration: list[int] = []
+                if newly_elected:
+                    for cid in newly_elected:
+                        if cid not in continuing_ids:
+                            continue
+                        if cid in elected:
+                            continue
+
+                        elected.append(cid)
+                        elected_this_iteration.append(cid)
+                        forced_events.extend(apply_exclusions(triggered_by=cid))
+
+                # Update retention factors for all elected candidates.
+                max_delta = Decimal(0)
+                for cid in elected:
+                    if cid not in continuing_ids:
+                        continue
+                    incoming = incoming_totals.get(cid, Decimal(0))
+                    if incoming <= 0:
+                        continue
+                    new_r = quota / incoming
+                    if new_r > 1:
+                        new_r = Decimal(1)
+                    if new_r < 0:
+                        new_r = Decimal(0)
+                    delta = abs(new_r - retention[cid])
+                    if delta > max_delta:
+                        max_delta = delta
+                    retention[cid] = new_r
+
+                converged = max_delta < epsilon and not newly_elected and not forced_events
+                round_data: dict[str, object] = {
+                        "iteration": len(rounds) + 1,
+                        "quota_reached": list(quota_reached),
+                        "elected": list(elected_this_iteration),
+                        "eliminated": None,
+                        "forced_exclusions": forced_events,
+                        "tie_breaks": tie_breaks,
+                        "eligible_candidates": eligible_candidates_list(),
+                        "tiebreak_uuids": {str(cid): retention_uuid[cid] for cid in sorted(all_candidate_ids)},
+                        "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
+                        "retained_totals": {
+                            str(cid): str(retained_totals.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)
+                        },
+                        "converged": converged,
+                        "max_retention_delta": str(max_delta),
+                    }
+                round_data.update(
+                    generate_meek_round_explanations(
+                        round_data,
+                        quota=quota,
+                        candidate_name_by_id=candidate_name_by_id,
+                    )
+                )
+                rounds.append(round_data)
+
+                previous_totals = {cid: retained_totals.get(cid, Decimal(0)) for cid in continuing_ids}
+
+                if converged:
+                    break
+            else:
+                raise ValueError("Meek STV did not converge within max_iterations")
+
+            if len(elected) >= seats:
+                break
+
+            # If the remaining continuing candidates exactly fill the remaining seats,
+            # elect them all deterministically and finish.
+            remaining_seats = seats - len(elected)
+            remaining_candidates = [cid for cid in continuing_ids if cid not in elected]
+            if len(remaining_candidates) <= remaining_seats:
+                # Compute current vote distribution for tie-break rule 2 (cumulative support).
+                incoming_totals, _retained_totals = _distribute_votes(
+                    ballots=ballots,
+                    retention=retention,
+                    continuing_ids=frozenset(continuing_ids),
+                )
+
+                remaining_candidates.sort(
+                    key=lambda cid: (
+                        previous_totals.get(cid, Decimal(0)),
+                        incoming_totals.get(cid, Decimal(0)),
+                        first_pref.get(cid, Decimal(0)),
+                        retention_uuid.get(cid, ""),
+                    ),
+                    reverse=True,
+                )
+
+                tie_breaks: list[dict[str, object]] = []
+                if len(remaining_candidates) > 1:
+                    reordered: list[int] = []
+                    idx = 0
+                    while idx < len(remaining_candidates):
+                        cid = remaining_candidates[idx]
+                        key = previous_totals.get(cid, Decimal(0))
+                        group: list[int] = [cid]
+                        idx += 1
+                        while idx < len(remaining_candidates) and previous_totals.get(remaining_candidates[idx], Decimal(0)) == key:
+                            group.append(remaining_candidates[idx])
+                            idx += 1
+
+                        if len(group) == 1:
+                            reordered.extend(group)
+                            continue
+
+                        ordered_group, rule_trace = _tie_break_rules_trace(
+                            candidate_ids=group,
+                            prefer_highest=True,
+                            prior_round_retained=previous_totals,
+                            cumulative_support=incoming_totals,
+                            first_preferences=first_pref,
+                        )
+                        reordered.extend(ordered_group)
+                        tie_breaks.append(
+                            {
+                                "type": "election_order",
+                                "candidate_ids": sorted(group),
+                                "ordered": ordered_group,
+                                "rule_trace": rule_trace,
+                            }
+                        )
+
+                    remaining_candidates = reordered
+
+                elected.extend(remaining_candidates)
+                round_data: dict[str, object] = {
+                        "iteration": len(rounds) + 1,
+                        "elected": list(remaining_candidates),
+                        "eliminated": None,
+                        "forced_exclusions": [],
+                        "tie_breaks": tie_breaks,
+                    "eligible_candidates": eligible_candidates_list(),
+                        "tiebreak_uuids": {str(cid): retention_uuid[cid] for cid in sorted(all_candidate_ids)},
+                        "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
+                        "retained_totals": {str(cid): str(previous_totals.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
+                        "converged": True,
+                        "max_retention_delta": "0",
+                    }
+                round_data.update(
+                    generate_meek_round_explanations(
+                        round_data,
+                        quota=quota,
+                        candidate_name_by_id=candidate_name_by_id,
+                    )
+                )
+                rounds.append(round_data)
+                break
+
+            # After convergence, if we still have seats to fill, eliminate the lowest continuing non-elected candidate.
+            remaining_candidates = [cid for cid in continuing_ids if cid not in elected]
+            if not remaining_candidates:
+                break
+
+            totals = _distribute_votes(
+                ballots=ballots,
+                retention=retention,
+                continuing_ids=frozenset(continuing_ids),
+            )
+
+            incoming_totals, retained_totals = totals
+
+            min_retained = min(retained_totals.get(cid, Decimal(0)) for cid in remaining_candidates)
+            tied_for_elimination = [
+                cid for cid in remaining_candidates if retained_totals.get(cid, Decimal(0)) == min_retained
+            ]
+
+            tie_breaks: list[dict[str, object]] = []
+            if len(tied_for_elimination) > 1:
+                ordered_group, rule_trace = _tie_break_rules_trace(
+                    candidate_ids=tied_for_elimination,
+                    prefer_highest=False,
+                    prior_round_retained=previous_totals,
+                    cumulative_support=incoming_totals,
+                    first_preferences=first_pref,
+                )
+                to_eliminate = ordered_group[0]
+                tie_breaks.append(
+                    {
+                        "type": "elimination",
+                        "candidate_ids": sorted(tied_for_elimination),
+                        "selected": to_eliminate,
+                        "rule_trace": rule_trace,
+                    }
+                )
+            else:
+                to_eliminate = tied_for_elimination[0]
+            continuing_ids.remove(to_eliminate)
+            retention[to_eliminate] = Decimal(0)
+            eliminated.append(to_eliminate)
+
+            round_data: dict[str, object] = {
+                    "iteration": len(rounds) + 1,
+                    "elected": [],
+                    "eliminated": to_eliminate,
+                    "forced_exclusions": [],
+                    "tie_breaks": tie_breaks,
+                    "eligible_candidates": eligible_candidates_list(),
+                    "tiebreak_uuids": {str(cid): retention_uuid[cid] for cid in sorted(all_candidate_ids)},
+                    "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
+                    "retained_totals": {
+                        str(cid): str(retained_totals.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)
+                    },
+                    "converged": True,
+                    "max_retention_delta": "0",
+                }
+            round_data.update(
+                generate_meek_round_explanations(
+                    round_data,
+                    quota=quota,
+                    candidate_name_by_id=candidate_name_by_id,
+                )
+            )
+            rounds.append(round_data)
+
+        return {
+            "quota": quota,
+            "elected": elected[:seats],
+            "eliminated": eliminated,
+            "forced_excluded": forced_excluded,
+            "rounds": rounds,
+        }

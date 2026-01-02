@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import cast
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -14,7 +13,6 @@ from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFai
 from core.views_utils import _normalize_str
 
 
-@login_required(login_url="/login/")
 def groups(request: HttpRequest) -> HttpResponse:
     q = _normalize_str(request.GET.get("q"))
     page_number = _normalize_str(request.GET.get("page")) or None
@@ -82,7 +80,6 @@ def groups(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required(login_url="/login/")
 def group_detail(request: HttpRequest, name: str) -> HttpResponse:
     cn = _normalize_str(name)
     if not cn:

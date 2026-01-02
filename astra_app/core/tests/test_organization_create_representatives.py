@@ -93,7 +93,8 @@ class OrganizationCreateRepresentativesTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(url, {"q": "bo"})
-            self.assertEqual(resp.status_code, 302)
+            self.assertEqual(resp.status_code, 403)
+            self.assertEqual(resp.json().get("error"), "Permission denied.")
 
         FreeIPAPermissionGrant.objects.create(
             permission=ASTRA_CHANGE_MEMBERSHIP,

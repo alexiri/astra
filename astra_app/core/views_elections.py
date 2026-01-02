@@ -1,0 +1,1688 @@
+from __future__ import annotations
+
+import datetime
+import json
+import random
+import re
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
+
+from django.conf import settings
+from django.contrib import messages
+from django.contrib.auth.decorators import permission_required
+from django.core.paginator import Paginator
+from django.db.models import Count, Max, Min, Prefetch, Q, Sum
+from django.db.models.functions import TruncDate
+from django.http import Http404, HttpResponseBadRequest, HttpResponseGone, JsonResponse
+from django.shortcuts import redirect, render
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from post_office.models import EmailTemplate
+
+from core import elections_services
+from core.backends import FreeIPAUser
+from core.elections_services import (
+    ElectionError,
+    ElectionNotOpenError,
+    InvalidCredentialError,
+    eligible_voters_from_memberships,
+    issue_voting_credentials_from_memberships_detailed,
+    submit_ballot,
+)
+from core.forms_elections import (
+    CandidateWizardFormSet,
+    ElectionDetailsForm,
+    ElectionVotingEmailForm,
+    ExclusionGroupWizardFormSet,
+)
+from core.models import (
+    AuditLogEntry,
+    Ballot,
+    Candidate,
+    Election,
+    ExclusionGroup,
+    ExclusionGroupCandidate,
+    Membership,
+    VotingCredential,
+)
+from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
+from core.templated_email import (
+    render_templated_email_preview,
+    render_templated_email_preview_response,
+)
+
+_RECEIPT_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _get_freeipa_timezone_name(user: FreeIPAUser) -> str | None:
+    """Return the user's configured FreeIPA timezone (IANA name), if set."""
+
+    raw = user._user_data.get("fasTimezone")
+    if raw is None:
+        raw = user._user_data.get("fastimezone")
+
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    return str(raw or "").strip() or None
+
+
+@require_GET
+def ballot_verify(request):
+    receipt_raw = str(request.GET.get("receipt") or "").strip()
+    receipt = receipt_raw.lower()
+
+    has_query = bool(receipt_raw)
+    is_valid_receipt = bool(_RECEIPT_RE.fullmatch(receipt)) if receipt else False
+
+    ballot: Ballot | None = None
+    if is_valid_receipt:
+        ballot = (
+            Ballot.objects.select_related("election", "superseded_by")
+            .only(
+                "ballot_hash",
+                "created_at",
+                "is_counted",
+                "superseded_by_id",
+                "election__id",
+                "election__name",
+                "election__status",
+            )
+            .filter(ballot_hash=receipt)
+            .first()
+        )
+
+    found = ballot is not None
+    election: Election | None = ballot.election if ballot is not None else None
+    election_status = str(election.status) if election is not None else ""
+
+    is_superseded = bool(ballot is not None and ballot.superseded_by_id)
+    is_final_ballot = bool(found and not is_superseded)
+
+    # Privacy guardrail: never reveal ranking, credential IDs, IPs, or precise timestamps.
+    submitted_date = ballot.created_at.date().isoformat() if ballot is not None else ""
+
+    public_ballots_url = (
+        reverse("election-public-ballots", args=[election.id])
+        if election is not None and election.status == Election.Status.tallied
+        else ""
+    )
+    audit_log_url = (
+        reverse("election-audit-log", args=[election.id])
+        if election is not None and election.status == Election.Status.tallied
+        else ""
+    )
+
+    return render(
+        request,
+        "core/ballot_verify.html",
+        {
+            "receipt": receipt_raw,
+            "has_query": has_query,
+            "is_valid_receipt": is_valid_receipt,
+            "found": found,
+            "election": election,
+            "election_status": election_status,
+            "submitted_date": submitted_date,
+            "is_superseded": is_superseded,
+            "is_final_ballot": is_final_ballot,
+            "public_ballots_url": public_ballots_url,
+            "audit_log_url": audit_log_url,
+        },
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_email_render_preview(request, election_id: int) -> JsonResponse:
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+
+    username = str(request.user.get_username() or "").strip() or "preview"
+
+    context: dict[str, object] = {
+        "username": username,
+        "email": "",
+        "election_id": election.id,
+        "election_name": election.name,
+        "election_description": election.description,
+        "election_url": election.url,
+        "election_start_datetime": election.start_datetime,
+        "election_end_datetime": election.end_datetime,
+        "election_number_of_seats": election.number_of_seats,
+        "credential_public_id": "PREVIEW",
+        "vote_url": elections_services.election_vote_url(request=request, election=election),
+        "vote_url_with_credential_fragment": elections_services.election_vote_url_with_credential_fragment(
+            request=request,
+            election=election,
+            credential_public_id="PREVIEW",
+        ),
+    }
+
+    return render_templated_email_preview_response(request=request, context=context)
+
+
+@require_GET
+def elections_list(request):
+    can_manage_elections = request.user.has_perm(ASTRA_ADD_ELECTION)
+    qs = Election.objects.only("id", "name", "status", "start_datetime", "end_datetime").order_by(
+        "-start_datetime",
+        "id",
+    )
+    if not can_manage_elections:
+        qs = qs.exclude(status=Election.Status.draft)
+    elections = list(qs)
+
+    open_statuses = {Election.Status.open, Election.Status.draft}
+    past_statuses = {Election.Status.closed, Election.Status.tallied}
+
+    open_elections: list[Election] = []
+    past_elections: list[Election] = []
+    for election in elections:
+        if election.status in past_statuses:
+            past_elections.append(election)
+        elif election.status in open_statuses:
+            open_elections.append(election)
+        else:
+            open_elections.append(election)
+    return render(
+        request,
+        "core/elections_list.html",
+        {
+            "open_elections": open_elections,
+            "past_elections": past_elections,
+            "can_manage_elections": can_manage_elections,
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def election_new(request):
+    return election_edit(request, election_id=0)
+
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_eligible_users_search(request, election_id: int):
+    if election_id == 0:
+        start_datetime_raw = str(request.GET.get("start_datetime") or "").strip()
+        if not start_datetime_raw:
+            # Allow searching before the start datetime is filled in.
+            start_dt = timezone.now()
+        else:
+            try:
+                # Accept `datetime-local` values like `YYYY-MM-DDTHH:MM`.
+                start_dt = datetime.datetime.fromisoformat(start_datetime_raw)
+            except ValueError:
+                return JsonResponse({"results": []})
+            if timezone.is_naive(start_dt):
+                start_dt = timezone.make_aware(start_dt)
+        election = Election(
+            name="",
+            description="",
+            url="",
+            start_datetime=start_dt,
+            end_datetime=start_dt,
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+    else:
+        election = Election.objects.filter(pk=election_id).only("id", "start_datetime").first()
+        if election is None:
+            raise Http404
+
+    q = str(request.GET.get("q") or "").strip()
+    q_lower = q.lower()
+
+    eligible = eligible_voters_from_memberships(election=election)
+    eligible_usernames = {v.username for v in eligible}
+
+    results: list[dict[str, str]] = []
+    for username in sorted(eligible_usernames, key=str.lower):
+        if q_lower and q_lower not in username.lower():
+            continue
+
+        try:
+            user = FreeIPAUser.get(username)
+        except Exception:
+            # FreeIPA may be unavailable during local development or transiently
+            # during a request. Eligibility is computed from local DB state, so
+            # degrade gracefully by returning usernames without full names.
+            user = None
+        full_name = user.get_full_name() if user is not None else ""
+        text = username
+        if full_name and full_name != username:
+            text = f"{full_name} ({username})"
+
+        results.append({"id": username, "text": text})
+        if len(results) >= 20:
+            break
+
+    return JsonResponse({"results": results})
+
+@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
+def election_edit(request, election_id: int):
+    is_create = election_id == 0
+    election = None if is_create else Election.objects.filter(pk=election_id).first()
+    if not is_create and election is None:
+        raise Http404
+
+    templates = list(EmailTemplate.objects.all().order_by("name"))
+    default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
+
+    eligible_usernames: set[str] = set()
+    if election is not None:
+        eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+
+    if request.method == "POST":
+        action = str(request.POST.get("action") or "").strip()
+
+        if action in {"end_election", "end_election_and_tally"}:
+            return HttpResponseBadRequest("Ending elections is not supported from the edit page.")
+
+        details_form = ElectionDetailsForm(request.POST, instance=election)
+        email_form = ElectionVotingEmailForm(request.POST)
+        if action == "save_draft":
+            candidate_formset = CandidateWizardFormSet(
+                request.POST,
+                queryset=(
+                    Candidate.objects.filter(election=election).order_by("ordering", "id")
+                    if election is not None
+                    else Candidate.objects.none()
+                ),
+                prefix="candidates",
+            )
+            group_formset = ExclusionGroupWizardFormSet(
+                request.POST,
+                queryset=(
+                    ExclusionGroup.objects.filter(election=election).order_by("name", "id")
+                    if election is not None
+                    else ExclusionGroup.objects.none()
+                ),
+                prefix="groups",
+            )
+        else:
+            candidate_formset = CandidateWizardFormSet(queryset=Candidate.objects.none(), prefix="candidates")
+            group_formset = ExclusionGroupWizardFormSet(queryset=ExclusionGroup.objects.none(), prefix="groups")
+
+        if election is not None:
+            eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+
+        def _configure_candidate_form_choices() -> None:
+            ajax_election_id = election.id if election is not None else 0
+            ajax_url = request.build_absolute_uri(reverse("election-eligible-users-search", args=[ajax_election_id]))
+            for form in candidate_formset.forms:
+                freeipa_value = str(form.data.get(form.add_prefix("freeipa_username")) or form.initial.get("freeipa_username") or form.instance.freeipa_username or "").strip()
+                if freeipa_value:
+                    form.fields["freeipa_username"].choices = [(freeipa_value, freeipa_value)]
+                form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
+                form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+
+                nominated_value = str(form.data.get(form.add_prefix("nominated_by")) or form.initial.get("nominated_by") or form.instance.nominated_by or "").strip()
+                if nominated_value:
+                    form.fields["nominated_by"].choices = [(nominated_value, nominated_value)]
+                form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+                form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+
+            candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
+            candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+            candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+            candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+
+        def _configure_group_choices() -> None:
+            if election is None:
+                # Create-mode: candidates aren't in the DB yet. Accept selections for candidates
+                # that are being submitted in the same POST.
+                total_raw = str(request.POST.get("candidates-TOTAL_FORMS") or "0").strip()
+                try:
+                    total = int(total_raw)
+                except ValueError:
+                    total = 0
+                submitted_usernames: list[str] = []
+                for i in range(max(total, 0)):
+                    if str(request.POST.get(f"candidates-{i}-DELETE") or "").strip():
+                        continue
+                    username = str(request.POST.get(f"candidates-{i}-freeipa_username") or "").strip()
+                    if username:
+                        submitted_usernames.append(username)
+                submitted_unique = sorted(set(submitted_usernames), key=str.lower)
+                choices = [(u, u) for u in submitted_unique]
+            else:
+                candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
+                choices = [(c.freeipa_username, c.freeipa_username) for c in candidates_qs if c.freeipa_username]
+
+            # The UI adds new rows by cloning the formset's empty-form template.
+            # Populate its choices so the dynamic row has options immediately.
+            group_formset.empty_form.fields["candidate_usernames"].choices = choices
+
+            for form in group_formset.forms:
+                selected = form.data.getlist(form.add_prefix("candidate_usernames")) if hasattr(form.data, "getlist") else []
+                extra = [(u, u) for u in selected if u and u not in {c[0] for c in choices}]
+                form.fields["candidate_usernames"].choices = choices + extra
+
+        if action == "save_draft":
+            _configure_candidate_form_choices()
+            _configure_group_choices()
+
+        formsets_ok = True
+        if action == "save_draft":
+            formsets_ok = bool(candidate_formset.is_valid() and group_formset.is_valid())
+
+        if action == "save_draft" and election is not None and election.status != Election.Status.draft:
+            messages.error(request, "This election is no longer in draft; draft changes are locked.")
+            formsets_ok = False
+
+        email_save_mode = str(request.POST.get("email_save_mode") or "").strip()
+
+        if action == "save_draft" and details_form.is_valid() and email_form.is_valid() and formsets_ok:
+            election = details_form.save(commit=False)
+            election.status = Election.Status.draft
+
+            if election_id == 0 or email_save_mode != "keep_existing":
+                template_id = email_form.cleaned_data.get("email_template_id")
+                template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
+                election.voting_email_template = template
+                election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
+                election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
+                election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
+
+            election.save()
+
+            eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+
+            # Candidates
+            ordering = 1
+            for form in candidate_formset.forms:
+                if not hasattr(form, "cleaned_data"):
+                    continue
+                if form.cleaned_data.get("DELETE"):
+                    if form.instance.pk:
+                        form.instance.delete()
+                    continue
+
+                username = str(form.cleaned_data.get("freeipa_username") or "").strip()
+                nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
+                if not username:
+                    continue
+                if username not in eligible_usernames:
+                    form.add_error("freeipa_username", "User is not eligible.")
+                    continue
+                if nominator and nominator not in eligible_usernames:
+                    form.add_error("nominated_by", "User is not eligible.")
+                    continue
+
+                candidate = form.save(commit=False)
+                candidate.election = election
+                candidate.ordering = ordering
+                ordering += 1
+                candidate.save()
+
+            # Exclusion groups
+            for form in group_formset.forms:
+                if not hasattr(form, "cleaned_data"):
+                    continue
+                if form.cleaned_data.get("DELETE"):
+                    if form.instance.pk:
+                        form.instance.delete()
+                    continue
+
+                group_name = str(form.cleaned_data.get("name") or "").strip()
+                if not group_name:
+                    continue
+
+                group = form.save(commit=False)
+                group.election = election
+                group.save()
+
+                selected_usernames = [str(u).strip() for u in (form.cleaned_data.get("candidate_usernames") or [])]
+                selected_usernames = [u for u in selected_usernames if u]
+                candidates = list(
+                    Candidate.objects.filter(election=election, freeipa_username__in=selected_usernames).only("id")
+                )
+                by_username = {c.freeipa_username: c for c in candidates}
+
+                ExclusionGroupCandidate.objects.filter(exclusion_group=group).delete()
+                for u in selected_usernames:
+                    c = by_username.get(u)
+                    if c is None:
+                        continue
+                    ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
+
+            messages.success(request, "Draft saved.")
+            return redirect("election-edit", election_id=election.id)
+
+        if action == "start_election":
+            if election is None:
+                messages.error(request, "Save the draft first.")
+            elif election.status != Election.Status.draft:
+                messages.error(request, "Only draft elections can be started.")
+            elif not details_form.is_valid() or not email_form.is_valid():
+                messages.error(request, "Please correct the errors below.")
+            elif not Candidate.objects.filter(election=election).exists():
+                messages.error(request, "Add at least one candidate before starting the election.")
+            else:
+                election = details_form.save(commit=False)
+
+                # Align the published start timestamp with when the election actually opens.
+                # The draft's start_datetime is only a planned window and may drift from real operations.
+                election.start_datetime = timezone.now()
+
+                template_id = email_form.cleaned_data.get("email_template_id")
+                template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
+                election.voting_email_template = template
+                election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
+                election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
+                election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
+
+                election.status = Election.Status.open
+                election.save()
+
+                credentials = issue_voting_credentials_from_memberships_detailed(election=election)
+                emailed = 0
+                skipped = 0
+                failures = 0
+
+                subject_template = election.voting_email_subject
+                html_template = election.voting_email_html
+                text_template = election.voting_email_text
+                use_snapshot = bool(subject_template.strip() or html_template.strip() or text_template.strip())
+
+                for cred in credentials:
+                    username = str(cred.freeipa_username or "").strip()
+                    if not username:
+                        skipped += 1
+                        continue
+
+                    try:
+                        user = FreeIPAUser.get(username)
+                    except Exception:
+                        failures += 1
+                        continue
+                    if user is None or not user.email:
+                        skipped += 1
+                        continue
+
+                    tz_name = _get_freeipa_timezone_name(user)
+
+                    try:
+                        elections_services.send_voting_credential_email(
+                            request=request,
+                            election=election,
+                            username=username,
+                            email=user.email,
+                            credential_public_id=str(cred.public_id),
+                            tz_name=tz_name,
+                            subject_template=subject_template if use_snapshot else None,
+                            html_template=html_template if use_snapshot else None,
+                            text_template=text_template if use_snapshot else None,
+                        )
+                    except Exception:
+                        failures += 1
+                        continue
+                    emailed += 1
+
+                AuditLogEntry.objects.create(
+                    election=election,
+                    event_type="election_started",
+                    payload={
+                        "eligible_voters": len(credentials),
+                        "emailed": emailed,
+                        "skipped": skipped,
+                        "failures": failures,
+                    },
+                    is_public=True,
+                )
+
+                if emailed:
+                    messages.success(request, f"Election started; emailed {emailed} voter(s).")
+                if skipped:
+                    messages.warning(request, f"Skipped {skipped} voter(s) (missing user/email).")
+                if failures:
+                    messages.error(request, f"Failed to email {failures} voter(s).")
+                return redirect("election-detail", election_id=election.id)
+
+        messages.error(request, "Please correct the errors below.")
+    else:
+        details_form = ElectionDetailsForm(instance=election)
+
+        selected_template = default_template
+        if election is not None and election.voting_email_template_id is not None:
+            selected_template = election.voting_email_template
+
+        initial_email = {
+            "email_template_id": selected_template.pk if selected_template is not None else "",
+            "subject": "",
+            "html_content": "",
+            "text_content": "",
+        }
+
+        if election is not None and (
+            election.voting_email_subject.strip()
+            or election.voting_email_html.strip()
+            or election.voting_email_text.strip()
+        ):
+            initial_email["subject"] = election.voting_email_subject
+            initial_email["html_content"] = election.voting_email_html
+            initial_email["text_content"] = election.voting_email_text
+        elif selected_template is not None:
+            initial_email["subject"] = selected_template.subject or ""
+            initial_email["html_content"] = selected_template.html_content or ""
+            initial_email["text_content"] = selected_template.content or ""
+
+        email_form = ElectionVotingEmailForm(initial=initial_email)
+
+        candidate_formset = CandidateWizardFormSet(
+            queryset=Candidate.objects.filter(election=election).order_by("ordering", "id") if election else Candidate.objects.none(),
+            prefix="candidates",
+        )
+        group_formset = ExclusionGroupWizardFormSet(
+            queryset=ExclusionGroup.objects.filter(election=election).order_by("name", "id") if election else ExclusionGroup.objects.none(),
+            prefix="groups",
+        )
+
+        ajax_election_id = election.id if election is not None else 0
+        ajax_url = request.build_absolute_uri(reverse("election-eligible-users-search", args=[ajax_election_id]))
+        for form in candidate_formset.forms:
+            freeipa = str(form.instance.freeipa_username or "").strip()
+            if freeipa:
+                form.fields["freeipa_username"].choices = [(freeipa, freeipa)]
+            form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
+            form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+
+            nominator = str(form.instance.nominated_by or "").strip()
+            if nominator:
+                form.fields["nominated_by"].choices = [(nominator, nominator)]
+            form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+            form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+
+        candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
+        candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+        candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+        candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
+
+        if election is not None:
+            candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
+            choices = [(c.freeipa_username, c.freeipa_username) for c in candidates_qs if c.freeipa_username]
+            for form in group_formset.forms:
+                form.fields["candidate_usernames"].choices = choices
+                if form.instance.pk:
+                    selected = list(
+                        form.instance.candidates.order_by("ordering", "id").values_list("freeipa_username", flat=True)
+                    )
+                    form.initial["candidate_usernames"] = selected
+
+            # Used for the dynamic "Add exclusion group" rows.
+            group_formset.empty_form.fields["candidate_usernames"].choices = choices
+
+    rendered_preview: dict[str, str] = {"html": "", "text": "", "subject": ""}
+    if election is not None:
+        try:
+            preview_context: dict[str, object] = {
+                "username": "preview",
+                "email": "",
+                "election_id": election.id,
+                "election_name": details_form.instance.name if details_form.instance else "",
+                "election_description": details_form.instance.description if details_form.instance else "",
+                "election_url": details_form.instance.url if details_form.instance else "",
+                "election_start_datetime": details_form.instance.start_datetime if details_form.instance else "",
+                "election_end_datetime": details_form.instance.end_datetime if details_form.instance else "",
+                "election_number_of_seats": details_form.instance.number_of_seats if details_form.instance else "",
+                "credential_public_id": "PREVIEW",
+                "vote_url": elections_services.election_vote_url(request=request, election=election),
+                "vote_url_with_credential_fragment": elections_services.election_vote_url_with_credential_fragment(
+                    request=request,
+                    election=election,
+                    credential_public_id="PREVIEW",
+                ),
+            }
+            rendered_preview.update(
+                render_templated_email_preview(
+                    subject=str(email_form.data.get("subject") or email_form.initial.get("subject") or ""),
+                    html_content=str(email_form.data.get("html_content") or email_form.initial.get("html_content") or ""),
+                    text_content=str(email_form.data.get("text_content") or email_form.initial.get("text_content") or ""),
+                    context=preview_context,
+                )
+            )
+        except ValueError:
+            rendered_preview = {"html": "", "text": "", "subject": ""}
+
+    # The JS adds exclusion-group rows by cloning the rendered empty-form HTML.
+    # Ensure that empty form has candidate options, even if the formset recreates
+    # `empty_form` instances when accessed from the template.
+    group_empty_form = group_formset.empty_form
+    if election is not None:
+        candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
+        candidate_choices = [(c.freeipa_username, c.freeipa_username) for c in candidates_qs if c.freeipa_username]
+        group_empty_form.fields["candidate_usernames"].choices = candidate_choices
+
+    return render(
+        request,
+        "core/election_edit.html",
+        {
+            "is_create": is_create,
+            "election": election,
+            "details_form": details_form,
+            "email_form": email_form,
+            "candidate_formset": candidate_formset,
+            "group_formset": group_formset,
+            "group_empty_form": group_empty_form,
+            "eligible_usernames_count": len(eligible_usernames),
+            "templates": templates,
+            "rendered_preview": rendered_preview,
+            "default_template_name": settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+        },
+    )
+
+
+@require_GET
+def election_detail(request, election_id: int):
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+
+    can_manage_elections = request.user.has_perm(ASTRA_ADD_ELECTION)
+
+    is_staff = bool(request.user.is_staff)
+    if election.status == Election.Status.draft and not (is_staff or can_manage_elections):
+        raise Http404
+
+    candidates = list(Candidate.objects.filter(election=election).order_by("ordering", "id"))
+
+    usernames: set[str] = set()
+    for c in candidates:
+        if c.freeipa_username:
+            usernames.add(c.freeipa_username)
+        if c.nominated_by:
+            usernames.add(c.nominated_by)
+
+    users_by_username: dict[str, FreeIPAUser] = {}
+    for username in sorted(usernames):
+        user = FreeIPAUser.get(username)
+        if user is None:
+            # Keep rendering stable even if FreeIPA doesn't return the user.
+            users_by_username[username] = FreeIPAUser(username, {"uid": [username], "memberof_group": []})
+        else:
+            users_by_username[username] = user
+
+    candidate_cards: list[dict[str, object]] = []
+    for c in candidates:
+        candidate_user = users_by_username.get(c.freeipa_username)
+        nominator_user = users_by_username.get(c.nominated_by) if c.nominated_by else None
+        candidate_cards.append(
+            {
+                "candidate": c,
+                "candidate_user": candidate_user,
+                "nominator_user": nominator_user,
+            }
+        )
+
+    def _natural_join(items: list[str]) -> str:
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+    def _candidate_display_name(username: str) -> str:
+        user = users_by_username.get(username)
+        full_name = user.get_full_name() if user is not None else ""
+        full_name = str(full_name or "").strip()
+        if not full_name:
+            full_name = username
+        return f"{full_name} ({username})"
+
+    exclusion_group_messages: list[str] = []
+    exclusion_groups = list(
+        ExclusionGroup.objects.filter(election=election)
+        .prefetch_related(
+            Prefetch(
+                "candidates",
+                queryset=Candidate.objects.only("id", "freeipa_username", "ordering").order_by("ordering", "id"),
+            )
+        )
+        .order_by("name", "id")
+    )
+    for group in exclusion_groups:
+        group_candidates = [c for c in group.candidates.all() if c.freeipa_username]
+        names = [_candidate_display_name(c.freeipa_username) for c in group_candidates]
+        if not names:
+            continue
+
+        who = _natural_join(names)
+        candidate_word = "candidate" if group.max_elected == 1 else "candidates"
+        exclusion_group_messages.append(
+            f"{who} belong to the {group.name} exclusion group: only {group.max_elected} {candidate_word} of the group can be elected."
+        )
+
+    tally_result = election.tally_result or {}
+    elected_ids = [int(x) for x in (tally_result.get("elected") or [])]
+    tally_elected: list[Candidate] = []
+    if elected_ids:
+        candidates_by_id = {c.id: c for c in candidates}
+        tally_elected = [candidates_by_id[cid] for cid in elected_ids if cid in candidates_by_id]
+
+    tally_winners: list[dict[str, str]] = []
+    for c in tally_elected:
+        user = users_by_username.get(c.freeipa_username)
+        full_name = user.get_full_name() if user is not None else c.freeipa_username
+        tally_winners.append({"username": c.freeipa_username, "full_name": full_name})
+
+    admin_context = _eligible_voters_context(request=request, election=election, enabled=can_manage_elections)
+
+    username = str(request.session.get("_freeipa_username") or "").strip()
+    if not username:
+        username = str(request.user.get_username() or "").strip()
+
+    voter_votes: int | None = None
+    if election.status == Election.Status.open and username:
+        credential = (
+            VotingCredential.objects.filter(election=election, freeipa_username=username)
+            .only("weight")
+            .first()
+        )
+        voter_votes = int(credential.weight or 0) if credential is not None else 0
+
+    can_vote = election.status == Election.Status.open and bool(voter_votes and voter_votes > 0)
+
+    turnout_stats: dict[str, object] = {}
+    turnout_chart_data: dict[str, object] = {}
+    if can_manage_elections:
+        eligible_voters = admin_context.get("eligible_voters") or eligible_voters_from_memberships(election=election)
+        eligible_voter_count = len(eligible_voters)
+        eligible_weight_total = sum(v.weight for v in eligible_voters)
+
+        # Quorum is 50% of eligible voters, rounded up (i.e., require at least half).
+        quorum_voters = (eligible_voter_count + 1) // 2
+
+        ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
+            ballots=Count("id"),
+            weight_total=Sum("weight"),
+        )
+        ballots_cast = int(ballot_agg.get("ballots") or 0)
+        votes_cast = int(ballot_agg.get("weight_total") or 0)
+
+        ballots_pct = 0
+        if eligible_voter_count > 0:
+            ballots_pct = min(100, int((ballots_cast * 100) / eligible_voter_count))
+        votes_pct = 0
+        if eligible_weight_total > 0:
+            votes_pct = min(100, int((votes_cast * 100) / eligible_weight_total))
+
+        turnout_stats = {
+            "ballots_cast": ballots_cast,
+            "votes_cast": votes_cast,
+            "eligible_voters": eligible_voter_count,
+            "eligible_votes": eligible_weight_total,
+            "quorum_voters": quorum_voters,
+            "quorum_met": ballots_cast >= quorum_voters,
+            "ballots_pct": ballots_pct,
+            "votes_pct": votes_pct,
+        }
+
+        if election.status == Election.Status.open:
+            rows = (
+                AuditLogEntry.objects.filter(election=election, event_type="ballot_submitted")
+                .annotate(day=TruncDate("timestamp"))
+                .values("day")
+                .annotate(count=Count("id"))
+                .order_by("day")
+            )
+
+            counts_by_day: dict[datetime.date, int] = {}
+            for row in rows:
+                day = row.get("day")
+                if not isinstance(day, datetime.date):
+                    continue
+                counts_by_day[day] = int(row.get("count") or 0)
+
+            start_day = timezone.localdate(election.start_datetime)
+            end_day = timezone.localdate()
+            if end_day < start_day:
+                end_day = start_day
+
+            labels: list[str] = []
+            counts: list[int] = []
+            cursor = start_day
+            while cursor <= end_day:
+                labels.append(cursor.isoformat())
+                counts.append(counts_by_day.get(cursor, 0))
+                cursor += datetime.timedelta(days=1)
+
+            turnout_chart_data = {
+                "labels": labels,
+                "counts": counts,
+            }
+
+    results_stats: dict[str, object] = {}
+    if election.status == Election.Status.tallied:
+        ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
+            ballots=Count("id"),
+            weight_total=Sum("weight"),
+        )
+
+        eligible_voters = admin_context.get("eligible_voters") or eligible_voters_from_memberships(election=election)
+        eligible_voter_count = len(eligible_voters)
+        eligible_weight_total = sum(v.weight for v in eligible_voters)
+
+        cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+        eligible_breakdown = list(
+            Membership.objects.filter(
+                membership_type__isIndividual=True,
+                membership_type__enabled=True,
+                membership_type__votes__gt=0,
+                created_at__lte=cutoff,
+            )
+            .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
+            .values(
+                "membership_type__code",
+                "membership_type__name",
+                "membership_type__votes",
+            )
+            .annotate(
+                voters=Count("target_username", distinct=True),
+                vote_weight_total=Sum("membership_type__votes"),
+            )
+            .order_by("-vote_weight_total", "membership_type__code")
+        )
+
+        results_stats = {
+            "ballots_cast": int(ballot_agg.get("ballots") or 0),
+            "votes_cast": int(ballot_agg.get("weight_total") or 0),
+            "eligible_voters": eligible_voter_count,
+            "eligible_votes": eligible_weight_total,
+            "eligible_breakdown": eligible_breakdown,
+        }
+
+    return render(
+        request,
+        "core/election_detail.html",
+        {
+            "election": election,
+            "candidates": candidates,
+            "candidate_cards": candidate_cards,
+            "can_manage_elections": can_manage_elections,
+            "can_vote": can_vote,
+            "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
+            **admin_context,
+            "turnout_stats": turnout_stats,
+            "turnout_chart_data": turnout_chart_data,
+            "exclusion_group_messages": exclusion_group_messages,
+            "tally_elected": tally_elected,
+            "tally_winners": tally_winners,
+            "results_stats": results_stats,
+        },
+    )
+
+
+def _eligible_voters_context(*, request, election: Election, enabled: bool) -> dict[str, object]:
+    if not enabled:
+        return {}
+
+    eligible = eligible_voters_from_memberships(election=election)
+
+    usernames = [v.username for v in eligible]
+    grid_items = [{"kind": "user", "username": username} for username in usernames]
+
+    paginator = Paginator(grid_items, per_page=24)
+    page_number = str(request.GET.get("eligible_page") or "1").strip()
+    page_obj = paginator.get_page(page_number)
+
+    total_pages = paginator.num_pages
+    current_page = page_obj.number
+    if total_pages <= 10:
+        page_numbers = list(range(1, total_pages + 1))
+        show_first = False
+        show_last = False
+    else:
+        start = max(1, current_page - 2)
+        end = min(total_pages, current_page + 2)
+        page_numbers = list(range(start, end + 1))
+        show_first = 1 not in page_numbers
+        show_last = total_pages not in page_numbers
+
+    qs = dict(request.GET.items())
+    qs.pop("eligible_page", None)
+    page_url_prefix = f"?{urlencode(qs)}&eligible_page=" if qs else "?eligible_page="
+
+    return {
+        "eligible_voters": eligible,
+        "eligible_voter_usernames": usernames,
+        "grid_items": list(page_obj),
+        "paginator": paginator,
+        "page_obj": page_obj,
+        "is_paginated": paginator.num_pages > 1,
+        "page_numbers": page_numbers,
+        "show_first": show_first,
+        "show_last": show_last,
+        "page_url_prefix": page_url_prefix,
+        "empty_label": "No eligible voters.",
+    }
+
+
+@require_POST
+@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
+def election_resend_credentials(request, election_id: int):
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+
+    target_username = str(request.POST.get("username") or "").strip()
+
+    credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
+    if not credentials_qs.exists():
+        issued = issue_voting_credentials_from_memberships_detailed(election=election)
+        by_username = {c.freeipa_username: c for c in issued if c.freeipa_username}
+        if target_username:
+            credential_list = [by_username[target_username]] if target_username in by_username else []
+        else:
+            credential_list = list(by_username.values())
+    else:
+        if target_username:
+            credential_list = list(
+                credentials_qs.filter(freeipa_username=target_username).only("freeipa_username", "public_id")
+            )
+        else:
+            credential_list = list(credentials_qs.only("freeipa_username", "public_id"))
+
+    if target_username and not credential_list:
+        messages.error(request, "That user does not have a voting credential for this election.")
+        return redirect("election-detail", election_id=election.id)
+
+    emailed = 0
+    skipped = 0
+    failed = 0
+
+    for credential in credential_list:
+        username = str(credential.freeipa_username or "").strip()
+        if not username:
+            continue
+
+        user = FreeIPAUser.get(username)
+        if user is None or not user.email:
+            skipped += 1
+            continue
+
+        tz_name = _get_freeipa_timezone_name(user)
+
+        try:
+            elections_services.send_voting_credential_email(
+                request=request,
+                election=election,
+                username=username,
+                email=user.email,
+                credential_public_id=str(credential.public_id),
+                tz_name=tz_name,
+            )
+            emailed += 1
+        except Exception:
+            failed += 1
+
+    if emailed:
+        messages.success(request, f"Sent {emailed} credential email(s).")
+    if skipped:
+        messages.warning(request, f"Skipped {skipped} user(s) (missing email).")
+    if failed:
+        messages.error(request, f"Failed to send {failed} email(s).")
+
+    return redirect("election-detail", election_id=election.id)
+
+
+@require_POST
+@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
+def election_conclude(request, election_id: int):
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+
+    skip_tally = bool(request.POST.get("skip_tally"))
+
+    try:
+        elections_services.close_election(election=election)
+    except ElectionError as exc:
+        messages.error(request, str(exc))
+        return redirect("election-detail", election_id=election.id)
+
+    if skip_tally:
+        messages.success(request, "Election closed.")
+        return redirect("election-detail", election_id=election.id)
+
+    try:
+        elections_services.tally_election(election=election)
+    except ElectionError as exc:
+        messages.error(request, f"Election closed, but tally failed: {exc}")
+        return redirect("election-detail", election_id=election.id)
+
+    messages.success(request, "Election closed and tallied.")
+    return redirect("election-detail", election_id=election.id)
+
+
+def _get_exportable_election(*, election_id: int) -> Election:
+    election = Election.objects.filter(pk=election_id).only("id", "status").first()
+    if election is None:
+        raise Http404
+    if election.status not in {Election.Status.closed, Election.Status.tallied}:
+        raise Http404
+    return election
+
+
+@require_GET
+def election_public_ballots(request, election_id: int):
+    election = _get_exportable_election(election_id=election_id)
+
+    ballots = list(
+        Ballot.objects.filter(election=election)
+        .order_by("created_at", "id")
+        .values(
+            "ranking",
+            "weight",
+            "ballot_hash",
+            "is_counted",
+            "chain_hash",
+            "previous_chain_hash",
+            "superseded_by__ballot_hash",
+        )
+    )
+    for row in ballots:
+        row["superseded_by"] = row.pop("superseded_by__ballot_hash")
+
+    chain_head = ballots[-1]["chain_hash"] if ballots else "0" * 64
+
+    return JsonResponse(
+        {
+            "election_id": election.id,
+            "ballots": ballots,
+            "chain_head": chain_head,
+        }
+    )
+
+
+@require_GET
+def election_public_audit(request, election_id: int):
+    election = _get_exportable_election(election_id=election_id)
+
+    rows = list(
+        AuditLogEntry.objects.filter(election=election, is_public=True)
+        .order_by("timestamp", "id")
+        .values(
+            "timestamp",
+            "event_type",
+            "payload",
+        )
+    )
+    for row in rows:
+        row["timestamp"] = row["timestamp"].isoformat()
+
+    return JsonResponse(
+        {
+            "election_id": election.id,
+            "audit_log": rows,
+        }
+    )
+
+
+@require_GET
+def election_audit_log(request, election_id: int):
+    """Render a human-readable election audit log.
+
+    This page is meant to improve transparency and auditability by presenting
+    the election's public audit events (and, for election managers, private
+    events as well) in a chronological timeline.
+    """
+
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+
+    if election.status not in {Election.Status.closed, Election.Status.tallied}:
+        raise Http404
+
+    candidates = list(
+        Candidate.objects.filter(election=election).only("id", "freeipa_username").order_by("ordering", "id")
+    )
+    candidate_username_by_id: dict[int, str] = {
+        int(c.id): str(c.freeipa_username or "").strip()
+        for c in candidates
+        if str(c.freeipa_username or "").strip()
+    }
+
+    audit_qs = AuditLogEntry.objects.filter(election=election)
+    can_manage_elections = request.user.has_perm(ASTRA_ADD_ELECTION)
+    if not can_manage_elections:
+        audit_qs = audit_qs.filter(is_public=True)
+
+    timeline_items: list[AuditLogEntry | dict[str, object]] = []
+    non_ballot_entries = list(
+        audit_qs.exclude(event_type="ballot_submitted")
+        .only("id", "timestamp", "event_type", "payload", "is_public")
+        .order_by("timestamp", "id")
+    )
+    timeline_items.extend(non_ballot_entries)
+
+    if can_manage_elections:
+        # Group ballot submissions by day for managers to keep the timeline readable.
+        ballot_qs = audit_qs.filter(event_type="ballot_submitted")
+        for row in (
+            ballot_qs.annotate(day=TruncDate("timestamp"))
+            .values("day")
+            .annotate(
+                ballots_count=Count("id"),
+                first_timestamp=Min("timestamp"),
+                last_timestamp=Max("timestamp"),
+            )
+            .order_by("day")
+        ):
+            day = row.get("day")
+            first_ts = row.get("first_timestamp")
+            last_ts = row.get("last_timestamp")
+            if not isinstance(day, datetime.date) or not isinstance(first_ts, datetime.datetime) or not isinstance(
+                last_ts, datetime.datetime
+            ):
+                continue
+            timeline_items.append(
+                {
+                    "timestamp": last_ts,
+                    "event_type": "ballots_submitted_summary",
+                    "payload": {},
+                    "ballot_date": day.isoformat(),
+                    "ballots_count": int(row.get("ballots_count") or 0),
+                    "first_timestamp": first_ts,
+                    "last_timestamp": last_ts,
+                }
+            )
+
+    def _timeline_sort_key(item: AuditLogEntry | dict[str, object]) -> tuple[datetime.datetime, int]:
+        if isinstance(item, dict):
+            ts = item.get("timestamp")
+            if isinstance(ts, datetime.datetime):
+                return (ts, 0)
+            return (datetime.datetime.min.replace(tzinfo=timezone.get_current_timezone()), 0)
+        return (item.timestamp, item.id)
+
+    # Sort newest-first to support "load older" navigation.
+    timeline_items.sort(key=_timeline_sort_key, reverse=True)
+
+    page_raw = str(request.GET.get("page") or "1").strip()
+    try:
+        page_number = int(page_raw)
+    except ValueError:
+        page_number = 1
+
+    paginator = Paginator(timeline_items, 60)
+    page_obj = paginator.get_page(page_number)
+
+    base_url = reverse("election-audit-log", args=[election.id])
+
+    def _url_for_page(page: int) -> str:
+        q = request.GET.copy()
+        q["page"] = str(page)
+        return f"{base_url}?{q.urlencode()}"
+
+    newer_url = _url_for_page(page_obj.previous_page_number()) if page_obj.has_previous() else ""
+    older_url = _url_for_page(page_obj.next_page_number()) if page_obj.has_next() else ""
+
+    ballot_preview_by_date: dict[str, list[dict[str, object]]] = {}
+    ballot_preview_limit = 50
+    if can_manage_elections:
+        preview_dates: list[datetime.date] = []
+        for it in page_obj.object_list:
+            if not isinstance(it, dict):
+                continue
+            if str(it.get("event_type") or "") != "ballots_submitted_summary":
+                continue
+            day_raw = str(it.get("ballot_date") or "").strip()
+            if not day_raw:
+                continue
+            try:
+                preview_dates.append(datetime.date.fromisoformat(day_raw))
+            except ValueError:
+                continue
+
+        if preview_dates:
+            ballot_qs = audit_qs.filter(event_type="ballot_submitted")
+            for day in sorted(set(preview_dates)):
+                rows = list(
+                    ballot_qs.filter(timestamp__date=day)
+                    .only("timestamp", "payload")
+                    .order_by("timestamp", "id")[:ballot_preview_limit]
+                )
+                preview: list[dict[str, object]] = []
+                for row in rows:
+                    payload = row.payload if isinstance(row.payload, dict) else {}
+                    ballot_hash = str(payload.get("ballot_hash") or "").strip()
+                    supersedes_hash = str(payload.get("supersedes_ballot_hash") or "").strip()
+                    preview.append(
+                        {
+                            "timestamp": row.timestamp,
+                            "ballot_hash": ballot_hash,
+                            "supersedes_ballot_hash": supersedes_hash,
+                        }
+                    )
+                ballot_preview_by_date[day.isoformat()] = preview
+
+    ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
+        ballots=Count("id"),
+        weight_total=Sum("weight"),
+    )
+    ballots_cast = int(ballot_agg.get("ballots") or 0)
+    votes_cast = int(ballot_agg.get("weight_total") or 0)
+
+    tally_result = election.tally_result or {}
+
+    def _icon_for_event(event_type: str) -> tuple[str, str]:
+        match event_type:
+            case "election_started":
+                return ("fas fa-play", "bg-green")
+            case "ballot_submitted":
+                return ("fas fa-vote-yea", "bg-blue")
+            case "ballots_submitted_summary":
+                return ("fas fa-layer-group", "bg-blue")
+            case "election_closed":
+                return ("fas fa-lock", "bg-orange")
+            case "credentials_anonymized":
+                return ("fas fa-user-secret", "bg-purple")
+            case "tally_round":
+                return ("fas fa-calculator", "bg-info")
+            case "tally_completed":
+                return ("fas fa-flag-checkered", "bg-success")
+            case _:
+                return ("fas fa-info-circle", "bg-secondary")
+
+    def _title_for_event(event_type: str, payload: dict[str, object]) -> str:
+        match event_type:
+            case "election_started":
+                return "Election started"
+            case "ballot_submitted":
+                return "Ballot submitted"
+            case "ballots_submitted_summary":
+                return "Ballots submitted"
+            case "election_closed":
+                return "Election closed"
+            case "credentials_anonymized":
+                return "Voting credentials anonymized"
+            case "tally_round":
+                round_number = payload.get("round")
+                iteration = payload.get("iteration")
+                if isinstance(round_number, int) and isinstance(iteration, int):
+                    return f"Tally round {round_number} (iteration {iteration})"
+                if isinstance(round_number, int):
+                    return f"Tally round {round_number}"
+                if isinstance(iteration, int):
+                    return f"Tally iteration {iteration}"
+                return "Tally round"
+            case "tally_completed":
+                return "Tally completed"
+            case _:
+                return event_type.replace("_", " ")
+
+    def _candidate_username(cid: int) -> str:
+        username = candidate_username_by_id.get(cid)
+        if username:
+            return username
+        return str(cid)
+
+    events: list[dict[str, object]] = []
+    jump_links: list[dict[str, str]] = []
+    anchor_for_event_type = {
+        "election_closed": "jump-election-closed",
+        "tally_round": "jump-tally-rounds",
+        "tally_completed": "jump-tally-completed",
+    }
+    anchor_labels = {
+        "election_closed": "Election closed",
+        "tally_round": "Tally rounds",
+        "tally_completed": "Results",
+    }
+    anchors_added: set[str] = set()
+
+    for item in page_obj.object_list:
+        if isinstance(item, dict):
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            event_type = str(item.get("event_type") or "").strip() or "unknown"
+            timestamp = item.get("timestamp")
+            if not isinstance(timestamp, datetime.datetime):
+                continue
+            icon, icon_bg = _icon_for_event(event_type)
+            event: dict[str, object] = {
+                "timestamp": timestamp,
+                "event_type": event_type,
+                "title": _title_for_event(event_type, payload),
+                "icon": icon,
+                "icon_bg": icon_bg,
+                "payload": payload,
+            }
+            event.update(item)
+
+            if event_type == "ballots_submitted_summary":
+                day = str(event.get("ballot_date") or "").strip()
+                entries = ballot_preview_by_date.get(day, [])
+                event["ballot_entries"] = entries
+                try:
+                    count = int(event.get("ballots_count") or 0)
+                except (TypeError, ValueError):
+                    count = 0
+                event["ballots_preview_truncated"] = count > len(entries)
+                event["ballots_preview_limit"] = ballot_preview_limit
+
+            anchor = anchor_for_event_type.get(event_type)
+            if anchor and anchor not in anchors_added:
+                anchors_added.add(anchor)
+                event["anchor"] = anchor
+                jump_links.append({"anchor": anchor, "label": anchor_labels.get(event_type, event_type)})
+            events.append(event)
+            continue
+
+        entry = item
+        payload = entry.payload if isinstance(entry.payload, dict) else {}
+        event_type = str(entry.event_type or "").strip() or "unknown"
+        icon, icon_bg = _icon_for_event(event_type)
+
+        event: dict[str, object] = {
+            "timestamp": entry.timestamp,
+            "event_type": event_type,
+            "title": _title_for_event(event_type, payload),
+            "icon": icon,
+            "icon_bg": icon_bg,
+            "payload": payload,
+        }
+
+        anchor = anchor_for_event_type.get(event_type)
+        if anchor and anchor not in anchors_added:
+            anchors_added.add(anchor)
+            event["anchor"] = anchor
+            jump_links.append({"anchor": anchor, "label": anchor_labels.get(event_type, event_type)})
+
+        if event_type == "tally_round":
+            retained_totals_obj = payload.get("retained_totals")
+            retention_factors_obj = payload.get("retention_factors")
+            retained_totals: dict[int, str] = {}
+            retention_factors: dict[int, str] = {}
+
+            if isinstance(retained_totals_obj, dict):
+                for k, v in retained_totals_obj.items():
+                    try:
+                        cid = int(k)
+                    except (TypeError, ValueError):
+                        continue
+                    retained_totals[cid] = str(v)
+
+            if isinstance(retention_factors_obj, dict):
+                for k, v in retention_factors_obj.items():
+                    try:
+                        cid = int(k)
+                    except (TypeError, ValueError):
+                        continue
+                    retention_factors[cid] = str(v)
+
+            elected_ids_obj = payload.get("elected")
+            elected_ids = {int(x) for x in elected_ids_obj} if isinstance(elected_ids_obj, list) else set()
+            eliminated_obj = payload.get("eliminated")
+            eliminated_id = int(eliminated_obj) if isinstance(eliminated_obj, int) else None
+
+            def _sort_key(item: tuple[int, str]) -> tuple[Decimal, str]:
+                cid, retained_str = item
+                try:
+                    retained_val = Decimal(str(retained_str))
+                except (InvalidOperation, ValueError):
+                    retained_val = Decimal(0)
+                return (retained_val, _candidate_username(cid).lower())
+
+            round_rows: list[dict[str, object]] = []
+            for cid, retained_str in sorted(retained_totals.items(), key=_sort_key, reverse=True):
+                username = candidate_username_by_id.get(cid, "")
+                profile_url = reverse("user-profile", args=[username]) if username else ""
+                round_rows.append(
+                    {
+                        "candidate_id": cid,
+                        "candidate_username": username,
+                        "candidate_profile_url": profile_url,
+                        "candidate_label": username or str(cid),
+                        "retained_total": retained_str,
+                        "retention_factor": retention_factors.get(cid, ""),
+                        "is_elected": cid in elected_ids,
+                        "is_eliminated": eliminated_id is not None and cid == eliminated_id,
+                    }
+                )
+
+            event["round_rows"] = round_rows
+            event["summary_text"] = str(payload.get("summary_text") or "").strip()
+            event["audit_text"] = str(payload.get("audit_text") or "").strip()
+
+        if event_type == "tally_completed":
+            elected_obj = payload.get("elected")
+            elected_ids = [int(x) for x in elected_obj] if isinstance(elected_obj, list) else []
+            elected_users: list[dict[str, str]] = []
+            for cid in elected_ids:
+                username = candidate_username_by_id.get(cid, "")
+                if not username:
+                    continue
+                elected_users.append(
+                    {
+                        "username": username,
+                        "profile_url": reverse("user-profile", args=[username]),
+                    }
+                )
+            event["elected_users"] = elected_users
+
+        events.append(event)
+
+    tally_elected_users: list[dict[str, str]] = []
+    elected_from_result = tally_result.get("elected")
+    if isinstance(elected_from_result, list):
+        for cid_obj in elected_from_result:
+            try:
+                cid = int(cid_obj)
+            except (TypeError, ValueError):
+                continue
+            username = candidate_username_by_id.get(cid, "")
+            if not username:
+                continue
+            tally_elected_users.append(
+                {
+                    "username": username,
+                    "profile_url": reverse("user-profile", args=[username]),
+                }
+            )
+
+    return render(
+        request,
+        "core/election_audit_log.html",
+        {
+            "election": election,
+            "can_manage_elections": can_manage_elections,
+            "events": events,
+            "jump_links": jump_links,
+            "newer_url": newer_url,
+            "older_url": older_url,
+            "page_obj": page_obj,
+            "candidates": candidates,
+            "ballots_cast": ballots_cast,
+            "votes_cast": votes_cast,
+            "tally_result": tally_result,
+            "quota": tally_result.get("quota"),
+            "tally_elected_users": tally_elected_users,
+        },
+    )
+
+
+def _parse_vote_payload(request, *, election: Election) -> tuple[str, list[int]]:
+    if request.content_type and request.content_type.startswith("application/json"):
+        raw = request.body.decode("utf-8") if request.body else "{}"
+        data = json.loads(raw)
+        credential_public_id = str(data.get("credential_public_id") or "").strip()
+        ranking_raw = data.get("ranking")
+    else:
+        credential_public_id = str(request.POST.get("credential_public_id") or "").strip()
+        ranking_raw = str(request.POST.get("ranking") or "").strip()
+        ranking_usernames_raw = str(request.POST.get("ranking_usernames") or "").strip()
+        if not ranking_raw and ranking_usernames_raw:
+            ranking_raw = ranking_usernames_raw
+
+    if not credential_public_id:
+        raise ValueError("credential_public_id is required")
+
+    if isinstance(ranking_raw, list):
+        ranking = [int(x) for x in ranking_raw]
+    elif isinstance(ranking_raw, str):
+        # Allow comma-separated input.
+        parts = [p.strip() for p in ranking_raw.split(",") if p.strip()]
+        if not parts:
+            ranking = []
+        else:
+            # First try numeric IDs (JS path).
+            try:
+                ranking = [int(p) for p in parts]
+            except ValueError:
+                # No-JS fallback: accept comma-separated FreeIPA usernames.
+                # Resolve them to candidate IDs at submit-time.
+                ranking = []
+                usernames = [p.lower() for p in parts]
+                candidates = list(
+                    Candidate.objects.filter(election=election, freeipa_username__in=usernames).values_list(
+                        "freeipa_username",
+                        "id",
+                    )
+                )
+                by_username = {u.lower(): int(cid) for u, cid in candidates}
+                for u in usernames:
+                    cid = by_username.get(u)
+                    if cid is not None:
+                        ranking.append(cid)
+    else:
+        raise ValueError("ranking must be a list")
+
+    if not ranking:
+        raise ValueError("ranking is required")
+
+    return credential_public_id, ranking
+
+
+@require_POST
+def election_vote_submit(request, election_id: int):
+    election = Election.objects.filter(pk=election_id).only("id", "status").first()
+    if election is None:
+        raise Http404
+
+    try:
+        credential_public_id, ranking = _parse_vote_payload(request, election=election)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+    username = str(request.session.get("_freeipa_username") or "").strip()
+    if not username:
+        username = str(request.user.get_username() or "").strip()
+    if not username:
+        return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
+
+    # Voting eligibility and weight are determined when credentials are issued.
+    # Do not re-check current memberships here; they can change while the election is open.
+    try:
+        user_credential = VotingCredential.objects.only("public_id", "weight").get(
+            election_id=election.id,
+            freeipa_username=username,
+        )
+    except VotingCredential.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Not eligible to vote in this election."}, status=403)
+
+    if int(user_credential.weight or 0) <= 0:
+        return JsonResponse({"ok": False, "error": "Not eligible to vote in this election."}, status=403)
+
+    if str(user_credential.public_id) != credential_public_id:
+        other_credential = (
+            VotingCredential.objects.filter(election_id=election.id, public_id=credential_public_id)
+            .only("freeipa_username")
+            .first()
+        )
+        if other_credential is None:
+            return JsonResponse({"ok": False, "error": "Invalid credential."}, status=400)
+        return JsonResponse({"ok": False, "error": "Credential does not belong to the current user."}, status=403)
+
+    try:
+        receipt = submit_ballot(
+            election=election,
+            credential_public_id=credential_public_id,
+            ranking=ranking,
+        )
+    except (InvalidCredentialError, ElectionNotOpenError) as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+    freeipa_user = FreeIPAUser.get(username)
+    voter_email = str(freeipa_user.email or "").strip() if freeipa_user is not None else ""
+    if voter_email:
+        tz_name = _get_freeipa_timezone_name(freeipa_user) if freeipa_user is not None else None
+        elections_services.send_vote_receipt_email(
+            request=request,
+            election=election,
+            username=username,
+            email=voter_email,
+            receipt=receipt,
+            tz_name=tz_name,
+        )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "election_id": election.id,
+            "ballot_hash": receipt.ballot.ballot_hash,
+            "nonce": receipt.nonce,
+            "previous_chain_hash": receipt.ballot.previous_chain_hash,
+            "chain_hash": receipt.ballot.chain_hash,
+        }
+    )
+
+
+@require_GET
+def election_vote(request, election_id: int):
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+    if election.status in {Election.Status.closed, Election.Status.tallied}:
+        return HttpResponseGone("Election is closed.")
+    if election.status != Election.Status.open:
+        raise Http404
+
+    username = str(request.session.get("_freeipa_username") or "").strip()
+    if not username:
+        username = str(request.user.get_username() or "").strip()
+
+    voter_votes: int | None = None
+    if username:
+        credential = (
+            VotingCredential.objects.filter(election=election, freeipa_username=username)
+            .only("weight")
+            .first()
+        )
+        voter_votes = int(credential.weight or 0) if credential is not None else 0
+
+    can_submit_vote = voter_votes is not None and voter_votes > 0
+
+    candidates = list(Candidate.objects.filter(election=election))
+    random.shuffle(candidates)
+
+    users_by_username: dict[str, FreeIPAUser] = {}
+    for c in candidates:
+        if c.freeipa_username and c.freeipa_username not in users_by_username:
+            user = FreeIPAUser.get(c.freeipa_username)
+            if user is None:
+                user = FreeIPAUser(c.freeipa_username, {"uid": [c.freeipa_username], "memberof_group": []})
+            users_by_username[c.freeipa_username] = user
+
+    candidate_display: list[dict[str, object]] = []
+    for c in candidates:
+        user = users_by_username.get(c.freeipa_username)
+        full_name = user.get_full_name() if user is not None else c.freeipa_username
+        label = f"{full_name} ({c.freeipa_username})"
+        candidate_display.append({"candidate": c, "label": label})
+
+    return render(
+        request,
+        "core/election_vote.html",
+        {
+            "election": election,
+            "candidates": candidate_display,
+            "voter_votes": voter_votes,
+            "can_submit_vote": can_submit_vote,
+        },
+    )

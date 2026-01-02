@@ -167,6 +167,16 @@
               </li>
             {% endif %}
 
+            <li class="nav-item">
+              <a
+                href="{% url 'elections' %}"
+                class="nav-link {% if current_url_name == 'elections' or current_url_name == 'election-detail' or current_url_name == 'election-vote' %}active{% endif %}"
+              >
+                <i class="nav-icon fas fa-vote-yea"></i>
+                <p>Elections</p>
+              </a>
+            </li>
+
             {% if membership_can_add or membership_can_view or mailmerge_can_add%}
               <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}menu-open{% endif %}">
                 <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}active{% endif %}">

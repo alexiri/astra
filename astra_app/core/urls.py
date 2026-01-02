@@ -1,6 +1,7 @@
 from django.urls import path
 
 from core import (
+    views_elections,
     views_groups,
     views_mailmerge,
     views_membership,
@@ -8,6 +9,7 @@ from core import (
     views_search,
     views_settings,
     views_settings_otp,
+    views_templated_email,
     views_users,
 )
 
@@ -50,16 +52,76 @@ urlpatterns = [
 
     path("search/", views_search.global_search, name="global-search"),
 
+    path("elections/", views_elections.elections_list, name="elections"),
+    path("elections/ballot/verify/", views_elections.ballot_verify, name="ballot-verify"),
+    path("elections/<int:election_id>/edit/", views_elections.election_edit, name="election-edit"),
+    path(
+        "elections/<int:election_id>/eligible-users/search/",
+        views_elections.election_eligible_users_search,
+        name="election-eligible-users-search",
+    ),
+    path(
+        "elections/<int:election_id>/email/render-preview/",
+        views_elections.election_email_render_preview,
+        name="election-email-render-preview",
+    ),
+    path("elections/<int:election_id>/", views_elections.election_detail, name="election-detail"),
+    path("elections/<int:election_id>/vote/", views_elections.election_vote, name="election-vote"),
+
+    path(
+        "elections/<int:election_id>/resend-credentials/",
+        views_elections.election_resend_credentials,
+        name="election-resend-credentials",
+    ),
+
+    path(
+        "elections/<int:election_id>/conclude/",
+        views_elections.election_conclude,
+        name="election-conclude",
+    ),
+
+    path(
+        "elections/<int:election_id>/public/ballots.json",
+        views_elections.election_public_ballots,
+        name="election-public-ballots",
+    ),
+    path(
+        "elections/<int:election_id>/public/audit.json",
+        views_elections.election_public_audit,
+        name="election-public-audit",
+    ),
+    path(
+        "elections/<int:election_id>/audit/",
+        views_elections.election_audit_log,
+        name="election-audit-log",
+    ),
+    path(
+        "elections/<int:election_id>/vote/submit.json",
+        views_elections.election_vote_submit,
+        name="election-vote-submit",
+    ),
+
     path("email-tools/mail-merge/", views_mailmerge.mail_merge, name="mail-merge"),
     path(
         "email-tools/mail-merge/render-preview/",
         views_mailmerge.mail_merge_render_preview,
         name="mail-merge-render-preview",
     ),
+
     path(
-        "email-tools/mail-merge/templates/<int:template_id>/",
-        views_mailmerge.mail_merge_template_json,
-        name="mail-merge-template-json",
+        "email-tools/templates/<int:template_id>/json/",
+        views_templated_email.email_template_json,
+        name="email-template-json",
+    ),
+    path(
+        "email-tools/templates/save/",
+        views_templated_email.email_template_save,
+        name="email-template-save",
+    ),
+    path(
+        "email-tools/templates/save-as/",
+        views_templated_email.email_template_save_as,
+        name="email-template-save-as",
     ),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),

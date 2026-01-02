@@ -1,3 +1,5 @@
+{% load core_dict %}
+
 <div class="card card-outline card-success">
   <div class="card-header">
     <h3 class="card-title">{{ card_title|default:"Compose email" }}</h3>
@@ -8,17 +10,21 @@
         <label for="id_email_template_id">Email template</label>
         <select class="form-control" name="email_template_id" id="id_email_template_id">
           <option value="">(None)</option>
-          {% for t in templates %}
-            <option value="{{ t.pk }}" {% if form.data.email_template_id == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
-          {% endfor %}
+          {% with selected_id=form.data|dict_get:"email_template_id"|default:form.initial|dict_get:"email_template_id" %}
+            {% for t in templates %}
+              <option value="{{ t.pk }}" {% if selected_id|stringformat:'s' == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          {% endwith %}
         </select>
         <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
 
-        <div class="mt-2">
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="mailmerge-restore-btn" disabled>Restore</button>
-          <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-btn">Save</button>
-          <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-as-btn">Save as…</button>
-        </div>
+        {% if show_save_buttons != False %}
+          <div class="mt-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="mailmerge-restore-btn" disabled>Restore</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-btn">Save</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-as-btn">Save as…</button>
+          </div>
+        {% endif %}
       </div>
 
       <div class="form-group col-md-6">
@@ -58,3 +64,9 @@
     </div>
   </div>
 </div>
+
+{% if show_save_buttons != False %}
+  {% include 'core/_modal_confirm.html' with modal_id='templated-email-save-modal' title='Save email template' body='Overwrite the selected email template with the current subject and contents?' action_url='#' submit_label='Save' submit_class='btn-primary' %}
+
+  {% include 'core/_modal_confirm.html' with modal_id='templated-email-save-as-modal' title='Save email template as…' body='Create a new template from the current subject and contents?' action_url='#' submit_label='Create' submit_class='btn-primary' dialog_style='text-align: left;' form_fields_template='core/_templated_email_save_as_fields.html' %}
+{% endif %}

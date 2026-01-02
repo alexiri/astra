@@ -1,0 +1,115 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Verify ballot receipt{% endblock %}
+
+{% block header %}<h1 class="m-0">Verify ballot receipt</h1>{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-10 col-lg-8">
+    <div class="card card-primary">
+      <div class="card-header">
+        <h3 class="card-title">Ballot receipt verification</h3>
+      </div>
+
+      <div class="card-body">
+        <p class="text-muted">
+          Enter the 64-character receipt you received after submitting your ballot. This page confirms whether a ballot
+          with that receipt is recorded. It does not show your selections, your identity, or exact timestamps.
+        </p>
+
+        <form method="get" action="{% url 'ballot-verify' %}" class="mb-4" novalidate>
+          <div class="form-group">
+            <label for="id_receipt">Receipt</label>
+            <input
+              type="text"
+              class="form-control"
+              id="id_receipt"
+              name="receipt"
+              value="{{ receipt|default:'' }}"
+              placeholder="64-character lowercase hex"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+
+          <button type="submit" class="btn btn-primary">Verify</button>
+        </form>
+
+        {% if has_query %}
+          {% if not is_valid_receipt %}
+            <div class="alert alert-danger" role="alert">
+              <strong>Invalid receipt.</strong> Please enter a 64-character lowercase hex value.
+            </div>
+          {% elif not found %}
+            <div class="alert alert-warning" role="alert">
+              <strong>No ballot with this receipt was found.</strong>
+            </div>
+          {% else %}
+            <div class="card">
+              <div class="card-body">
+                <h5>Ballot status</h5>
+                <div class="alert alert-success mb-3" role="alert">
+                  Yes — a ballot with this receipt is recorded for this election.
+                </div>
+
+                <h5>Tally status</h5>
+                {% if election_status == 'open' %}
+                  <p>
+                    This election is still open, so the final tally is not available yet. We will not report whether any ballot
+                    is included in the final tally until after the election closes.
+                  </p>
+                {% elif election_status == 'closed' %}
+                  {% if is_superseded %}
+                    <p>
+                      This ballot was replaced by a later submission from the same voter and will not be included in the upcoming tally.
+                    </p>
+                  {% else %}
+                    <p>This ballot is recorded and locked and will be included in the upcoming tally.</p>
+                  {% endif %}
+                {% elif election_status == 'tallied' %}
+                  {% if is_superseded %}
+                    <p>
+                      This ballot was replaced by a later submission from the same voter and was not included in the final tally.
+                    </p>
+                  {% else %}
+                    <p>This ballot was included in the final tally.</p>
+                  {% endif %}
+
+                  {% if public_ballots_url or audit_log_url %}
+                    <h5>Public verification</h5>
+                    <ul>
+                      {% if public_ballots_url %}
+                        <li><a href="{{ public_ballots_url }}">Public ballots ledger (JSON)</a></li>
+                      {% endif %}
+                      {% if audit_log_url %}
+                        <li><a href="{{ audit_log_url }}">Audit log</a></li>
+                      {% endif %}
+                    </ul>
+                  {% endif %}
+                {% endif %}
+
+                <h5>Ballot Information</h5>
+                <ul>
+                  <li><strong>Election:</strong> <a href="{% url 'election-detail' election.id %}">{{ election.name }}</a></li>
+                  <li><strong>Election status:</strong> {{ election_status }}</li>
+                  <li><strong>Submission date:</strong> {{ submitted_date }}</li>
+                  <li>
+                    <strong>Ballot status:</strong>
+                    {% if is_superseded %}
+                      Superseded (replaced by a later submission)
+                    {% else %}
+                      Final ballot submission
+                    {% endif %}
+                  </li>
+                </ul>
+
+              </div>
+            </div>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
