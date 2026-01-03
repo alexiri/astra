@@ -249,7 +249,7 @@ class ElectionVoteWeightsTests(TestCase):
         self.assertEqual(len(previous_chain_hash), 64)
         self.assertEqual(len(chain_hash), 64)
 
-    def test_tally_uses_ballot_weight_after_credentials_anonymized(self) -> None:
+    def test_tally_uses_ballot_weight_after_election_anonymized(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Anonymized credential election",

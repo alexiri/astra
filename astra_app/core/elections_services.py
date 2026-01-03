@@ -778,22 +778,31 @@ def issue_voting_credential(*, election: Election, freeipa_username: str, weight
 
 
 @transaction.atomic
-def anonymize_election_credentials(*, election: Election) -> int:
+def anonymize_election(*, election: Election) -> dict[str, int]:
+    """Anonymize election credentials and scrub sensitive emails.
+    
+    Returns a dict with 'credentials_affected' and 'emails_scrubbed' counts.
+    """
     if election.status not in {Election.Status.closed, Election.Status.tallied}:
         raise ElectionNotClosedError("election must be closed or tallied to anonymize")
 
-    updated = VotingCredential.objects.filter(election=election, freeipa_username__isnull=False).update(
-        freeipa_username=None
-    )
+    credentials_affected = VotingCredential.objects.filter(
+        election=election, freeipa_username__isnull=False
+    ).update(freeipa_username=None)
+
+    emails_scrubbed = scrub_election_emails(election=election)
 
     AuditLogEntry.objects.create(
         election=election,
-        event_type="credentials_anonymized",
-        payload={"credentials_affected": updated},
+        event_type="election_anonymized",
+        payload={
+            "credentials_affected": credentials_affected,
+            "emails_scrubbed": emails_scrubbed,
+        },
         is_public=True,
     )
 
-    return updated
+    return {"credentials_affected": credentials_affected, "emails_scrubbed": emails_scrubbed}
 
 
 @transaction.atomic
@@ -849,18 +858,14 @@ def close_election(*, election: Election) -> None:
     election.end_datetime = ended_at
     election.save(update_fields=["status", "end_datetime"])
 
-    affected = anonymize_election_credentials(election=election)
-    scrubbed_emails = scrub_election_emails(election=election)
+    anonymize_election(election=election)
+
     AuditLogEntry.objects.create(
         election=election,
         event_type="election_closed",
-        payload={
-            "credentials_anonymized": affected,
-            "emails_scrubbed": scrubbed_emails,
-            "chain_head": chain_head,
-        },
+        payload={"chain_head": chain_head},
         is_public=True,
-    )
+    )    
 
 
 @transaction.atomic

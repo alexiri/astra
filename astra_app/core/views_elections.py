@@ -989,6 +989,8 @@ def election_detail(request, election_id: int):
         full_name = user.get_full_name() if user is not None else c.freeipa_username
         tally_winners.append({"username": c.freeipa_username, "full_name": full_name})
 
+    empty_seats = election.number_of_seats - len(tally_elected)
+
     admin_context = _eligible_voters_context(request=request, election=election, enabled=can_manage_elections)
 
     username = str(request.session.get("_freeipa_username") or "").strip()
@@ -1134,6 +1136,7 @@ def election_detail(request, election_id: int):
             "exclusion_group_messages": exclusion_group_messages,
             "tally_elected": tally_elected,
             "tally_winners": tally_winners,
+            "empty_seats": empty_seats if election.status == Election.Status.tallied else 0,
             "results_stats": results_stats,
         },
     )
@@ -1512,7 +1515,7 @@ def election_audit_log(request, election_id: int):
                 return ("fas fa-calendar-plus", "bg-orange")
             case "election_closed":
                 return ("fas fa-lock", "bg-orange")
-            case "credentials_anonymized":
+            case "election_anonymized":
                 return ("fas fa-user-secret", "bg-purple")
             case "tally_round":
                 return ("fas fa-calculator", "bg-info")
@@ -1535,8 +1538,8 @@ def election_audit_log(request, election_id: int):
                 return "Election end extended"
             case "election_closed":
                 return "Election closed"
-            case "credentials_anonymized":
-                return "Voting credentials anonymized"
+            case "election_anonymized":
+                return "Election anonymized"
             case "tally_round":
                 round_number = payload.get("round")
                 iteration = payload.get("iteration")
@@ -1721,6 +1724,11 @@ def election_audit_log(request, election_id: int):
                 }
             )
 
+    empty_seats = 0
+    if election.status == Election.Status.tallied:
+        elected_count = len(tally_elected_users)
+        empty_seats = election.number_of_seats - elected_count
+
     return render(
         request,
         "core/election_audit_log.html",
@@ -1738,6 +1746,7 @@ def election_audit_log(request, election_id: int):
             "tally_result": tally_result,
             "quota": tally_result.get("quota"),
             "tally_elected_users": tally_elected_users,
+            "empty_seats": empty_seats,
         },
     )
 

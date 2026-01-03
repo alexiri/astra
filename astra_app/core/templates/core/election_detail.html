@@ -274,7 +274,7 @@
           <div class="card-body">
             {% if tally_winners %}
               <h5 class="mb-2"><strong>Elected</strong></h5>
-              <ol class="mb-3">
+              <ol>
                 {% for w in tally_winners %}
                   <li>
                     {{ w.full_name }}
@@ -282,6 +282,9 @@
                   </li>
                 {% endfor %}
               </ol>
+              {% if empty_seats > 0 %}
+                <p><strong>Empty seats:</strong> {{ empty_seats }}</p>
+              {% endif %}
             {% endif %}
 
             {% if results_stats.ballots_cast is not None %}

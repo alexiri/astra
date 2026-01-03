@@ -13,7 +13,7 @@ from core.backends import FreeIPAUser
 from core.elections_services import (
     BallotReceipt,
     InvalidCredentialError,
-    anonymize_election_credentials,
+    anonymize_election,
     close_election,
     issue_voting_credential,
     issue_voting_credentials_from_memberships,
@@ -198,7 +198,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         self.assertEqual(cred1.public_id, cred2.public_id)
         self.assertEqual(VotingCredential.objects.filter(election=self.election).count(), 1)
 
-    def test_anonymize_election_credentials_clears_username(self) -> None:
+    def test_anonymize_election_clears_username(self) -> None:
         cred = issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
@@ -208,7 +208,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
 
         self.election.status = Election.Status.closed
         self.election.save(update_fields=["status"])
-        anonymize_election_credentials(election=self.election)
+        anonymize_election(election=self.election)
 
         cred.refresh_from_db()
         self.assertIsNone(cred.freeipa_username)
@@ -494,7 +494,7 @@ class ElectionCloseAndTallyTests(TestCase):
         public_events = list(
             AuditLogEntry.objects.filter(election=election, is_public=True).values_list("event_type", flat=True)
         )
-        self.assertIn("credentials_anonymized", public_events)
+        self.assertIn("election_anonymized", public_events)
         self.assertIn("election_closed", public_events)
 
     def test_close_election_sets_end_datetime_to_close_time(self) -> None:

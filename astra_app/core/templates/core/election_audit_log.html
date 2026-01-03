@@ -54,14 +54,17 @@
           </div>
           <div class="card-body">
             {% if tally_elected_users %}
-              <p class="mb-2"><strong>Elected</strong></p>
-              <ul class="mb-0 pl-3">
+              <p class="mb-2"><strong>Elected:</strong></p>
+              <ul class="pl-3">
                 {% for u in tally_elected_users %}
                   <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
                 {% endfor %}
               </ul>
+              {% if empty_seats > 0 %}
+                <p><strong>Empty seats:</strong> {{ empty_seats }}</p>
+              {% endif %}
             {% else %}
-              <p class="text-muted mb-0">No elected list was recorded.</p>
+              <p class="mb-0">No elected list was recorded.</p>
             {% endif %}
           </div>
         </div>
@@ -256,17 +259,12 @@
                           <dt class="col-sm-5">Eligible voters</dt>
                           <dd class="col-sm-7">{{ ev.payload.eligible_voter_count }}</dd>
                         {% endif %}
-                        {% if ev.payload.quorum_met %}
-                          <dt class="col-sm-5">Quorum met</dt>
-                          <dd class="col-sm-7">{{ ev.payload.quorum_met }}</dd>
-                        {% endif %}
                       </dl>
 
-                    {% else %}
-                      {% if ev.event_type == 'election_closed' and ev.payload.chain_head %}
+                    {% elif ev.event_type == 'election_closed' %}
+                      {% if ev.payload.chain_head %}
                         <p class="mb-2">
-                          <strong>Final chain head</strong>
-                          —
+                          <strong>Final chain head:</strong>
                           <code title="{{ ev.payload.chain_head }}">
                             {% if ev.payload.chain_head|length > 16 %}
                               {{ ev.payload.chain_head|slice:":16" }}…
@@ -284,15 +282,36 @@
                             <i class="fas fa-copy" aria-hidden="true"></i>
                           </button>
                         </p>
+                      {% else %}
+                        <p class="text-muted mb-0">No chain head recorded.</p>
                       {% endif %}
 
-                      {% if ev.event_type == 'tally_completed' and ev.elected_users %}
-                        <p class="mb-2"><strong>Elected</strong></p>
-                        <ul class="mb-2 pl-3">
-                          {% for u in ev.elected_users %}
-                            <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
-                          {% endfor %}
-                        </ul>
+                    {% elif ev.event_type == 'election_anonymized' %}
+                      <p class="mb-2">Voter credentials anonymized and sensitive emails scrubbed.</p>
+                      <dl class="row mb-0">
+                        {% if ev.payload.credentials_affected %}
+                          <dt class="col-sm-6">Credentials anonymized</dt>
+                          <dd class="col-sm-6">{{ ev.payload.credentials_affected }}</dd>
+                        {% endif %}
+                        {% if ev.payload.emails_scrubbed %}
+                          <dt class="col-sm-6">Emails scrubbed</dt>
+                          <dd class="col-sm-6">{{ ev.payload.emails_scrubbed }}</dd>
+                        {% endif %}
+                      </dl>
+
+                    {% else %}
+                      {% if ev.event_type == 'tally_completed' %}
+                        {% if ev.elected_users %}
+                          <p class="mb-2"><strong>Elected:</strong></p>
+                          <ul class="pl-3">
+                            {% for u in ev.elected_users %}
+                              <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
+                            {% endfor %}
+                          </ul>
+                        {% endif %}
+                        {% if empty_seats > 0 %}
+                          <p class="mt-2"><strong>Empty seats:</strong> {{ empty_seats }}</p>
+                        {% endif %}
                       {% endif %}
 
                       {% if ev.payload %}

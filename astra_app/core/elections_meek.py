@@ -202,7 +202,7 @@ def generate_meek_round_explanations(
         cid for cid in quota_reached_not_elected if cid not in forced_excluded_ids
     ]
 
-    audit_parts: list[str] = [f"Iteration {iteration} summary", ""]
+    audit_parts: list[str] = []
 
     remaining_seats = max(seats - elected_total, 0) if seats > 0 else 0
     seats_filled = bool(seats and elected_total >= seats)

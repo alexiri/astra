@@ -117,7 +117,7 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "class=\"timeline\"")
         # The Meek tally always emits iteration summaries.
-        self.assertContains(resp, "Iteration 1")
+        self.assertContains(resp, "iteration 1")
         # Candidate IDs should not appear in summaries/audit text.
         self.assertNotContains(resp, f"(#{c1.id})")
         # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
@@ -186,3 +186,55 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertContains(resp, "hash-2")
         self.assertContains(resp, "hash-3")
         self.assertContains(resp, "hash-4")
+
+    def test_audit_log_renders_election_closed_and_anonymized_events_prettily(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Closed election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        # Create election_closed event
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_closed",
+            payload={"chain_head": "a" * 64},
+            is_public=True,
+        )
+
+        # Create election_anonymized event
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_anonymized",
+            payload={"credentials_affected": 5, "emails_scrubbed": 10},
+            is_public=True,
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        
+        # Check election_closed renders prettily
+        self.assertContains(resp, "Election closed")
+        self.assertContains(resp, "Final chain head:")
+        self.assertContains(resp, "aaaaaaaaaaaaaaaa")  # truncated chain head
+        
+        # Check election_anonymized renders prettily
+        self.assertContains(resp, "Election anonymized")
+        self.assertContains(resp, "Voter credentials anonymized and sensitive emails scrubbed")
+        self.assertContains(resp, "Credentials anonymized")
+        self.assertContains(resp, "Emails scrubbed")
+        self.assertContains(resp, "5")  # credentials count
+        self.assertContains(resp, "10")  # emails count
+        
+        # Verify raw payload is not shown
+        self.assertNotContains(resp, "&#x27;chain_head&#x27;:")
+        self.assertNotContains(resp, "&#x27;credentials_affected&#x27;:")
