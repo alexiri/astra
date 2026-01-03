@@ -139,7 +139,8 @@ class ElectionVoteWeightsTests(TestCase):
 
         result = tally_election(election=election)
         # quota is a stringified Decimal.
-        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected) / Decimal(2))
+        # Droop quota: floor(votes / (seats + 1)) + 1. With seats=1, it is floor(votes/2) + 1.
+        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected // 2 + 1))
 
     def test_vote_submit_uses_credential_weight_even_if_memberships_removed_after_issuance(self) -> None:
         now = timezone.now()
@@ -194,7 +195,7 @@ class ElectionVoteWeightsTests(TestCase):
         election.save(update_fields=["status"])
 
         result = tally_election(election=election)
-        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected) / Decimal(2))
+        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected // 2 + 1))
 
     def test_vote_submit_returns_nonce_and_chain_hashes(self) -> None:
         now = timezone.now()
@@ -287,7 +288,7 @@ class ElectionVoteWeightsTests(TestCase):
         Organization.objects.all().delete()
 
         result = tally_election(election=election)
-        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected) / Decimal(2))
+        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected // 2 + 1))
 
     def test_vote_page_shows_user_vote_count_under_credential_field(self) -> None:
         now = timezone.now()

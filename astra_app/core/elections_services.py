@@ -10,6 +10,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import post_office.mail
+from post_office.models import Email
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
@@ -819,6 +820,15 @@ def issue_voting_credentials_from_memberships_detailed(*, election: Election) ->
 
 
 @transaction.atomic
+def scrub_election_emails(*, election: Election) -> int:
+    """Delete sensitive emails (credentials, receipts) associated with the election."""
+    # We identify emails by the election_id in their context.
+    # post_office stores context as a JSON field.
+    count, _ = Email.objects.filter(context__contains={"election_id": election.id}).delete()
+    return count
+
+
+@transaction.atomic
 def close_election(*, election: Election) -> None:
     election.refresh_from_db(fields=["status"])
     if election.status != Election.Status.open:
@@ -840,10 +850,15 @@ def close_election(*, election: Election) -> None:
     election.save(update_fields=["status", "end_datetime"])
 
     affected = anonymize_election_credentials(election=election)
+    scrubbed_emails = scrub_election_emails(election=election)
     AuditLogEntry.objects.create(
         election=election,
         event_type="election_closed",
-        payload={"credentials_anonymized": affected, "chain_head": chain_head},
+        payload={
+            "credentials_anonymized": affected,
+            "emails_scrubbed": scrubbed_emails,
+            "chain_head": chain_head,
+        },
         is_public=True,
     )
 

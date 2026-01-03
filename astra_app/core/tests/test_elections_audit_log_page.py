@@ -11,7 +11,8 @@ from core import elections_services
 from core.backends import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.ballot_chain import GENESIS_CHAIN_HASH, compute_chain_hash
+from core.tests.ballot_chain import compute_chain_hash
+from core.tokens import election_genesis_chain_hash
 
 
 class ElectionAuditLogPageTests(TestCase):
@@ -93,14 +94,15 @@ class ElectionAuditLogPageTests(TestCase):
             weight=1,
             nonce="0" * 32,
         )
-        chain_hash = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash)
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-1",
             ranking=[c1.id],
             weight=1,
             ballot_hash=ballot_hash,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
 
@@ -118,8 +120,8 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertContains(resp, "Iteration 1")
         # Candidate IDs should not appear in summaries/audit text.
         self.assertNotContains(resp, f"(#{c1.id})")
-        # Quota is total/(seats+1) = 1/2.
-        self.assertContains(resp, "0.5000")
+        # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
+        self.assertContains(resp, "1.0000")
 
     def test_audit_log_groups_ballot_submissions_by_day_for_managers(self) -> None:
         self._login_as_freeipa_user("admin")

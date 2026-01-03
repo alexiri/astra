@@ -7,7 +7,8 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.models import Ballot, Candidate, Election, VotingCredential
-from core.tests.ballot_chain import GENESIS_CHAIN_HASH, compute_chain_hash
+from core.tests.ballot_chain import compute_chain_hash
+from core.tokens import election_genesis_chain_hash
 
 
 class AdvanceElectionsCommandTests(TestCase):
@@ -30,6 +31,7 @@ class AdvanceElectionsCommandTests(TestCase):
             freeipa_username="voter1",
             weight=1,
         )
+        genesis_hash = election_genesis_chain_hash(election.id)
         ballot_hash = Ballot.compute_hash(
             election_id=election.id,
             credential_public_id="cred-1",
@@ -37,14 +39,14 @@ class AdvanceElectionsCommandTests(TestCase):
             weight=1,
             nonce="0" * 32,
         )
-        chain_hash = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-1",
             ranking=[c1.id, c2.id],
             weight=1,
             ballot_hash=ballot_hash,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
 
@@ -66,6 +68,7 @@ class AdvanceElectionsCommandTests(TestCase):
             status=Election.Status.closed,
         )
         c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        genesis_hash = election_genesis_chain_hash(election.id)
         ballot_hash = Ballot.compute_hash(
             election_id=election.id,
             credential_public_id="cred-x",
@@ -73,14 +76,14 @@ class AdvanceElectionsCommandTests(TestCase):
             weight=1,
             nonce="0" * 32,
         )
-        chain_hash = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-x",
             ranking=[c1.id],
             weight=1,
             ballot_hash=ballot_hash,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
 

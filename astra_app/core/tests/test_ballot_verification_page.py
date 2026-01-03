@@ -8,7 +8,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Ballot, Candidate, Election
-from core.tests.ballot_chain import GENESIS_CHAIN_HASH, compute_chain_hash
+from core.tests.ballot_chain import compute_chain_hash
+from core.tokens import election_genesis_chain_hash
 
 
 class BallotVerificationPageTests(TestCase):
@@ -86,7 +87,7 @@ class BallotVerificationPageTests(TestCase):
             credential_public_id="cred-1",
             ranking=[c1.id],
             weight=1,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at,
         )
 
@@ -119,7 +120,7 @@ class BallotVerificationPageTests(TestCase):
             credential_public_id="cred-1",
             ranking=[c1.id],
             weight=1,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at,
         )
 
@@ -149,7 +150,7 @@ class BallotVerificationPageTests(TestCase):
             credential_public_id="cred-1",
             ranking=[c1.id],
             weight=1,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at,
         )
 
@@ -186,7 +187,7 @@ class BallotVerificationPageTests(TestCase):
             credential_public_id="cred-1",
             ranking=[c1.id],
             weight=1,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at1,
             is_counted=True,
         )
@@ -198,7 +199,7 @@ class BallotVerificationPageTests(TestCase):
             credential_public_id="cred-1",
             ranking=[c2.id],
             weight=1,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at2,
             is_counted=True,
             superseded_by=ballot1,

@@ -20,7 +20,8 @@ from core.models import (
     MembershipType,
 )
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.ballot_chain import GENESIS_CHAIN_HASH, compute_chain_hash
+from core.tests.ballot_chain import compute_chain_hash
+from core.tokens import election_genesis_chain_hash
 
 
 class ElectionsListDraftVisibilityTests(TestCase):
@@ -290,14 +291,15 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             weight=2,
             nonce="0" * 32,
         )
-        chain_hash = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash)
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-1",
             ranking=[],
             weight=2,
             ballot_hash=ballot_hash,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
 
@@ -573,14 +575,15 @@ class ElectionDetailConcludeElectionTests(TestCase):
             weight=1,
             nonce="0" * 32,
         )
-        chain_hash = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash)
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-x",
             ranking=[c1.id],
             weight=1,
             ballot_hash=ballot_hash,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
 

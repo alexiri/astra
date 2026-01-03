@@ -7,7 +7,8 @@ from django.utils import timezone
 
 from core.elections_services import close_election, submit_ballot
 from core.models import AuditLogEntry, Ballot, Candidate, Election, VotingCredential
-from core.tests.ballot_chain import GENESIS_CHAIN_HASH, compute_chain_hash
+from core.tests.ballot_chain import compute_chain_hash
+from core.tokens import election_genesis_chain_hash
 
 
 def _export_ballots_for_audit(*, election: Election) -> list[dict[str, object]]:
@@ -48,14 +49,15 @@ def _verify_chain(
     *,
     ballots: list[dict[str, object]],
     published_chain_head: str | None,
+    genesis_hash: str,
 ) -> tuple[int | None, str]:
     """Verify the per-election commitment chain.
 
     Returns a tuple: (mismatch_index_1_based | None, computed_chain_head).
     """
 
-    prev = GENESIS_CHAIN_HASH
-    computed_chain_head = GENESIS_CHAIN_HASH
+    prev = genesis_hash
+    computed_chain_head = genesis_hash
 
     for idx, row in enumerate(ballots, start=1):
         ballot_hash = str(row.get("ballot_hash") or "")
@@ -80,7 +82,7 @@ def _verify_chain(
     return None, computed_chain_head
 
 
-def _rewrite_chain_fields(*, ballots: list[dict[str, object]]) -> list[dict[str, object]]:
+def _rewrite_chain_fields(*, ballots: list[dict[str, object]], genesis_hash: str) -> list[dict[str, object]]:
     """Simulate an attacker rewriting chain fields pre-publication.
 
     This represents a malicious actor with direct DB access (bypassing triggers)
@@ -88,7 +90,7 @@ def _rewrite_chain_fields(*, ballots: list[dict[str, object]]) -> list[dict[str,
     """
 
     rewritten: list[dict[str, object]] = []
-    prev = GENESIS_CHAIN_HASH
+    prev = genesis_hash
     for row in ballots:
         ballot_hash = str(row.get("ballot_hash") or "")
         chain_hash = compute_chain_hash(previous_chain_hash=prev, ballot_hash=ballot_hash)
@@ -142,7 +144,11 @@ class MeekVotingAttackTests(TestCase):
         published_head = _published_chain_head(election=election)
 
         ballots = _export_ballots_for_audit(election=election)
-        mismatch_idx, computed_head = _verify_chain(ballots=ballots, published_chain_head=published_head)
+        mismatch_idx, computed_head = _verify_chain(
+            ballots=ballots,
+            published_chain_head=published_head,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
         self.assertIsNone(mismatch_idx)
         self.assertEqual(computed_head, published_head)
 
@@ -150,7 +156,11 @@ class MeekVotingAttackTests(TestCase):
         tampered = list(ballots)
         tampered.pop(1)  # index 2 (1-based) in the original sequence
 
-        mismatch_idx2, computed_head2 = _verify_chain(ballots=tampered, published_chain_head=published_head)
+        mismatch_idx2, computed_head2 = _verify_chain(
+            ballots=tampered,
+            published_chain_head=published_head,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
         self.assertEqual(mismatch_idx2, 2)
         self.assertNotEqual(computed_head2, published_head)
 
@@ -180,7 +190,11 @@ class MeekVotingAttackTests(TestCase):
         tampered_ranking = [c2.id, c1.id]
         tampered = [dict(row, ranking=tampered_ranking)]
 
-        mismatch_idx, computed_head = _verify_chain(ballots=tampered, published_chain_head=published_head)
+        mismatch_idx, computed_head = _verify_chain(
+            ballots=tampered,
+            published_chain_head=published_head,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
         self.assertIsNone(mismatch_idx)
         self.assertEqual(computed_head, published_head)
 
@@ -212,7 +226,11 @@ class MeekVotingAttackTests(TestCase):
         self.assertEqual(len(ballots), 2)
 
         tampered = [ballots[1], ballots[0]]
-        mismatch_idx, _computed_head = _verify_chain(ballots=tampered, published_chain_head=published_head)
+        mismatch_idx, _computed_head = _verify_chain(
+            ballots=tampered,
+            published_chain_head=published_head,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
         self.assertEqual(mismatch_idx, 1)
 
     def test_attack_4_superseded_ballot_removal_detected_and_receipt_missing(self) -> None:
@@ -237,7 +255,11 @@ class MeekVotingAttackTests(TestCase):
         tampered = [row for row in ballots if str(row.get("ballot_hash")) != superseded_hash]
         self.assertEqual(len(tampered), 2)
 
-        mismatch_idx, _computed_head = _verify_chain(ballots=tampered, published_chain_head=published_head)
+        mismatch_idx, _computed_head = _verify_chain(
+            ballots=tampered,
+            published_chain_head=published_head,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
         self.assertIsNotNone(mismatch_idx)
 
         # Auditor detection: a ballot submission audit event exists for the receipt,
@@ -301,8 +323,15 @@ class MeekVotingAttackTests(TestCase):
 
         # Attacker deletes ballot B and rewrites the remaining chain fields.
         tampered = [ballots[0], ballots[2]]
-        rewritten = _rewrite_chain_fields(ballots=tampered)
+        rewritten = _rewrite_chain_fields(
+            ballots=tampered,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
 
         # Without a published anchor (chain head), internal verification passes.
-        mismatch_idx, _computed_head = _verify_chain(ballots=rewritten, published_chain_head=None)
+        mismatch_idx, _computed_head = _verify_chain(
+            ballots=rewritten,
+            published_chain_head=None,
+            genesis_hash=election_genesis_chain_hash(election.id),
+        )
         self.assertIsNone(mismatch_idx)
