@@ -14,11 +14,13 @@ def main() -> None:
     ]
 
     ballots = [
-        {"weight": 1, "ranking": [12, 10, 11]},
-        {"weight": 1, "ranking": [12, 11, 10]},
-        {"weight": 5, "ranking": [12, 10]},
-        {"weight": 2, "ranking": [12, 11, 10]},
-        {"weight": 5, "ranking": [11, 10, 12]},
+        {"weight": 1, "ranking": [10, 12]},
+        {"weight": 1, "ranking": [11, 10]},
+        # {"weight": 1, "ranking": [12, 11]},
+        # {"weight": 1, "ranking": [11, 12, 10]},
+        # {"weight": 5, "ranking": [12, 10]},
+        # {"weight": 2, "ranking": [12, 11, 10]},
+        # {"weight": 5, "ranking": [10, 12, 11]},
     ]
 
     exclusions = [
@@ -35,6 +37,8 @@ def main() -> None:
         # print(round_detail['summary_text'])
         print(round_detail['audit_text'])
         print()
+        print(round_detail)
+        # break
 
 
 if __name__ == "__main__":
