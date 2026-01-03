@@ -111,6 +111,15 @@
               </div>
             </div>
 
+            <div class="form-group">
+              <label for="{{ details_form.eligible_group_cn.id_for_label }}">Eligible group (optional)</label>
+              {{ details_form.eligible_group_cn }}
+              {% if details_form.eligible_group_cn.errors %}<div class="text-danger small">{{ details_form.eligible_group_cn.errors }}</div>{% endif %}
+              <div class="text-muted small mt-1">
+                If set, only members of this group will receive voting credentials when the election starts, and only members of this group can be candidates.
+              </div>
+            </div>
+
             {% if details_form.non_field_errors %}<div class="text-danger">{{ details_form.non_field_errors }}</div>{% endif %}
           </div>
         </div>
@@ -151,7 +160,7 @@
           </div>
           <div class="modal-body">
             <p class="mb-2">This will open the election and email voting credentials to all eligible voters.</p>
-            <p class="small mb-0">Eligible voters: <strong>{{ eligible_usernames_count }}</strong></p>
+            <p class="small mb-0">Eligible voters: <strong class="js-eligible-voters-count">{{ eligible_voters_count }}</strong></p>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
@@ -168,7 +177,7 @@
             <h3 class="card-title">Candidates &amp; exclusion groups</h3>
           </div>
           <div class="card-body">
-            <div class="text-muted mb-3">Eligible members: {{ eligible_usernames_count }}</div>
+            <div class="text-muted mb-3">Eligible members: <span class="js-eligible-voters-count">{{ eligible_voters_count }}</span></div>
 
             {{ candidate_formset.management_form }}
 
@@ -240,14 +249,18 @@
 
             <div class="collapse mt-2" id="exclusion-groups-collapse">
               <div class="card card-body">
+                <p class="text-muted">This interface allows you to define mutual exclusion rules between candidates within an election.
+                  The AlmaLinux Bylaws state that "Only one Member which is part of a group of Related Companies
+                  shall be entitled to have a representative on the Board of Directors at one time."
+                </p>
+                
                 {{ group_formset.management_form }}
-
                 <div class="table-responsive">
                   <table class="table table-sm mb-2">
                     <thead>
                       <tr>
-                        <th style="width: 30%">Name</th>
-                        <th style="width: 12%">Max elected</th>
+                        <th style="width: 30%">Group Name</th>
+                        <th style="width: 12%">Max electable</th>
                         <th>Candidates</th>
                         <th style="width: 6%">Remove</th>
                       </tr>

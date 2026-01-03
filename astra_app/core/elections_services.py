@@ -20,6 +20,7 @@ from django.template.exceptions import TemplateSyntaxError
 from django.urls import reverse
 from django.utils import timezone
 
+from core.backends import FreeIPAGroup
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -347,13 +348,60 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
     return eligible
 
 
+def _freeipa_group_recursive_member_usernames(*, group_cn: str) -> set[str]:
+    """Return lowercased usernames in the given FreeIPA group, including nested groups."""
+
+    root = str(group_cn or "").strip()
+    if not root:
+        return set()
+
+    seen_groups: set[str] = set()
+    members: set[str] = set()
+    pending: list[str] = [root]
+
+    while pending:
+        cn = str(pending.pop() or "").strip()
+        if not cn:
+            continue
+        cn_key = cn.lower()
+        if cn_key in seen_groups:
+            continue
+        seen_groups.add(cn_key)
+
+        group = FreeIPAGroup.get(cn)
+        if group is None:
+            continue
+
+        for username_raw in (group.members or []):
+            username = str(username_raw or "").strip()
+            if username:
+                members.add(username.lower())
+
+        for nested_cn_raw in (group.member_groups or []):
+            nested_cn = str(nested_cn_raw or "").strip()
+            if nested_cn:
+                pending.append(nested_cn)
+
+    return members
+
+
 def eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
     """Compute the eligible voters for an election from memberships.
 
     This is used both for issuing credentials and for admin visibility.
     """
 
-    return _eligible_voters_from_memberships(election=election)
+    eligible = _eligible_voters_from_memberships(election=election)
+
+    group_cn = str(election.eligible_group_cn or "").strip()
+    if not group_cn:
+        return eligible
+
+    eligible_usernames = _freeipa_group_recursive_member_usernames(group_cn=group_cn)
+    if not eligible_usernames:
+        return []
+
+    return [v for v in eligible if v.username.lower() in eligible_usernames]
 
 
 def eligible_vote_weight_for_username(*, election: Election, username: str) -> int:
@@ -362,6 +410,12 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
     username = str(username or "").strip()
     if not username:
         return 0
+
+    group_cn = str(election.eligible_group_cn or "").strip()
+    if group_cn:
+        eligible_usernames = _freeipa_group_recursive_member_usernames(group_cn=group_cn)
+        if username.lower() not in eligible_usernames:
+            return 0
 
     cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
     membership_weight = (

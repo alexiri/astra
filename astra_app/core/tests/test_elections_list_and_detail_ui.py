@@ -148,6 +148,96 @@ class ElectionsListGroupingTests(TestCase):
         self.assertContains(resp, reverse("election-detail", args=[past_election.id]))
 
 
+class ElectionsDeletedVisibilityTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_elections_list_hides_deleted_for_non_managers(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        Election.objects.create(
+            name="Visible election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        deleted = Election.objects.create(
+            name="Deleted election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=9),
+            number_of_seats=1,
+            status="deleted",
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("elections"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Visible election")
+        self.assertNotContains(resp, "Deleted election")
+        self.assertNotContains(resp, reverse("election-detail", args=[deleted.id]))
+
+    def test_elections_list_hides_deleted_for_managers(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        Election.objects.create(
+            name="Visible election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        deleted = Election.objects.create(
+            name="Deleted election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=9),
+            number_of_seats=1,
+            status="deleted",
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+            resp = self.client.get(reverse("elections"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Visible election")
+        self.assertNotContains(resp, "Deleted election")
+        self.assertNotContains(resp, reverse("election-edit", args=[deleted.id]))
+
+    def test_election_detail_returns_404_for_deleted(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        deleted = Election.objects.create(
+            name="Deleted election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=9),
+            number_of_seats=1,
+            status="deleted",
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("election-detail", args=[deleted.id]))
+        self.assertEqual(resp.status_code, 404)
+
+
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
 class ElectionDetailManagerUIStatsTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:

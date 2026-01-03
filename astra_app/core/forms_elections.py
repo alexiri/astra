@@ -8,6 +8,7 @@ from django.conf import settings
 from django.forms import modelformset_factory
 from django.utils import timezone
 
+from core.backends import FreeIPAGroup
 from core.models import Candidate, Election, ExclusionGroup
 
 _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
@@ -19,6 +20,18 @@ _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
 
 
 class ElectionDetailsForm(forms.ModelForm):
+    eligible_group_cn = forms.ChoiceField(
+        required=False,
+        choices=[("", "")],
+        widget=forms.Select(
+            attrs={
+                "class": "form-control alx-select2",
+                "data-ajax-url": "/groups/search/",
+                "data-placeholder": "(no group restriction)",
+            }
+        ),
+    )
+
     number_of_seats = forms.IntegerField(
         min_value=1,
         widget=forms.NumberInput(attrs={"class": "form-control smallNumber", "min": 1, "step": 1}),
@@ -54,6 +67,7 @@ class ElectionDetailsForm(forms.ModelForm):
             "end_datetime",
             "number_of_seats",
             "quorum",
+            "eligible_group_cn",
         ]
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
@@ -79,6 +93,36 @@ class ElectionDetailsForm(forms.ModelForm):
                 self.add_error("end_datetime", "End must be after start.")
 
         return cleaned
+
+    @override
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Select2 uses AJAX for options; only include the current selection so the
+        # widget renders a value even without preloading all groups.
+        raw: str = ""
+        if self.is_bound:
+            raw = str(self.data.get("eligible_group_cn") or "").strip()
+        else:
+            raw = str(self.initial.get("eligible_group_cn") or "").strip()
+            if not raw and self.instance.pk is not None:
+                raw = str(self.instance.eligible_group_cn or "").strip()
+
+        choices: list[tuple[str, str]] = [("", "")]
+        if raw:
+            choices.append((raw, raw))
+        self.fields["eligible_group_cn"].choices = choices
+
+    def clean_eligible_group_cn(self) -> str:
+        cn = str(self.cleaned_data.get("eligible_group_cn") or "").strip()
+        if not cn:
+            return ""
+
+        group = FreeIPAGroup.get(cn)
+        if group is None:
+            raise forms.ValidationError("Unknown group.", code="unknown_group")
+
+        return cn
 
 
 class ElectionEndDateForm(forms.ModelForm):

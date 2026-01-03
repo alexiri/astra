@@ -137,7 +137,7 @@ def ballot_verify(request):
 @require_POST
 @json_permission_required(ASTRA_ADD_ELECTION)
 def election_email_render_preview(request, election_id: int) -> JsonResponse:
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
@@ -168,9 +168,10 @@ def election_email_render_preview(request, election_id: int) -> JsonResponse:
 @require_GET
 def elections_list(request):
     can_manage_elections = request.user.has_perm(ASTRA_ADD_ELECTION)
-    qs = Election.objects.only("id", "name", "status", "start_datetime", "end_datetime").order_by(
-        "-start_datetime",
-        "id",
+    qs = (
+        Election.objects.exclude(status=Election.Status.deleted)
+        .only("id", "name", "status", "start_datetime", "end_datetime")
+        .order_by("-start_datetime", "id")
     )
     if not can_manage_elections:
         qs = qs.exclude(status=Election.Status.draft)
@@ -207,6 +208,8 @@ def election_new(request):
 @require_GET
 @json_permission_required(ASTRA_ADD_ELECTION)
 def election_eligible_users_search(request, election_id: int):
+    eligible_group_cn = str(request.GET.get("eligible_group_cn") or "").strip()
+
     if election_id == 0:
         start_datetime_raw = str(request.GET.get("start_datetime") or "").strip()
         if not start_datetime_raw:
@@ -230,15 +233,29 @@ def election_eligible_users_search(request, election_id: int):
             status=Election.Status.draft,
         )
     else:
-        election = Election.objects.filter(pk=election_id).only("id", "start_datetime").first()
+        election = (
+            Election.objects.exclude(status=Election.Status.deleted)
+            .filter(pk=election_id)
+            .only("id", "start_datetime", "eligible_group_cn")
+            .first()
+        )
         if election is None:
             raise Http404
+
+    if "eligible_group_cn" in request.GET:
+        # Allow the edit UI to preview eligibility before the draft is saved.
+        # This must also support clearing the field (empty string).
+        election.eligible_group_cn = eligible_group_cn
 
     q = str(request.GET.get("q") or "").strip()
     q_lower = q.lower()
 
     eligible = eligible_voters_from_memberships(election=election)
     eligible_usernames = {v.username for v in eligible}
+
+    count_only = str(request.GET.get("count_only") or "").strip()
+    if count_only in {"1", "true", "True", "yes", "on"}:
+        return JsonResponse({"count": len(eligible_usernames)})
 
     results: list[dict[str, str]] = []
     for username in sorted(eligible_usernames, key=str.lower):
@@ -263,19 +280,105 @@ def election_eligible_users_search(request, election_id: int):
 
     return JsonResponse({"results": results})
 
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_nomination_users_search(request, election_id: int):
+    """Eligible-user search for the nomination UI.
+
+    Nomination eligibility is based on membership age/status only and must not
+    be filtered by the election's optional eligible-group voting restriction.
+    """
+
+    if election_id == 0:
+        start_datetime_raw = str(request.GET.get("start_datetime") or "").strip()
+        if not start_datetime_raw:
+            start_dt = timezone.now()
+        else:
+            try:
+                start_dt = datetime.datetime.fromisoformat(start_datetime_raw)
+            except ValueError:
+                return JsonResponse({"results": []})
+            if timezone.is_naive(start_dt):
+                start_dt = timezone.make_aware(start_dt)
+        election = Election(
+            name="",
+            description="",
+            url="",
+            start_datetime=start_dt,
+            end_datetime=start_dt,
+            number_of_seats=1,
+            status=Election.Status.draft,
+            eligible_group_cn="",
+        )
+    else:
+        election = (
+            Election.objects.exclude(status=Election.Status.deleted)
+            .filter(pk=election_id)
+            .only("id", "start_datetime")
+            .first()
+        )
+        if election is None:
+            raise Http404
+
+        # Do not apply the voting restriction when searching for candidates/nominators.
+        election.eligible_group_cn = ""
+
+    q = str(request.GET.get("q") or "").strip()
+    q_lower = q.lower()
+
+    eligible = eligible_voters_from_memberships(election=election)
+    eligible_usernames = {v.username for v in eligible}
+
+    results: list[dict[str, str]] = []
+    for username in sorted(eligible_usernames, key=str.lower):
+        if q_lower and q_lower not in username.lower():
+            continue
+
+        try:
+            user = FreeIPAUser.get(username)
+        except Exception:
+            user = None
+        full_name = user.get_full_name() if user is not None else ""
+        text = username
+        if full_name and full_name != username:
+            text = f"{full_name} ({username})"
+
+        results.append({"id": username, "text": text})
+        if len(results) >= 20:
+            break
+
+    return JsonResponse({"results": results})
+
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_edit(request, election_id: int):
     is_create = election_id == 0
-    election = None if is_create else Election.objects.filter(pk=election_id).first()
+    election = (
+        None
+        if is_create
+        else Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
+    )
     if not is_create and election is None:
         raise Http404
 
     templates = list(EmailTemplate.objects.all().order_by("name"))
     default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
 
-    eligible_usernames: set[str] = set()
+    eligible_voter_usernames: set[str] = set()
+    nomination_eligible_usernames: set[str] = set()
     if election is not None:
-        eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+        eligible_voter_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+        election_for_nomination = Election(
+            name="",
+            description="",
+            url="",
+            start_datetime=election.start_datetime,
+            end_datetime=election.end_datetime,
+            number_of_seats=election.number_of_seats,
+            status=election.status,
+            eligible_group_cn="",
+        )
+        nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
 
     if request.method == "POST":
         action = str(request.POST.get("action") or "").strip()
@@ -341,26 +444,42 @@ def election_edit(request, election_id: int):
             group_formset = ExclusionGroupWizardFormSet(queryset=ExclusionGroup.objects.none(), prefix="groups")
 
         if election is not None:
-            eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+            eligible_voter_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+            election_for_nomination = Election(
+                name="",
+                description="",
+                url="",
+                start_datetime=election.start_datetime,
+                end_datetime=election.end_datetime,
+                number_of_seats=election.number_of_seats,
+                status=election.status,
+                eligible_group_cn="",
+            )
+            nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
 
         def _configure_candidate_form_choices() -> None:
             ajax_election_id = election.id if election is not None else 0
-            ajax_url = request.build_absolute_uri(reverse("election-eligible-users-search", args=[ajax_election_id]))
+            ajax_url_candidate = request.build_absolute_uri(
+                reverse("election-eligible-users-search", args=[ajax_election_id])
+            )
+            ajax_url_nominator = request.build_absolute_uri(
+                reverse("election-nomination-users-search", args=[ajax_election_id])
+            )
             for form in candidate_formset.forms:
                 freeipa_value = str(form.data.get(form.add_prefix("freeipa_username")) or form.initial.get("freeipa_username") or form.instance.freeipa_username or "").strip()
                 if freeipa_value:
                     form.fields["freeipa_username"].choices = [(freeipa_value, freeipa_value)]
-                form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
+                form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url_candidate
                 form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
                 nominated_value = str(form.data.get(form.add_prefix("nominated_by")) or form.initial.get("nominated_by") or form.instance.nominated_by or "").strip()
                 if nominated_value:
                     form.fields["nominated_by"].choices = [(nominated_value, nominated_value)]
-                form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+                form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
                 form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
-            candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
-            candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+            candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url_candidate
+            candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
             candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
             candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
@@ -456,7 +575,18 @@ def election_edit(request, election_id: int):
 
             election.save()
 
-            eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+            eligible_voter_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
+            election_for_nomination = Election(
+                name="",
+                description="",
+                url="",
+                start_datetime=election.start_datetime,
+                end_datetime=election.end_datetime,
+                number_of_seats=election.number_of_seats,
+                status=election.status,
+                eligible_group_cn="",
+            )
+            nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
 
             # Candidates
             for form in candidate_formset.forms:
@@ -471,10 +601,10 @@ def election_edit(request, election_id: int):
                 nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
                 if not username:
                     continue
-                if username not in eligible_usernames:
+                if username not in eligible_voter_usernames:
                     form.add_error("freeipa_username", "User is not eligible.")
                     continue
-                if nominator and nominator not in eligible_usernames:
+                if nominator and nominator not in nomination_eligible_usernames:
                     form.add_error("nominated_by", "User is not eligible.")
                     continue
 
@@ -667,22 +797,23 @@ def election_edit(request, election_id: int):
                     field.disabled = True
 
         ajax_election_id = election.id if election is not None else 0
-        ajax_url = request.build_absolute_uri(reverse("election-eligible-users-search", args=[ajax_election_id]))
+        ajax_url_candidate = request.build_absolute_uri(reverse("election-eligible-users-search", args=[ajax_election_id]))
+        ajax_url_nominator = request.build_absolute_uri(reverse("election-nomination-users-search", args=[ajax_election_id]))
         for form in candidate_formset.forms:
             freeipa = str(form.instance.freeipa_username or "").strip()
             if freeipa:
                 form.fields["freeipa_username"].choices = [(freeipa, freeipa)]
-            form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
+            form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url_candidate
             form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
             nominator = str(form.instance.nominated_by or "").strip()
             if nominator:
                 form.fields["nominated_by"].choices = [(nominator, nominator)]
-            form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+            form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
             form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
-        candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url
-        candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url
+        candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url_candidate
+        candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
         candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
         candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
@@ -752,7 +883,8 @@ def election_edit(request, election_id: int):
             "candidate_formset": candidate_formset,
             "group_formset": group_formset,
             "group_empty_form": group_empty_form,
-            "eligible_usernames_count": len(eligible_usernames),
+            "eligible_voters_count": len(eligible_voter_usernames),
+            "nomination_eligible_voters_count": len(nomination_eligible_usernames),
             "templates": templates,
             "rendered_preview": rendered_preview,
             "default_template_name": settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
@@ -762,7 +894,7 @@ def election_edit(request, election_id: int):
 
 @require_GET
 def election_detail(request, election_id: int):
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
@@ -1053,7 +1185,7 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
 @require_POST
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_resend_credentials(request, election_id: int):
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
@@ -1121,7 +1253,7 @@ def election_resend_credentials(request, election_id: int):
 @require_POST
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_conclude(request, election_id: int):
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
@@ -1150,7 +1282,7 @@ def election_conclude(request, election_id: int):
 @require_POST
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_extend_end(request, election_id: int):
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
@@ -1183,7 +1315,12 @@ def election_extend_end(request, election_id: int):
 
 
 def _get_exportable_election(*, election_id: int) -> Election:
-    election = Election.objects.filter(pk=election_id).only("id", "status").first()
+    election = (
+        Election.objects.exclude(status=Election.Status.deleted)
+        .filter(pk=election_id)
+        .only("id", "status")
+        .first()
+    )
     if election is None:
         raise Http404
     if election.status not in {Election.Status.closed, Election.Status.tallied}:
@@ -1255,7 +1392,7 @@ def election_audit_log(request, election_id: int):
     events as well) in a chronological timeline.
     """
 
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
@@ -1692,7 +1829,12 @@ def _parse_vote_payload(request, *, election: Election) -> tuple[str, list[int]]
 
 @require_POST
 def election_vote_submit(request, election_id: int):
-    election = Election.objects.filter(pk=election_id).only("id", "status").first()
+    election = (
+        Election.objects.exclude(status=Election.Status.deleted)
+        .filter(pk=election_id)
+        .only("id", "status")
+        .first()
+    )
     if election is None:
         raise Http404
 
@@ -1766,7 +1908,7 @@ def election_vote_submit(request, election_id: int):
 
 @require_GET
 def election_vote(request, election_id: int):
-    election = Election.objects.filter(pk=election_id).first()
+    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
     if election.status in {Election.Status.closed, Election.Status.tallied}:

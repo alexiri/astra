@@ -18,6 +18,7 @@ urlpatterns = [
     path("users/", views_users.users, name="users"),
     path("user/<str:username>/", views_users.user_profile, name="user-profile"),
     path("groups/", views_groups.groups, name="groups"),
+    path("groups/search/", views_groups.group_search, name="group-search"),
     path("group/<str:name>/", views_groups.group_detail, name="group-detail"),
 
     path("organizations/", views_organizations.organizations, name="organizations"),
@@ -59,6 +60,11 @@ urlpatterns = [
         "elections/<int:election_id>/eligible-users/search/",
         views_elections.election_eligible_users_search,
         name="election-eligible-users-search",
+    ),
+    path(
+        "elections/<int:election_id>/nomination-users/search/",
+        views_elections.election_nomination_users_search,
+        name="election-nomination-users-search",
     ),
     path(
         "elections/<int:election_id>/email/render-preview/",

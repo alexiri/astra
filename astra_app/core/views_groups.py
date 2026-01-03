@@ -4,13 +4,40 @@ from typing import cast
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.views.decorators.http import require_GET
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
 from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed, FreeIPAUser
+from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.views_utils import _normalize_str
+
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def group_search(request: HttpRequest) -> HttpResponse:
+    q = _normalize_str(request.GET.get("q"))
+    q_lower = q.lower()
+
+    results: list[dict[str, str]] = []
+    for g in FreeIPAGroup.all():
+        if q_lower:
+            if q_lower not in g.cn.lower() and q_lower not in (g.description or "").lower():
+                continue
+
+        text = g.cn
+        desc = str(g.description or "").strip()
+        if desc:
+            text = f"{g.cn} — {desc}"
+
+        results.append({"id": g.cn, "text": text})
+        if len(results) >= 20:
+            break
+
+    results.sort(key=lambda r: r["id"].lower())
+    return JsonResponse({"results": results})
 
 
 def groups(request: HttpRequest) -> HttpResponse:

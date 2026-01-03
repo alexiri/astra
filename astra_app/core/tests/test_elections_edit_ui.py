@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -252,6 +253,22 @@ class ElectionEditPermissionTests(TestCase):
         self.assertIn('step="1"', html)
         self.assertIn('class="form-control smallNumber"', html)
 
+    def test_new_election_renders_eligible_group_select2(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        self.assertIn('id="id_eligible_group_cn"', html)
+        self.assertIn('alx-select2', html)
+        self.assertIn('data-ajax-url="/groups/search/"', html)
+
         self.assertIn('id="id_quorum"', html)
         self.assertIn('min="0"', html)
         self.assertIn('max="100"', html)
@@ -274,6 +291,77 @@ class ElectionEditPermissionTests(TestCase):
         self.assertIn('id="candidates-empty-form"', html)
         self.assertIn("data-ajax-url", html)
 
+    def test_draft_edit_page_uses_nomination_search_for_nominator_dropdown(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            eligible_group_cn="restricted",
+        )
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="bob",
+            description="",
+            url="",
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        m = re.search(r'name="candidates-0-nominated_by"[^>]*data-ajax-url="([^"]+)"', html)
+        self.assertIsNotNone(m)
+        self.assertIn("/nomination-users/search/", m.group(1))
+
+    def test_draft_edit_page_uses_group_filtered_search_for_candidate_dropdown(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            eligible_group_cn="restricted",
+        )
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="bob",
+            description="",
+            url="",
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        m = re.search(r'name="candidates-0-freeipa_username"[^>]*data-ajax-url="([^"]+)"', html)
+        self.assertIsNotNone(m)
+        self.assertIn("/eligible-users/search/", m.group(1))
 
 class ElectionEditExclusionGroupsSelectTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:

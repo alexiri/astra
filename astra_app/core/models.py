@@ -923,6 +923,7 @@ class Election(models.Model):
         open = "open", "Open"
         closed = "closed", "Closed"
         tallied = "tallied", "Tallied"
+        deleted = "deleted", "Deleted"
 
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
@@ -934,6 +935,14 @@ class Election(models.Model):
         default=50,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text="Minimum turnout percentage required to conclude the election without extension.",
+    )
+    eligible_group_cn = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Optional FreeIPA group CN. When set, only members of this group will receive voting credentials."
+        ),
     )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.draft)
 

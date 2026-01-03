@@ -87,6 +87,12 @@
     return '/elections/' + encodeURIComponent(String(electionId)) + '/eligible-users/search/';
   }
 
+  function eligibleVotersCountUrlFromPath() {
+    var base = eligibleUsersSearchUrlFromPath();
+    if (!base) return null;
+    return base + '?count_only=1';
+  }
+
   function collectSelectedCandidates() {
     var $ = window.jQuery;
     if (!$) return [];
@@ -323,9 +329,11 @@
       }
 
       if (ajaxUrl) {
+        var placeholder = String($select.attr('data-placeholder') || $select.data('placeholder') || '').trim();
         $select.select2({
           width: '100%',
           allowClear: true,
+          placeholder: placeholder,
           minimumInputLength: 0,
           closeOnSelect: !$select.prop('multiple'),
           ajax: {
@@ -340,13 +348,19 @@
                 var startEl = document.getElementById(String(startSourceId));
                 if (startEl && startEl.value) payload.start_datetime = String(startEl.value);
               }
+
+              var groupEl = document.getElementById('id_eligible_group_cn');
+              if (groupEl && groupEl.value != null) {
+                payload.eligible_group_cn = String(groupEl.value || '');
+              }
               return payload;
             }
           }
         });
 
       } else {
-        $select.select2({ width: '100%', closeOnSelect: !$select.prop('multiple') });
+        var placeholder2 = String($select.attr('data-placeholder') || $select.data('placeholder') || '').trim();
+        $select.select2({ width: '100%', closeOnSelect: !$select.prop('multiple'), allowClear: true, placeholder: placeholder2 });
       }
     });
   }
@@ -371,6 +385,89 @@
     totalEl.value = String(total + 1);
     initSelect2(tbody);
     syncGroupCandidateOptions(document);
+  }
+
+  async function refreshEligibleVotersCount() {
+    var url = eligibleVotersCountUrlFromPath();
+    if (!url) return;
+
+    var startEl = document.getElementById('id_start_datetime');
+    var startValue = startEl && startEl.value ? String(startEl.value) : '';
+    var groupEl = document.getElementById('id_eligible_group_cn');
+    var groupValue = groupEl && groupEl.value != null ? String(groupEl.value || '') : '';
+
+    var fullUrl = url;
+    if (startValue) fullUrl += '&start_datetime=' + encodeURIComponent(startValue);
+    fullUrl += '&eligible_group_cn=' + encodeURIComponent(groupValue);
+
+    try {
+      var resp = await window.fetch(fullUrl, { headers: { 'Accept': 'application/json' } });
+      if (!resp.ok) return;
+      var payload = await resp.json();
+      if (!payload || typeof payload.count !== 'number') return;
+
+      var nodes = document.querySelectorAll('.js-eligible-voters-count');
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].textContent = String(payload.count);
+      }
+    } catch (_e) {
+      // Ignore transient failures.
+    }
+  }
+
+  async function isUsernameEligibleForCurrentGroup(username) {
+    username = String(username || '').trim();
+    if (!username) return false;
+
+    var base = eligibleUsersSearchUrlFromPath();
+    if (!base) return true;
+
+    var startEl = document.getElementById('id_start_datetime');
+    var startValue = startEl && startEl.value ? String(startEl.value) : '';
+    var groupEl = document.getElementById('id_eligible_group_cn');
+    var groupValue = groupEl && groupEl.value != null ? String(groupEl.value || '') : '';
+
+    var url = base + '?q=' + encodeURIComponent(username);
+    if (startValue) url += '&start_datetime=' + encodeURIComponent(startValue);
+    url += '&eligible_group_cn=' + encodeURIComponent(groupValue);
+
+    try {
+      var resp = await window.fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!resp.ok) return true;
+      var payload = await resp.json();
+      var results = payload && payload.results ? payload.results : [];
+      if (!Array.isArray(results)) return true;
+
+      for (var i = 0; i < results.length; i++) {
+        if (results[i] && String(results[i].id || '').trim() === username) return true;
+      }
+      return false;
+    } catch (_e) {
+      // Degrade gracefully; don't auto-clear if the server can't be reached.
+      return true;
+    }
+  }
+
+  async function clearIneligibleSelectedCandidates() {
+    var jq = window.jQuery;
+    if (!jq) return;
+
+    var selects = jq('select[name^="candidates-"][name$="-freeipa_username"]');
+    if (!selects.length) return;
+
+    for (var i = 0; i < selects.length; i++) {
+      var $sel = jq(selects[i]);
+      var current = $sel.val();
+      if (!current) continue;
+
+      var username = String(current || '').trim();
+      if (!username) continue;
+
+      var ok = await isUsernameEligibleForCurrentGroup(username);
+      if (!ok) {
+        $sel.val(null).trigger('change');
+      }
+    }
   }
 
   function markRowDeleted(row) {
@@ -583,6 +680,38 @@
     initSelect2(document);
 
     var jq = window.jQuery;
+
+    // Select2 triggers jQuery events; using jQuery handlers here ensures the
+    // eligible-voter count refreshes when the group is changed/cleared.
+    var groupEl = document.getElementById('id_eligible_group_cn');
+    if (groupEl) {
+      if (jq) {
+        jq(groupEl).on('change select2:select select2:clear', function () {
+          refreshEligibleVotersCount();
+          clearIneligibleSelectedCandidates();
+        });
+      } else {
+        groupEl.addEventListener('change', function () {
+          refreshEligibleVotersCount();
+          clearIneligibleSelectedCandidates();
+        });
+      }
+    }
+
+    var startEl = document.getElementById('id_start_datetime');
+    if (startEl) {
+      if (jq) {
+        jq(startEl).on('change', function () {
+          refreshEligibleVotersCount();
+        });
+      } else {
+        startEl.addEventListener('change', function () {
+          refreshEligibleVotersCount();
+        });
+      }
+    }
+
+    refreshEligibleVotersCount();
     if (jq) {
       jq(document).on('change', 'select[name^="candidates-"][name$="-freeipa_username"], input[name^="candidates-"][name$="-DELETE"]', function () {
         syncGroupCandidateOptions(document);
