@@ -35,7 +35,6 @@ class ElectionDetailAdminControlsTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         voter_type = MembershipType.objects.create(
@@ -92,7 +91,6 @@ class ElectionDetailAdminControlsTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         voter_type = MembershipType.objects.create(
@@ -174,7 +172,6 @@ class ElectionDetailAdminControlsTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         viewer = FreeIPAUser(
@@ -215,7 +212,6 @@ class ElectionDetailAdminControlsTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         voter_type = MembershipType.objects.create(
@@ -296,13 +292,11 @@ class ElectionVoteNoJsFallbackTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         c2 = Candidate.objects.create(
             election=election,
             freeipa_username="bob",
             nominated_by="nominator",
-            ordering=2,
         )
 
         cred = VotingCredential.objects.create(

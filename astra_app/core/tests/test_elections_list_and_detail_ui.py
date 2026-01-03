@@ -372,7 +372,6 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             nominated_by="nominator",
             description="",
             url="",
-            ordering=1,
         )
         c2 = Candidate.objects.create(
             election=election,
@@ -380,7 +379,6 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             nominated_by="nominator",
             description="",
             url="",
-            ordering=2,
         )
         group = ExclusionGroup.objects.create(
             election=election,
@@ -433,7 +431,6 @@ class ElectionDetailConcludeElectionTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         self._login_as_freeipa_user("viewer")
@@ -478,7 +475,6 @@ class ElectionDetailConcludeElectionTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         ballot_hash = Ballot.compute_hash(
             election_id=election.id,
@@ -524,7 +520,6 @@ class ElectionDetailConcludeElectionTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         self._login_as_freeipa_user("admin")
@@ -559,3 +554,106 @@ class ElectionDetailConcludeElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=viewer):
             resp = self.client.post(reverse("election-conclude", args=[election.id]), data={})
         self.assertEqual(resp.status_code, 403)
+
+
+@override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+class ElectionDetailExtendElectionTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def _grant_manage_permission(self, username: str) -> None:
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name=username,
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+    def test_extend_button_visible_only_to_managers_and_above_conclude(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Extend election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=50,
+            status=Election.Status.open,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        self._login_as_freeipa_user("viewer")
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Extend Election")
+        self.assertNotContains(resp, "Conclude Election")
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Extend Election")
+        self.assertContains(resp, "Conclude Election")
+
+        body = resp.content.decode("utf-8")
+        self.assertLess(body.find("Extend Election"), body.find("Conclude Election"))
+
+    def test_extend_post_requires_new_end_after_current_and_logs_quota_status(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Extend election - post",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=50,
+            status=Election.Status.open,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        same_end = election.end_datetime
+        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+            resp = self.client.post(
+                reverse("election-extend-end", args=[election.id]),
+                {"end_datetime": timezone.localtime(same_end).strftime("%Y-%m-%dT%H:%M")},
+            )
+        self.assertEqual(resp.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(
+            timezone.localtime(election.end_datetime).strftime("%Y-%m-%dT%H:%M"),
+            timezone.localtime(same_end).strftime("%Y-%m-%dT%H:%M"),
+        )
+        self.assertFalse(
+            AuditLogEntry.objects.filter(election=election, event_type="election_end_extended").exists()
+        )
+
+        new_end = now + datetime.timedelta(days=2)
+        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+            resp = self.client.post(
+                reverse("election-extend-end", args=[election.id]),
+                {"end_datetime": timezone.localtime(new_end).strftime("%Y-%m-%dT%H:%M")},
+            )
+        self.assertEqual(resp.status_code, 302)
+
+        election.refresh_from_db()
+        self.assertEqual(
+            timezone.localtime(election.end_datetime).strftime("%Y-%m-%dT%H:%M"),
+            timezone.localtime(new_end).strftime("%Y-%m-%dT%H:%M"),
+        )
+
+        entries = list(AuditLogEntry.objects.filter(election=election, event_type="election_end_extended"))
+        self.assertEqual(len(entries), 1)
+        payload = entries[0].payload if isinstance(entries[0].payload, dict) else {}
+        self.assertIn("previous_end_datetime", payload)
+        self.assertIn("new_end_datetime", payload)
+        self.assertIn("quorum_percent", payload)
+        self.assertIn("participating_voter_count", payload)

@@ -42,13 +42,11 @@ class ElectionCredentialAndBallotTests(TestCase):
             election=self.election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         self.c2 = Candidate.objects.create(
             election=self.election,
             freeipa_username="bob",
             nominated_by="nominator",
-            ordering=2,
         )
 
         self.cred = VotingCredential.objects.create(
@@ -329,7 +327,6 @@ class ElectionPublicExportTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         VotingCredential.objects.create(
@@ -388,13 +385,11 @@ class ElectionPublicExportTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         c2 = Candidate.objects.create(
             election=election,
             freeipa_username="bob",
             nominated_by="nominator",
-            ordering=2,
         )
 
         VotingCredential.objects.create(
@@ -595,8 +590,8 @@ class ElectionCloseAndTallyTests(TestCase):
             number_of_seats=1,
             status=Election.Status.closed,
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         Ballot.objects.create(
             election=election,
@@ -665,21 +660,18 @@ class ElectionCloseAndTallyTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
             tiebreak_uuid="00000000-0000-0000-0000-000000000001",
         )
         c2 = Candidate.objects.create(
             election=election,
             freeipa_username="bob",
             nominated_by="nominator",
-            ordering=2,
             tiebreak_uuid="00000000-0000-0000-0000-000000000002",
         )
         c3 = Candidate.objects.create(
             election=election,
             freeipa_username="carol",
             nominated_by="nominator",
-            ordering=3,
             tiebreak_uuid="00000000-0000-0000-0000-000000000003",
         )
 
@@ -853,13 +845,11 @@ class ElectionVoteEndpointTests(TestCase):
             election=self.election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         self.c2 = Candidate.objects.create(
             election=self.election,
             freeipa_username="bob",
             nominated_by="nominator",
-            ordering=2,
         )
         self.cred = VotingCredential.objects.create(
             election=self.election,
@@ -1097,7 +1087,6 @@ class ElectionPublicPagesTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         list_url = reverse("elections")
@@ -1144,7 +1133,7 @@ class ElectionPublicPagesTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
 
@@ -1189,7 +1178,7 @@ class ElectionPublicPagesTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
 
@@ -1226,7 +1215,7 @@ class ElectionPublicPagesTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
 
@@ -1266,7 +1255,7 @@ class ElectionPublicPagesTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
 
@@ -1307,8 +1296,8 @@ class ElectionPublicPagesTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
 
@@ -1354,7 +1343,7 @@ class ElectionPublicPagesTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         detail_url = reverse("election-detail", args=[election.id])
 

@@ -10,10 +10,14 @@
         <label for="id_email_template_id">Email template</label>
         <select class="form-control" name="email_template_id" id="id_email_template_id">
           <option value="">(None)</option>
-          {% with selected_id=form.data|dict_get:"email_template_id"|default:form.initial|dict_get:"email_template_id" %}
-            {% for t in templates %}
-              <option value="{{ t.pk }}" {% if selected_id|stringformat:'s' == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
-            {% endfor %}
+          {% with data_selected=form.data|dict_get:"email_template_id" %}
+            {% with initial_selected=form.initial|dict_get:"email_template_id" %}
+              {% with selected_id=data_selected|default:initial_selected %}
+                {% for t in templates %}
+                  <option value="{{ t.pk }}" {% if selected_id|stringformat:'s' == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
+                {% endfor %}
+              {% endwith %}
+            {% endwith %}
           {% endwith %}
         </select>
         <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>

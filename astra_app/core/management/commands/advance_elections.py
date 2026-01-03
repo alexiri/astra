@@ -50,6 +50,10 @@ class Command(BaseCommand):
                 failed += 1
                 self.stderr.write(f"Failed to close election {election.id}: {exc}")
 
+        # Refresh the reference time: close_election() sets end_datetime=timezone.now(),
+        # which can be slightly after the 'now' captured at command start.
+        now = timezone.now()
+
         # Requery after close step so elections closed above are eligible to tally.
         to_tally = list(
             Election.objects.filter(status=Election.Status.closed, end_datetime__lte=now).only("id")

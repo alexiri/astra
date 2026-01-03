@@ -37,7 +37,6 @@ class ElectionAuditLogPageTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
@@ -86,7 +85,6 @@ class ElectionAuditLogPageTests(TestCase):
             election=election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         ballot_hash = Ballot.compute_hash(
             election_id=election.id,

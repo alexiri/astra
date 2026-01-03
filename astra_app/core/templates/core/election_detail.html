@@ -16,10 +16,15 @@
             <dt class="col-sm-4">Status</dt>
             <dd class="col-sm-8">{{ election.status }}</dd>
             <dt class="col-sm-4">Voting window</dt>
-              <dd class="col-sm-8">{{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}</dd>
+              <dd class="col-sm-8">
+                {{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}
+                {% if election.status == 'open' %}
+                  <i class="fas fa-info-circle text-muted" data-toggle="tooltip" title="The end date may be extended if quorum is not reached."></i>
+                {% endif %}
+              </dd>
             <dt class="col-sm-4">Seats</dt>
             <dd class="col-sm-8">{{ election.number_of_seats }}</dd>
-          </dl>
+          </dl>     
           
           {% if election.description %}
             <p>{{ election.description }}</p>
@@ -68,6 +73,62 @@
 
           {% if can_manage_elections and election.status == 'open' %}
             <hr class="my-3" />
+
+            <button
+              type="button"
+              class="btn btn-warning btn-block mb-2"
+              data-toggle="modal"
+              data-target="#extend-election-modal"
+            >
+              Extend Election
+            </button>
+
+            <div
+              class="modal fade"
+              id="extend-election-modal"
+              tabindex="-1"
+              role="dialog"
+              aria-labelledby="extend-election-modal-label"
+              aria-hidden="true"
+            >
+              <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                  <form method="post" action="{% url 'election-extend-end' election.id %}">
+                    {% csrf_token %}
+                    <div class="modal-header">
+                      <h5 class="modal-title" id="extend-election-modal-label">Extend election?</h5>
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                      </button>
+                    </div>
+                    <div class="modal-body">
+                      <p class="mb-3">Set a new end datetime. It must be later than the current end.</p>
+
+                      <div class="form-group mb-0">
+                        <label for="extend-end-datetime">New end datetime</label>
+                        <input
+                          id="extend-end-datetime"
+                          name="end_datetime"
+                          type="datetime-local"
+                          class="form-control js-datetime-picker"
+                          value="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
+                          min="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
+                          required
+                        >
+                        <div class="text-muted small mt-1">
+                          Current end: {{ election.end_datetime|date:"Y-m-d H:i T" }}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+                      <button type="submit" class="btn btn-warning">Extend Election</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+
             <button
               type="button"
               class="btn btn-danger btn-block"
@@ -136,25 +197,25 @@
                 <div class="mb-2">
                   <strong>Number of voters</strong>
                   —
-                  {{ turnout_stats.ballots_cast }} / {{ turnout_stats.eligible_voters }} ({{ turnout_stats.ballots_pct }}%)
+                  {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
                 </div>
 
                 <div class="progress mb-2">
                   <div
                     class="progress-bar bg-success"
                     role="progressbar"
-                    aria-valuenow="{{ turnout_stats.ballots_cast }}"
+                    aria-valuenow="{{ turnout_stats.participating_voter_count }}"
                     aria-valuemin="0"
-                    aria-valuemax="{{ turnout_stats.eligible_voters }}"
-                    style="width: {{ turnout_stats.ballots_pct }}%"
+                    aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
+                    style="width: {{ turnout_stats.participating_voter_percent }}%"
                   >
-                    <span class="sr-only">{{ turnout_stats.ballots_pct }}% Complete</span>
+                    <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
                   </div>
                 </div>
 
                 <div class="mb-3 text-muted">
                   Quorum:
-                  {{ turnout_stats.quorum_voters }} voters (50%)
+                  {{ turnout_stats.required_participating_voter_count }} voters ({{ turnout_stats.quorum_percent }}%)
                   {% if turnout_stats.quorum_met %}
                     <span class="ml-1 badge badge-success">met</span>
                   {% else %}
@@ -165,18 +226,18 @@
                 <div class="mb-2">
                   <strong>Votes cast (weight)</strong>
                   —
-                  {{ turnout_stats.votes_cast }} / {{ turnout_stats.eligible_votes }} ({{ turnout_stats.votes_pct }}%)
+                  {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
                 </div>
                 <div class="progress mb-0">
                   <div
                     class="progress-bar bg-info"
                     role="progressbar"
-                    aria-valuenow="{{ turnout_stats.votes_cast }}"
+                    aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
                     aria-valuemin="0"
-                    aria-valuemax="{{ turnout_stats.eligible_votes }}"
-                    style="width: {{ turnout_stats.votes_pct }}%"
+                    aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
+                    style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
                   >
-                    <span class="sr-only">{{ turnout_stats.votes_pct }}% Complete</span>
+                    <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
                   </div>
                 </div>
               </div>

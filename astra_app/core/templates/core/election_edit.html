@@ -57,8 +57,11 @@
     <div class="row">
       <div class="col-lg-9">
         <div class="card card-outline card-primary">
-          <div class="card-header">
-            <h3 class="card-title">Election details</h3>
+          <div class="card-header d-flex align-items-center">
+            <h3 class="card-title mb-0">Election details</h3>
+            {% if not election or election.status == "draft" %}
+              <span class="badge badge-warning ml-auto">draft</span>
+            {% endif %}
           </div>
           <div class="card-body">
             <div class="form-group">
@@ -99,8 +102,12 @@
                 {% if details_form.number_of_seats.errors %}<div class="text-danger small">{{ details_form.number_of_seats.errors }}</div>{% endif %}
               </div>
               <div class="form-group col-md-6">
-                <label>Status</label>
-                <input class="form-control" type="text" value="{% if election %}{{ election.status }}{% else %}draft{% endif %}" readonly />
+                <label for="{{ details_form.quorum.id_for_label }}">Quorum (%)</label>
+                {{ details_form.quorum }}
+                {% if details_form.quorum.errors %}<div class="text-danger small">{{ details_form.quorum.errors }}</div>{% endif %}
+                <div class="text-muted small mt-1">
+                  Minimum voter turnout percentage required; if not reached, the end date may be extended.
+                </div>
               </div>
             </div>
 
@@ -111,9 +118,6 @@
 
       <div class="col-lg-3">
         <div class="card card-outline card-secondary">
-          <div class="card-header">
-            <h3 class="card-title">Actions</h3>
-          </div>
           <div class="card-body">
             <button type="submit" class="btn btn-primary btn-block" onclick="document.getElementById('election-edit-action').value='save_draft'">
               Save Draft
@@ -129,7 +133,7 @@
             </button>
 
             <div class="text-muted small mt-2">
-              Starting an election sends credential emails to all eligible voters and disables edits.
+              Starting an election sends credential emails to all eligible voters and locks settings.
             </div>
           </div>
         </div>

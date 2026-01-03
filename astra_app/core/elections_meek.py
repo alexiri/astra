@@ -199,7 +199,7 @@ def generate_meek_round_explanations(
 
         tied_str = _format_candidate_list(tied_candidate_ids, candidate_name_by_id=names)
         paragraph = [
-            f"A tie occurred between {tied_str}. The predefined tie-breaking rules were applied in sequence.",
+            f"Candidates {tied_str} were tied. The predefined deterministic tie-breaking rules were applied in sequence."
         ]
 
         rule_trace_obj = tie_break.get("rule_trace")
@@ -211,9 +211,9 @@ def generate_meek_round_explanations(
         if len(failed_rules) > 0:
             paragraph.append(f"No distinction could be made based on {_format_list(failed_rules, joiner='or')}.")
 
-        paragraph.append(f"The tie was resolved using")
+        paragraph.append("The tie was resolved using")
         if successful_rule.get("rule") == 4:
-            paragraph.append(f"the final deterministic rule defined at election setup: a fixed candidate ordering identifier.")
+            paragraph.append("the final deterministic rule defined at election setup: a fixed candidate ordering identifier.")
         else:
             paragraph.append(str(successful_rule.get("title", "an unnamed rule")) + ".")
 
@@ -283,11 +283,11 @@ def generate_meek_round_explanations(
                 if triggered_by is not None:
                     trigger_name = _format_candidate_list([triggered_by], candidate_name_by_id=names)
                     paragraph.append(
-                        f"Because candidate {trigger_name}'s election satisfied an exclusion group constraint, no additional candidates from that group could be elected (group: \"{group_name}\")."
+                        f"Because candidate {trigger_name}'s election satisfied an exclusion group constraint, no additional candidates from the group \"{group_name}\" could be elected."
                     )
                 else:
                     paragraph.append(
-                        f"Because an exclusion group constraint was satisfied, no additional candidates from that group could be elected (group: \"{group_name}\")."
+                        f"Because an exclusion group constraint was satisfied, no additional candidates from the group \"{group_name}\" could be elected."
                     )
 
                 if excluded_reached_quota:
@@ -312,7 +312,7 @@ def generate_meek_round_explanations(
     if eliminated is not None:
         eliminated_str = _format_candidate_list([eliminated], candidate_name_by_id=names)
         audit_parts.append(
-            f"Candidate {eliminated_str} had the lowest vote total and was eliminated from the count."
+            f"Candidate {eliminated_str} had the lowest vote total and was eliminated from the count. "
             f"{eliminated_str}'s votes will be redistributed to remaining candidates according to voter preferences and current retention factors under the counting method."
         )           
         audit_parts.append("")
@@ -476,7 +476,7 @@ def tally_meek(
             remaining = [cid for cid in remaining if values3[cid] == pick3]
             _trace_step(
                 rule=3,
-                title="first-preference count",
+                title="first-preference votes",
                 values={cid: first_preferences.get(cid, Decimal(0)) for cid in ordered},
                 remaining=remaining,
             )

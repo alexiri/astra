@@ -74,6 +74,8 @@ urlpatterns = [
         name="election-resend-credentials",
     ),
 
+    path("elections/<int:election_id>/extend-end/", views_elections.election_extend_end, name="election-extend-end"),
+
     path(
         "elections/<int:election_id>/conclude/",
         views_elections.election_conclude,

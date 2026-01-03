@@ -40,7 +40,7 @@ class ElectionEditLifecycleTests(TestCase):
             voting_email_html="<p>Hi {{ username }}</p>",
             voting_email_text="Hi {{ username }}",
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         mt = MembershipType.objects.create(
             code="voter",
@@ -89,6 +89,7 @@ class ElectionEditLifecycleTests(TestCase):
                     "start_datetime": start_str,
                     "end_datetime": end_str,
                     "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
                     "email_template_id": "",
                     "subject": election.voting_email_subject,
                     "html_content": election.voting_email_html,

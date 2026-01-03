@@ -61,7 +61,6 @@ class ElectionsDetailCandidateCardsTests(TestCase):
             nominated_by="nominator",
             description="A short bio.",
             url="https://example.com/~alice",
-            ordering=1,
         )
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})

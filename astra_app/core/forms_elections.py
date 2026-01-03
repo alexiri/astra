@@ -1,15 +1,49 @@
 from __future__ import annotations
 
 import datetime
+from typing import override
 
 from django import forms
+from django.conf import settings
 from django.forms import modelformset_factory
 from django.utils import timezone
 
 from core.models import Candidate, Election, ExclusionGroup
 
+_DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
+    "%Y-%m-%dT%H:%M",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    *list(settings.DATETIME_INPUT_FORMATS),
+]
+
 
 class ElectionDetailsForm(forms.ModelForm):
+    number_of_seats = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={"class": "form-control smallNumber", "min": 1, "step": 1}),
+    )
+    quorum = forms.IntegerField(
+        min_value=0,
+        max_value=100,
+        widget=forms.NumberInput(
+            attrs={
+                "class": "form-control smallNumber",
+                "min": 0,
+                "max": 100,
+                "step": 1,
+            }
+        ),
+    )
+    start_datetime = forms.DateTimeField(
+        input_formats=_DATETIME_LOCAL_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"class": "form-control js-datetime-picker", "type": "datetime-local"}),
+    )
+    end_datetime = forms.DateTimeField(
+        input_formats=_DATETIME_LOCAL_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"class": "form-control js-datetime-picker", "type": "datetime-local"}),
+    )
+
     class Meta:
         model = Election
         fields = [
@@ -19,14 +53,12 @@ class ElectionDetailsForm(forms.ModelForm):
             "start_datetime",
             "end_datetime",
             "number_of_seats",
+            "quorum",
         ]
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
             "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
             "url": forms.URLInput(attrs={"class": "form-control"}),
-            "start_datetime": forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}),
-            "end_datetime": forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}),
-            "number_of_seats": forms.NumberInput(attrs={"class": "form-control", "min": 1}),
         }
 
     def clean(self) -> dict[str, object]:
@@ -47,6 +79,34 @@ class ElectionDetailsForm(forms.ModelForm):
                 self.add_error("end_datetime", "End must be after start.")
 
         return cleaned
+
+
+class ElectionEndDateForm(forms.ModelForm):
+    """Form for extending an election end datetime.
+
+    When an election is open, the edit UI disables other fields; disabled inputs
+    are not submitted by browsers, so we validate just end_datetime.
+    """
+
+    class Meta:
+        model = Election
+        fields = ["end_datetime"]
+        widgets = {
+            "end_datetime": forms.DateTimeInput(
+                attrs={"class": "form-control js-datetime-picker", "type": "datetime-local"}
+            ),
+        }
+
+    end_datetime = forms.DateTimeField(
+        input_formats=_DATETIME_LOCAL_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"class": "form-control js-datetime-picker", "type": "datetime-local"}),
+    )
+
+    def clean_end_datetime(self) -> datetime.datetime:
+        end_dt = self.cleaned_data["end_datetime"]
+        if timezone.is_naive(end_dt):
+            return timezone.make_aware(end_dt)
+        return end_dt
 
 
 class ElectionVotingEmailForm(forms.Form):

@@ -117,8 +117,8 @@ class ElectionVoteWeightsTests(TestCase):
             status=Election.Status.open,
         )
 
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
@@ -152,8 +152,8 @@ class ElectionVoteWeightsTests(TestCase):
             status=Election.Status.open,
         )
 
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
@@ -207,8 +207,8 @@ class ElectionVoteWeightsTests(TestCase):
             status=Election.Status.open,
         )
 
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         self._make_weighted_voter(election=election, username="voter1")
 
@@ -259,8 +259,8 @@ class ElectionVoteWeightsTests(TestCase):
             status=Election.Status.open,
         )
 
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         expected = self._make_weighted_voter(election=election, username="voter1")
         issued = issue_voting_credentials_from_memberships_detailed(election=election)
@@ -299,7 +299,7 @@ class ElectionVoteWeightsTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 

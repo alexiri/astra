@@ -105,6 +105,21 @@ class ElectionEditPermissionTests(TestCase):
         resp = self.client.get(reverse("election-edit", args=[0]))
         self.assertEqual(resp.status_code, 200)
 
+    def test_new_election_details_card_shows_draft_badge_and_hides_status_field(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+        self.assertContains(resp, "Election details")
+        self.assertContains(resp, ">draft</span>")
+        self.assertNotContains(resp, "<label>Status</label>")
+
     def test_new_election_post_save_draft_creates_election(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -124,6 +139,7 @@ class ElectionEditPermissionTests(TestCase):
                 "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
                 "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
                 "number_of_seats": "1",
+                "quorum": "50",
                 "email_template_id": "",
                 "subject": "",
                 "html_content": "",
@@ -151,6 +167,52 @@ class ElectionEditPermissionTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(Election.objects.filter(name="New draft", status=Election.Status.draft).count(), 1)
 
+    def test_new_election_post_rejects_zero_seats(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        resp = self.client.post(
+            reverse("election-edit", args=[0]),
+            data={
+                "action": "save_draft",
+                "name": "Invalid draft",
+                "description": "",
+                "url": "",
+                "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": "0",
+                "quorum": "50",
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "0",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": "",
+                "candidates-0-freeipa_username": "",
+                "candidates-0-nominated_by": "",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "groups-TOTAL_FORMS": "0",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Number of seats")
+        self.assertContains(resp, "Ensure this value is greater than or equal to 1")
+
     def test_new_election_includes_scripts_in_correct_order_for_select2(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -172,6 +234,29 @@ class ElectionEditPermissionTests(TestCase):
         self.assertNotEqual(election_js_i, -1)
         self.assertLess(jquery_i, select2_i)
         self.assertLess(select2_i, election_js_i)
+
+    def test_new_election_renders_seats_and_quorum_inputs(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertIn('id="id_number_of_seats"', html)
+        self.assertIn('min="1"', html)
+        self.assertIn('step="1"', html)
+        self.assertIn('class="form-control smallNumber"', html)
+
+        self.assertIn('id="id_quorum"', html)
+        self.assertIn('min="0"', html)
+        self.assertIn('max="100"', html)
+        self.assertIn('step="1"', html)
+        self.assertIn('class="form-control smallNumber"', html)
 
     def test_new_election_empty_form_has_ajax_url_for_dynamic_rows(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -221,7 +306,6 @@ class ElectionEditExclusionGroupsSelectTests(TestCase):
             nominated_by="alex",
             description="",
             url="",
-            ordering=1,
         )
         Candidate.objects.create(
             election=election,
@@ -229,7 +313,6 @@ class ElectionEditExclusionGroupsSelectTests(TestCase):
             nominated_by="alex",
             description="",
             url="",
-            ordering=2,
         )
 
         resp = self.client.get(reverse("election-edit", args=[election.id]))
@@ -270,7 +353,6 @@ class ElectionEditExclusionGroupsSelectTests(TestCase):
             nominated_by="alex",
             description="",
             url="",
-            ordering=1,
         )
 
         resp = self.client.get(reverse("election-edit", args=[election.id]))
@@ -329,6 +411,7 @@ class ElectionEditCreateModeGroupSelectionTests(TestCase):
                 "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
                 "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
                 "number_of_seats": "1",
+                "quorum": "50",
                 "email_template_id": "",
                 "subject": "",
                 "html_content": "",

@@ -1262,8 +1262,8 @@ class MembershipTypeAdmin(admin.ModelAdmin):
 class CandidateInline(admin.TabularInline):
     model = Candidate
     extra = 0
-    fields = ("freeipa_username", "nominated_by", "url", "description", "ordering")
-    ordering = ("ordering", "id")
+    fields = ("freeipa_username", "nominated_by", "url", "description")
+    ordering = ("freeipa_username", "id")
 
 
 @admin.register(Election)
@@ -1389,10 +1389,10 @@ class ElectionAdmin(admin.ModelAdmin):
 
 @admin.register(Candidate)
 class CandidateAdmin(admin.ModelAdmin):
-    list_display = ("freeipa_username", "nominated_by", "election", "ordering")
+    list_display = ("freeipa_username", "nominated_by", "election")
     list_filter = ("election",)
     search_fields = ("freeipa_username", "nominated_by", "election__name")
-    ordering = ("election", "ordering", "id")
+    ordering = ("election", "freeipa_username", "id")
 
 
 class ExclusionGroupCandidateInline(admin.TabularInline):

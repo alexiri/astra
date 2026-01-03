@@ -389,6 +389,30 @@
     row.style.display = 'none';
   }
 
+  function initDateTimePickers() {
+    var jq = window.jQuery;
+    if (!jq || !jq.fn) return;
+    if (typeof jq.fn.datetimepicker !== 'function') return;
+
+    jq('.js-datetime-picker').each(function () {
+      var $el = jq(this);
+      if ($el.data('datetimepicker')) return;
+      $el.datetimepicker({
+        icons: {
+          time: 'far fa-clock',
+          date: 'far fa-calendar',
+          up: 'fas fa-arrow-up',
+          down: 'fas fa-arrow-down',
+          previous: 'fas fa-chevron-left',
+          next: 'fas fa-chevron-right',
+          today: 'far fa-calendar-check',
+          clear: 'far fa-trash-alt',
+          close: 'far fa-times-circle'
+        }
+      });
+    });
+  }
+
   function onReady() {
     function resetEmailSaveMode() {
       var mode = $('election-edit-email-save-mode');
@@ -553,6 +577,7 @@
 
     // Make restore meaningful even before the user loads a template.
     storeOriginalsFromFields();
+    initDateTimePickers();
 
     syncGroupCandidateOptions(document);
     initSelect2(document);

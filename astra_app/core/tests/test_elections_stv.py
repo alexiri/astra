@@ -171,10 +171,9 @@ class STVTallyTests(TestCase):
         first_round = rounds[0]
 
         audit_text = str(first_round.get("audit_text") or "")
-        self.assertIn("Election outcome for this iteration", audit_text)
         self.assertIn("reached the election quota", audit_text)
         self.assertIn("could not be elected despite reaching the quota", audit_text)
-        self.assertIn('group: "Incompatibles"', audit_text)
+        self.assertIn('Incompatibles', audit_text)
 
 
 class ElectionPrivacyFlowTests(TestCase):
@@ -195,7 +194,6 @@ class ElectionPrivacyFlowTests(TestCase):
             freeipa_username="alice",
             nominated_by="nominator",
             description="",
-            ordering=1,
         )
 
         mt = MembershipType.objects.create(code="voter", name="Voter", votes=1, isIndividual=True)

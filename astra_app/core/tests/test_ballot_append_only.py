@@ -26,13 +26,11 @@ class BallotAppendOnlyTests(TestCase):
             election=self.election,
             freeipa_username="alice",
             nominated_by="nominator",
-            ordering=1,
         )
         self.c2 = Candidate.objects.create(
             election=self.election,
             freeipa_username="bob",
             nominated_by="nominator",
-            ordering=2,
         )
         self.cred = VotingCredential.objects.create(
             election=self.election,

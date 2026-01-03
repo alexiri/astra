@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -32,19 +33,21 @@ class BallotVerificationPageTests(TestCase):
             nonce=nonce,
         )
         chain_hash = compute_chain_hash(previous_chain_hash=previous_chain_hash, ballot_hash=ballot_hash)
-        ballot = Ballot.objects.create(
-            election=election,
-            credential_public_id=credential_public_id,
-            ranking=ranking,
-            weight=weight,
-            ballot_hash=ballot_hash,
-            previous_chain_hash=previous_chain_hash,
-            chain_hash=chain_hash,
-            is_counted=is_counted,
-            superseded_by=superseded_by,
-            created_at=created_at,
-        )
-        return ballot
+
+        # Ballot rows are append-only (DB trigger). To make created_at deterministic,
+        # freeze django.utils.timezone.now during insert (auto_now_add).
+        with patch("django.utils.timezone.now", return_value=created_at):
+            return Ballot.objects.create(
+                election=election,
+                credential_public_id=credential_public_id,
+                ranking=ranking,
+                weight=weight,
+                ballot_hash=ballot_hash,
+                previous_chain_hash=previous_chain_hash,
+                chain_hash=chain_hash,
+                is_counted=is_counted,
+                superseded_by=superseded_by,
+            )
 
     def test_verify_page_renders_and_rejects_invalid_receipt_format(self) -> None:
         url = reverse("ballot-verify")
@@ -75,7 +78,7 @@ class BallotVerificationPageTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n", ordering=1)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
 
         created_at = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
         ballot = self._create_ballot(
@@ -108,7 +111,7 @@ class BallotVerificationPageTests(TestCase):
             number_of_seats=1,
             status=Election.Status.closed,
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n", ordering=1)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
 
         created_at = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
         ballot = self._create_ballot(
@@ -138,7 +141,7 @@ class BallotVerificationPageTests(TestCase):
             status=Election.Status.tallied,
             tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n", ordering=1)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
 
         created_at = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
         ballot = self._create_ballot(
@@ -168,8 +171,8 @@ class BallotVerificationPageTests(TestCase):
             status=Election.Status.tallied,
             tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="n", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="n")
 
         created_at1 = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
         created_at2 = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 40, 0))

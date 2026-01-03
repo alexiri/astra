@@ -67,8 +67,8 @@ class AdminElectionLifecycleActionTests(TestCase):
             number_of_seats=1,
             status=Election.Status.closed,
         )
-        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator", ordering=1)
-        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator", ordering=2)
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
         ballot_hash = Ballot.compute_hash(
             election_id=election.id,
             credential_public_id="cred-x",

@@ -16,9 +16,9 @@ def main() -> None:
     ballots = [
         {"weight": 1, "ranking": [10, 12]},
         {"weight": 1, "ranking": [11, 10]},
-        # {"weight": 1, "ranking": [12, 11]},
-        # {"weight": 1, "ranking": [11, 12, 10]},
-        # {"weight": 5, "ranking": [12, 10]},
+        {"weight": 1, "ranking": [12, 11]},
+        {"weight": 1, "ranking": [11, 12, 10]},
+        {"weight": 5, "ranking": [11, 10]},
         # {"weight": 2, "ranking": [12, 11, 10]},
         # {"weight": 5, "ranking": [10, 12, 11]},
     ]
@@ -28,18 +28,20 @@ def main() -> None:
     ]
 
     result = tally_meek(seats=2, ballots=ballots, candidates=candidates, exclusion_groups=exclusions)
-    print(f"Elected: {result['elected']}")
-    print(f"Eliminated: {result['eliminated']}")
-    print(f"Forced Excluded: {result['forced_excluded']}")
-    print(f"Quota: {result['quota']}, Rounds: {len(result['rounds'])}")
     print("Rounds detail:")
     for round_detail in result["rounds"]:
+        data = round_detail.copy()
+        data.pop("audit_text", None)
+        print(data)
         # print(round_detail['summary_text'])
         print(round_detail['audit_text'])
         print()
-        print(round_detail)
         # break
 
+    print(f"Elected: {result['elected']}")
+    print(f"Eliminated: {result['eliminated']}")
+    print(f"Forced Excluded: {result['forced_excluded']}")
+    print(f"Quota: {result['quota']:.2f}, Rounds: {len(result['rounds'])}")
 
 if __name__ == "__main__":
     main()

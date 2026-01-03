@@ -144,66 +144,117 @@
                       {% if ev.audit_text %}
                         <div class="mb-0">{{ ev.audit_text|linebreaksbr }}</div>
                       {% endif %}
-                    {% else %}
-                      {% if ev.event_type == 'ballots_submitted_summary' %}
-                        <p class="mb-2">
-                          <strong>{{ ev.ballots_count }}</strong> ballot{{ ev.ballots_count|pluralize }} submitted.
+
+                    {% elif ev.event_type == 'ballots_submitted_summary' %}
+                      <p class="mb-2">
+                        <strong>{{ ev.ballots_count }}</strong> ballot{{ ev.ballots_count|pluralize }} submitted.
+                      </p>
+
+                      {% if ev.first_timestamp and ev.last_timestamp %}
+                        <p class="text-muted small mb-2">
+                          {{ ev.first_timestamp|time:"H:i:s" }} → {{ ev.last_timestamp|time:"H:i:s" }}
                         </p>
+                      {% endif %}
 
-                        {% if ev.first_timestamp and ev.last_timestamp %}
-                          <p class="text-muted small mb-2">
-                            {{ ev.first_timestamp|time:"H:i:s" }} → {{ ev.last_timestamp|time:"H:i:s" }}
-                          </p>
-                        {% endif %}
-
-                        <details class="mb-2">
-                          <summary class="text-muted">Show ballot hashes</summary>
-                          <ul class="mb-2 pl-3 mt-2">
-                            {% for b in ev.ballot_entries %}
-                              <li>
-                                <span class="text-muted">{{ b.timestamp|time:"H:i:s" }}</span>
-                                {% if b.ballot_hash %}
-                                  —
-                                  <code title="{{ b.ballot_hash }}">
-                                    {% if b.ballot_hash|length > 16 %}
-                                      {{ b.ballot_hash|slice:":16" }}…
-                                    {% else %}
-                                      {{ b.ballot_hash }}
-                                    {% endif %}
-                                  </code>
-                                  {% if b.supersedes_ballot_hash %}
-                                    <span class="text-muted small">
-                                      (supersedes
-                                      <code title="{{ b.supersedes_ballot_hash }}">
-                                        {% if b.supersedes_ballot_hash|length > 16 %}
-                                          {{ b.supersedes_ballot_hash|slice:":16" }}…
-                                        {% else %}
-                                          {{ b.supersedes_ballot_hash }}
-                                        {% endif %}
-                                      </code>)
-                                    </span>
+                      <details class="mb-2">
+                        <summary class="text-muted">Show ballot hashes</summary>
+                        <ul class="mb-2 pl-3 mt-2">
+                          {% for b in ev.ballot_entries %}
+                            <li>
+                              <span class="text-muted">{{ b.timestamp|time:"H:i:s" }}</span>
+                              {% if b.ballot_hash %}
+                                —
+                                <code title="{{ b.ballot_hash }}">
+                                  {% if b.ballot_hash|length > 16 %}
+                                    {{ b.ballot_hash|slice:":16" }}…
+                                  {% else %}
+                                    {{ b.ballot_hash }}
                                   {% endif %}
-                                  <button
-                                    type="button"
-                                    class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
-                                    data-hash="{{ b.ballot_hash }}"
-                                    aria-label="Copy full ballot hash"
-                                    title="Copy full ballot hash"
-                                  >
-                                    <i class="fas fa-copy" aria-hidden="true"></i>
-                                  </button>
+                                </code>
+                                {% if b.supersedes_ballot_hash %}
+                                  <span class="text-muted small">
+                                    (supersedes
+                                    <code title="{{ b.supersedes_ballot_hash }}">
+                                      {% if b.supersedes_ballot_hash|length > 16 %}
+                                        {{ b.supersedes_ballot_hash|slice:":16" }}…
+                                      {% else %}
+                                        {{ b.supersedes_ballot_hash }}
+                                      {% endif %}
+                                    </code>)
+                                  </span>
                                 {% endif %}
-                              </li>
-                            {% empty %}
-                              <li class="text-muted">No ballot details recorded.</li>
-                            {% endfor %}
-                          </ul>
+                                <button
+                                  type="button"
+                                  class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
+                                  data-hash="{{ b.ballot_hash }}"
+                                  aria-label="Copy full ballot hash"
+                                  title="Copy full ballot hash"
+                                >
+                                  <i class="fas fa-copy" aria-hidden="true"></i>
+                                </button>
+                              {% endif %}
+                            </li>
+                          {% empty %}
+                            <li class="text-muted">No ballot details recorded.</li>
+                          {% endfor %}
+                        </ul>
 
-                          {% if ev.ballots_preview_truncated %}
-                            <p class="text-muted small mb-2">Showing first {{ ev.ballots_preview_limit }} ballot{{ ev.ballots_preview_limit|pluralize }}.</p>
-                          {% endif %}
-                        </details>
-                      {% else %}
+                        {% if ev.ballots_preview_truncated %}
+                          <p class="text-muted small mb-2">Showing first {{ ev.ballots_preview_limit }} ballot{{ ev.ballots_preview_limit|pluralize }}.</p>
+                        {% endif %}
+                      </details>
+
+                    {% elif ev.event_type == 'election_end_extended' %}
+                      <p class="mb-2"><strong>Election end was extended</strong></p>
+                      <dl class="row mb-2">
+                        {% if ev.payload.previous_end_datetime %}
+                          <dt class="col-sm-5">Previous end</dt>
+                          <dd class="col-sm-7">{{ ev.payload.previous_end_datetime }}</dd>
+                        {% endif %}
+                        {% if ev.payload.new_end_datetime %}
+                          <dt class="col-sm-5">New end</dt>
+                          <dd class="col-sm-7">{{ ev.payload.new_end_datetime }}</dd>
+                        {% endif %}
+                        {% if ev.payload.quorum_percent %}
+                          <dt class="col-sm-5">Quorum percent</dt>
+                          <dd class="col-sm-7">{{ ev.payload.quorum_percent }}%</dd>
+                        {% endif %}
+                        {% if ev.payload.required_participating_voter_count %}
+                          <dt class="col-sm-5">Quorum voters required</dt>
+                          <dd class="col-sm-7">{{ ev.payload.required_participating_voter_count }}</dd>
+                        {% endif %}
+                        {% if ev.payload.participating_voter_count %}
+                          <dt class="col-sm-5">Voters participated</dt>
+                          <dd class="col-sm-7">{{ ev.payload.participating_voter_count }}</dd>
+                        {% endif %}
+                      </dl>
+
+                    {% elif ev.event_type == 'quorum_reached' %}
+                      <p class="mb-2"><strong>Quorum reached</strong></p>
+                      <dl class="row mb-2">
+                        {% if ev.payload.quorum_percent %}
+                          <dt class="col-sm-5">Quorum percent</dt>
+                          <dd class="col-sm-7">{{ ev.payload.quorum_percent }}%</dd>
+                        {% endif %}
+                        {% if ev.payload.required_participating_voter_count %}
+                          <dt class="col-sm-5">Voters required</dt>
+                          <dd class="col-sm-7">{{ ev.payload.required_participating_voter_count }}</dd>
+                        {% endif %}
+                        {% if ev.payload.participating_voter_count %}
+                          <dt class="col-sm-5">Voters participated</dt>
+                          <dd class="col-sm-7">{{ ev.payload.participating_voter_count }}</dd>
+                        {% endif %}
+                        {% if ev.payload.eligible_voter_count %}
+                          <dt class="col-sm-5">Eligible voters</dt>
+                          <dd class="col-sm-7">{{ ev.payload.eligible_voter_count }}</dd>
+                        {% endif %}
+                        {% if ev.payload.quorum_met %}
+                          <dt class="col-sm-5">Quorum met</dt>
+                          <dd class="col-sm-7">{{ ev.payload.quorum_met }}</dd>
+                        {% endif %}
+                      </dl>
+
+                    {% else %}
                       {% if ev.event_type == 'election_closed' and ev.payload.chain_head %}
                         <p class="mb-2">
                           <strong>Final chain head</strong>
@@ -226,6 +277,7 @@
                           </button>
                         </p>
                       {% endif %}
+
                       {% if ev.event_type == 'tally_completed' and ev.elected_users %}
                         <p class="mb-2"><strong>Elected</strong></p>
                         <ul class="mb-2 pl-3">
@@ -239,7 +291,6 @@
                         <pre class="mb-0">{{ ev.payload|pprint }}</pre>
                       {% else %}
                         <p class="text-muted mb-0">No details recorded.</p>
-                      {% endif %}
                       {% endif %}
                     {% endif %}
                   </div>

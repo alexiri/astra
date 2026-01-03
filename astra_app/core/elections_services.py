@@ -13,7 +13,7 @@ import post_office.mail
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.template import Context, Template
 from django.template.exceptions import TemplateSyntaxError
@@ -45,6 +45,40 @@ class InvalidCredentialError(ElectionError):
 
 class ElectionNotClosedError(ElectionError):
     pass
+
+
+@transaction.atomic
+def extend_election_end_datetime(*, election: Election, new_end_datetime: datetime.datetime) -> None:
+    # IMPORTANT: ModelForms populate their instance during validation. Views that
+    # validate end_datetime via a ModelForm may pass an already-mutated instance.
+    # Re-load under a row lock so validation compares against the persisted end.
+    locked = Election.objects.select_for_update().only("id", "status", "end_datetime").get(pk=election.pk)
+
+    if locked.status != Election.Status.open:
+        raise ElectionNotOpenError("election is not open")
+
+    old_end = locked.end_datetime
+    now = timezone.now()
+
+    if new_end_datetime <= old_end:
+        raise ElectionError("End datetime must be later than the current end.")
+    if new_end_datetime <= now:
+        raise ElectionError("End datetime must be in the future.")
+
+    locked.end_datetime = new_end_datetime
+    locked.save(update_fields=["end_datetime", "updated_at"])
+
+    status = election_quorum_status(election=locked)
+    AuditLogEntry.objects.create(
+        election=locked,
+        event_type="election_end_extended",
+        payload={
+            "previous_end_datetime": old_end.isoformat(),
+            "new_end_datetime": new_end_datetime.isoformat(),
+            **status,
+        },
+        is_public=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -376,6 +410,55 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
     return int(membership_weight) + sponsorship_weight
 
 
+def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
+    """Return the election's current quorum/turnout status.
+
+    Prefer issued credentials when they exist, since they represent the
+    election's frozen eligibility snapshot.
+    """
+
+    quorum_percent = int(election.quorum or 0)
+
+    credentials_qs = VotingCredential.objects.filter(election=election, weight__gt=0)
+    if election.status != Election.Status.draft:
+        cred_agg = credentials_qs.aggregate(voters=Count("id"), votes=Sum("weight"))
+        eligible_voter_count = int(cred_agg.get("voters") or 0)
+        eligible_vote_weight_total = int(cred_agg.get("votes") or 0)
+    else:
+        eligible = eligible_voters_from_memberships(election=election)
+        eligible_voter_count = len(eligible)
+        eligible_vote_weight_total = sum(v.weight for v in eligible)
+
+    ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
+        ballots=Count("id"),
+        weight_total=Sum("weight"),
+    )
+    participating_voter_count = int(ballot_agg.get("ballots") or 0)
+    participating_vote_weight_total = int(ballot_agg.get("weight_total") or 0)
+
+    required_participating_voter_count = 0
+    if quorum_percent > 0 and eligible_voter_count > 0:
+        # Ceil(eligible * pct / 100) with integer arithmetic.
+        required_participating_voter_count = (
+            eligible_voter_count * quorum_percent + 99
+        ) // 100
+
+    quorum_met = bool(
+        required_participating_voter_count
+        and participating_voter_count >= required_participating_voter_count
+    )
+
+    return {
+        "quorum_percent": quorum_percent,
+        "quorum_met": quorum_met,
+        "required_participating_voter_count": required_participating_voter_count,
+        "eligible_voter_count": eligible_voter_count,
+        "eligible_vote_weight_total": eligible_vote_weight_total,
+        "participating_voter_count": participating_voter_count,
+        "participating_vote_weight_total": participating_vote_weight_total,
+    }
+
+
 @transaction.atomic
 def submit_ballot(*, election: Election, credential_public_id: str, ranking: list[int]) -> BallotReceipt:
     if election.status != Election.Status.open:
@@ -477,6 +560,19 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
         payload=payload,
         is_public=False,
     )
+
+    status = election_quorum_status(election=election)
+    required_participating_voter_count = int(status.get("required_participating_voter_count") or 0)
+    quorum_met = bool(status.get("quorum_met"))
+    if required_participating_voter_count and quorum_met:
+        already_logged = AuditLogEntry.objects.filter(election=election, event_type="quorum_reached").exists()
+        if not already_logged:
+            AuditLogEntry.objects.create(
+                election=election,
+                event_type="quorum_reached",
+                payload=status,
+                is_public=True,
+            )
 
     return BallotReceipt(
         ballot=ballot,

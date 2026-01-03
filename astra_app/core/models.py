@@ -11,7 +11,7 @@ from typing import override
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -929,7 +929,12 @@ class Election(models.Model):
     url = models.URLField(blank=True, default="", max_length=2048)
     start_datetime = models.DateTimeField()
     end_datetime = models.DateTimeField()
-    number_of_seats = models.PositiveIntegerField(default=1)
+    number_of_seats = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
+    quorum = models.PositiveSmallIntegerField(
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Minimum turnout percentage required to conclude the election without extension.",
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.draft)
 
     # Published machine-readable tally output.
@@ -968,11 +973,10 @@ class Candidate(models.Model):
     )
     description = models.TextField(blank=True, default="")
     url = models.URLField(blank=True, default="", max_length=2048)
-    ordering = models.PositiveIntegerField(default=0)
     tiebreak_uuid = models.UUIDField(default=uuid.uuid4, editable=False)
 
     class Meta:
-        ordering = ("ordering", "id")
+        ordering = ("freeipa_username", "id")
         constraints = [
             models.UniqueConstraint(
                 fields=["election", "freeipa_username"],

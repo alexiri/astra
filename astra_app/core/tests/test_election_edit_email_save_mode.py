@@ -68,7 +68,7 @@ class ElectionEditEmailSaveModeTests(TestCase):
             voting_email_text="Saved text",
         )
 
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="bob", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="bob")
         self._make_eligible(election=election, username="alice")
         self._make_eligible(election=election, username="bob")
 
@@ -86,6 +86,7 @@ class ElectionEditEmailSaveModeTests(TestCase):
                 "start_datetime": (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M"),
                 "end_datetime": (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
                 "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
                 # Intentionally changed email fields; should NOT be persisted.
                 "email_template_id": str(t2.pk),
                 "subject": "New subject",
@@ -138,7 +139,7 @@ class ElectionEditEmailSaveModeTests(TestCase):
             status=Election.Status.draft,
         )
 
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="bob", ordering=1)
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="bob")
         self._make_eligible(election=election, username="alice")
         self._make_eligible(election=election, username="bob")
 
@@ -155,6 +156,7 @@ class ElectionEditEmailSaveModeTests(TestCase):
                 "start_datetime": (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M"),
                 "end_datetime": (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
                 "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
                 "email_template_id": str(t1.pk),
                 "subject": "New subject",
                 "html_content": "New html",

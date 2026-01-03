@@ -26,6 +26,7 @@ from core.elections_services import (
     ElectionError,
     ElectionNotOpenError,
     InvalidCredentialError,
+    election_quorum_status,
     eligible_voters_from_memberships,
     issue_voting_credentials_from_memberships_detailed,
     submit_ballot,
@@ -33,6 +34,7 @@ from core.elections_services import (
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
+    ElectionEndDateForm,
     ElectionVotingEmailForm,
     ExclusionGroupWizardFormSet,
 )
@@ -283,11 +285,26 @@ def election_edit(request, election_id: int):
 
         details_form = ElectionDetailsForm(request.POST, instance=election)
         email_form = ElectionVotingEmailForm(request.POST)
+
+        if election is not None and election.status != Election.Status.draft:
+            # Once an election is started, configuration is effectively frozen.
+            # The only allowed edit is extending the end datetime while open.
+            for field_name in (
+                "name",
+                "description",
+                "url",
+                "start_datetime",
+                "number_of_seats",
+                "quorum",
+            ):
+                details_form.fields[field_name].disabled = True
+            if election.status != Election.Status.open:
+                details_form.fields["end_datetime"].disabled = True
         if action == "save_draft":
             candidate_formset = CandidateWizardFormSet(
                 request.POST,
                 queryset=(
-                    Candidate.objects.filter(election=election).order_by("ordering", "id")
+                    Candidate.objects.filter(election=election).order_by("id")
                     if election is not None
                     else Candidate.objects.none()
                 ),
@@ -295,6 +312,23 @@ def election_edit(request, election_id: int):
             )
             group_formset = ExclusionGroupWizardFormSet(
                 request.POST,
+                queryset=(
+                    ExclusionGroup.objects.filter(election=election).order_by("name", "id")
+                    if election is not None
+                    else ExclusionGroup.objects.none()
+                ),
+                prefix="groups",
+            )
+        elif action == "extend_end":
+            candidate_formset = CandidateWizardFormSet(
+                queryset=(
+                    Candidate.objects.filter(election=election).order_by("id")
+                    if election is not None
+                    else Candidate.objects.none()
+                ),
+                prefix="candidates",
+            )
+            group_formset = ExclusionGroupWizardFormSet(
                 queryset=(
                     ExclusionGroup.objects.filter(election=election).order_by("name", "id")
                     if election is not None
@@ -365,6 +399,14 @@ def election_edit(request, election_id: int):
             _configure_candidate_form_choices()
             _configure_group_choices()
 
+        if election is not None and election.status != Election.Status.draft:
+            for form in candidate_formset.forms:
+                for field in form.fields.values():
+                    field.disabled = True
+            for form in group_formset.forms:
+                for field in form.fields.values():
+                    field.disabled = True
+
         formsets_ok = True
         if action == "save_draft":
             formsets_ok = bool(candidate_formset.is_valid() and group_formset.is_valid())
@@ -372,6 +414,31 @@ def election_edit(request, election_id: int):
         if action == "save_draft" and election is not None and election.status != Election.Status.draft:
             messages.error(request, "This election is no longer in draft; draft changes are locked.")
             formsets_ok = False
+
+        if action == "extend_end":
+            if election is None:
+                messages.error(request, "Save the draft first.")
+            elif election.status != Election.Status.open:
+                messages.error(request, "Only open elections can be extended.")
+            else:
+                end_form = ElectionEndDateForm(request.POST, instance=election)
+                if not end_form.is_valid():
+                    for msg in end_form.errors.get("end_datetime", []):
+                        details_form.add_error("end_datetime", msg)
+                    messages.error(request, "Please correct the errors below.")
+                    end_form = None
+                new_end = end_form.cleaned_data.get("end_datetime") if end_form is not None else None
+                if isinstance(new_end, datetime.datetime):
+                    try:
+                        elections_services.extend_election_end_datetime(
+                            election=election,
+                            new_end_datetime=new_end,
+                        )
+                    except ElectionError as exc:
+                        details_form.add_error("end_datetime", str(exc))
+                    else:
+                        messages.success(request, "Election end date extended.")
+                        return redirect("election-edit", election_id=election.id)
 
         email_save_mode = str(request.POST.get("email_save_mode") or "").strip()
 
@@ -392,7 +459,6 @@ def election_edit(request, election_id: int):
             eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
 
             # Candidates
-            ordering = 1
             for form in candidate_formset.forms:
                 if not hasattr(form, "cleaned_data"):
                     continue
@@ -414,8 +480,6 @@ def election_edit(request, election_id: int):
 
                 candidate = form.save(commit=False)
                 candidate.election = election
-                candidate.ordering = ordering
-                ordering += 1
                 candidate.save()
 
             # Exclusion groups
@@ -546,6 +610,19 @@ def election_edit(request, election_id: int):
     else:
         details_form = ElectionDetailsForm(instance=election)
 
+        if election is not None and election.status != Election.Status.draft:
+            for field_name in (
+                "name",
+                "description",
+                "url",
+                "start_datetime",
+                "number_of_seats",
+                "quorum",
+            ):
+                details_form.fields[field_name].disabled = True
+            if election.status != Election.Status.open:
+                details_form.fields["end_datetime"].disabled = True
+
         selected_template = default_template
         if election is not None and election.voting_email_template_id is not None:
             selected_template = election.voting_email_template
@@ -573,13 +650,21 @@ def election_edit(request, election_id: int):
         email_form = ElectionVotingEmailForm(initial=initial_email)
 
         candidate_formset = CandidateWizardFormSet(
-            queryset=Candidate.objects.filter(election=election).order_by("ordering", "id") if election else Candidate.objects.none(),
+            queryset=Candidate.objects.filter(election=election).order_by("id") if election else Candidate.objects.none(),
             prefix="candidates",
         )
         group_formset = ExclusionGroupWizardFormSet(
             queryset=ExclusionGroup.objects.filter(election=election).order_by("name", "id") if election else ExclusionGroup.objects.none(),
             prefix="groups",
         )
+
+        if election is not None and election.status != Election.Status.draft:
+            for form in candidate_formset.forms:
+                for field in form.fields.values():
+                    field.disabled = True
+            for form in group_formset.forms:
+                for field in form.fields.values():
+                    field.disabled = True
 
         ajax_election_id = election.id if election is not None else 0
         ajax_url = request.build_absolute_uri(reverse("election-eligible-users-search", args=[ajax_election_id]))
@@ -608,7 +693,7 @@ def election_edit(request, election_id: int):
                 form.fields["candidate_usernames"].choices = choices
                 if form.instance.pk:
                     selected = list(
-                        form.instance.candidates.order_by("ordering", "id").values_list("freeipa_username", flat=True)
+                        form.instance.candidates.order_by("freeipa_username", "id").values_list("freeipa_username", flat=True)
                     )
                     form.initial["candidate_usernames"] = selected
 
@@ -687,7 +772,7 @@ def election_detail(request, election_id: int):
     if election.status == Election.Status.draft and not (is_staff or can_manage_elections):
         raise Http404
 
-    candidates = list(Candidate.objects.filter(election=election).order_by("ordering", "id"))
+    candidates = list(Candidate.objects.filter(election=election).order_by("freeipa_username", "id"))
 
     usernames: set[str] = set()
     for c in candidates:
@@ -740,7 +825,7 @@ def election_detail(request, election_id: int):
         .prefetch_related(
             Prefetch(
                 "candidates",
-                queryset=Candidate.objects.only("id", "freeipa_username", "ordering").order_by("ordering", "id"),
+                queryset=Candidate.objects.only("id", "freeipa_username").order_by("freeipa_username", "id"),
             )
         )
         .order_by("name", "id")
@@ -790,36 +875,39 @@ def election_detail(request, election_id: int):
     turnout_stats: dict[str, object] = {}
     turnout_chart_data: dict[str, object] = {}
     if can_manage_elections:
-        eligible_voters = admin_context.get("eligible_voters") or eligible_voters_from_memberships(election=election)
-        eligible_voter_count = len(eligible_voters)
-        eligible_weight_total = sum(v.weight for v in eligible_voters)
+        status = election_quorum_status(election=election)
+        eligible_voter_count = int(status.get("eligible_voter_count") or 0)
+        eligible_vote_weight_total = int(status.get("eligible_vote_weight_total") or 0)
+        required_participating_voter_count = int(status.get("required_participating_voter_count") or 0)
+        participating_voter_count = int(status.get("participating_voter_count") or 0)
+        participating_vote_weight_total = int(status.get("participating_vote_weight_total") or 0)
+        quorum_met = bool(status.get("quorum_met"))
+        quorum_percent = int(status.get("quorum_percent") or 0)
 
-        # Quorum is 50% of eligible voters, rounded up (i.e., require at least half).
-        quorum_voters = (eligible_voter_count + 1) // 2
-
-        ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
-            ballots=Count("id"),
-            weight_total=Sum("weight"),
-        )
-        ballots_cast = int(ballot_agg.get("ballots") or 0)
-        votes_cast = int(ballot_agg.get("weight_total") or 0)
-
-        ballots_pct = 0
+        participating_voter_percent = 0
         if eligible_voter_count > 0:
-            ballots_pct = min(100, int((ballots_cast * 100) / eligible_voter_count))
-        votes_pct = 0
-        if eligible_weight_total > 0:
-            votes_pct = min(100, int((votes_cast * 100) / eligible_weight_total))
+            participating_voter_percent = min(
+                100,
+                int((participating_voter_count * 100) / eligible_voter_count),
+            )
+
+        participating_vote_weight_percent = 0
+        if eligible_vote_weight_total > 0:
+            participating_vote_weight_percent = min(
+                100,
+                int((participating_vote_weight_total * 100) / eligible_vote_weight_total),
+            )
 
         turnout_stats = {
-            "ballots_cast": ballots_cast,
-            "votes_cast": votes_cast,
-            "eligible_voters": eligible_voter_count,
-            "eligible_votes": eligible_weight_total,
-            "quorum_voters": quorum_voters,
-            "quorum_met": ballots_cast >= quorum_voters,
-            "ballots_pct": ballots_pct,
-            "votes_pct": votes_pct,
+            "participating_voter_count": participating_voter_count,
+            "participating_vote_weight_total": participating_vote_weight_total,
+            "eligible_voter_count": eligible_voter_count,
+            "eligible_vote_weight_total": eligible_vote_weight_total,
+            "required_participating_voter_count": required_participating_voter_count,
+            "quorum_met": quorum_met,
+            "quorum_percent": quorum_percent,
+            "participating_voter_percent": participating_voter_percent,
+            "participating_vote_weight_percent": participating_vote_weight_percent,
         }
 
         if election.status == Election.Status.open:
@@ -1059,6 +1147,41 @@ def election_conclude(request, election_id: int):
     return redirect("election-detail", election_id=election.id)
 
 
+@require_POST
+@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
+def election_extend_end(request, election_id: int):
+    election = Election.objects.filter(pk=election_id).first()
+    if election is None:
+        raise Http404
+
+    if election.status != Election.Status.open:
+        messages.error(request, "Only open elections can be extended.")
+        return redirect("election-detail", election_id=election.id)
+
+    end_form = ElectionEndDateForm(request.POST, instance=election)
+    if not end_form.is_valid():
+        for msg in end_form.errors.get("end_datetime", []):
+            messages.error(request, str(msg))
+        return redirect("election-detail", election_id=election.id)
+
+    new_end = end_form.cleaned_data.get("end_datetime")
+    if not isinstance(new_end, datetime.datetime):
+        messages.error(request, "Invalid end datetime.")
+        return redirect("election-detail", election_id=election.id)
+
+    try:
+        elections_services.extend_election_end_datetime(
+            election=election,
+            new_end_datetime=new_end,
+        )
+    except ElectionError as exc:
+        messages.error(request, str(exc))
+        return redirect("election-detail", election_id=election.id)
+
+    messages.success(request, "Election end date extended.")
+    return redirect("election-detail", election_id=election.id)
+
+
 def _get_exportable_election(*, election_id: int) -> Election:
     election = Election.objects.filter(pk=election_id).only("id", "status").first()
     if election is None:
@@ -1140,7 +1263,7 @@ def election_audit_log(request, election_id: int):
         raise Http404
 
     candidates = list(
-        Candidate.objects.filter(election=election).only("id", "freeipa_username").order_by("ordering", "id")
+        Candidate.objects.filter(election=election).only("id", "freeipa_username").order_by("freeipa_username", "id")
     )
     candidate_username_by_id: dict[int, str] = {
         int(c.id): str(c.freeipa_username or "").strip()
@@ -1279,6 +1402,10 @@ def election_audit_log(request, election_id: int):
                 return ("fas fa-vote-yea", "bg-blue")
             case "ballots_submitted_summary":
                 return ("fas fa-layer-group", "bg-blue")
+            case "quorum_reached":
+                return ("fas fa-check-circle", "bg-success")
+            case "election_end_extended":
+                return ("fas fa-calendar-plus", "bg-orange")
             case "election_closed":
                 return ("fas fa-lock", "bg-orange")
             case "credentials_anonymized":
@@ -1298,6 +1425,10 @@ def election_audit_log(request, election_id: int):
                 return "Ballot submitted"
             case "ballots_submitted_summary":
                 return "Ballots submitted"
+            case "quorum_reached":
+                return "Quorum reached"
+            case "election_end_extended":
+                return "Election end extended"
             case "election_closed":
                 return "Election closed"
             case "credentials_anonymized":
