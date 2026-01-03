@@ -118,6 +118,12 @@ class STVTallyTests(TestCase):
 
         audit_text = str(elim_round.get("audit_text") or "")
         self.assertIn("Final results", audit_text)
+        self.assertTrue(
+            (
+                "After this elimination, the remaining eligible candidate exactly filled" in audit_text
+                or "After this elimination, the remaining eligible candidates exactly filled" in audit_text
+            )
+        )
 
     def test_meek_fill_remaining_seats_explains_rule_election(self) -> None:
         from core.elections_meek import tally_meek
@@ -147,7 +153,12 @@ class STVTallyTests(TestCase):
         self.assertTrue(list(r.get("elected_to_fill_remaining_seats") or []))
 
         audit_text = str(r.get("audit_text") or "")
-        self.assertIn("remaining eligible candidates exactly filled", audit_text)
+        self.assertTrue(
+            (
+                "remaining eligible candidate exactly filled" in audit_text
+                or "remaining eligible candidates exactly filled" in audit_text
+            )
+        )
         # Guardrail: do not imply every elected candidate had quota-reduction / surplus.
         self.assertNotIn("each elected candidate's retained vote total was reduced", audit_text)
 
@@ -230,11 +241,13 @@ class STVTallyTests(TestCase):
         self.assertIn("Candidates A and B", audit_text)
         self.assertIn("predefined deterministic tie-breaking rules", audit_text)
         self.assertIn(
-            "No distinction could be made based on prior round performance, cumulative support, or first-preference votes.",
+            "No distinction could be made based on prior round totals, current support totals, or first-preference votes.",
             audit_text,
         )
         self.assertIn("fixed candidate ordering identifier", audit_text)
         self.assertIn("selected for elimination", audit_text)
+        self.assertIn("tied for the lowest vote total", audit_text)
+        self.assertNotIn("had the lowest vote total and was eliminated", audit_text)
 
     def test_exclusion_group_forces_exclusion_after_election(self) -> None:
         from core.elections_meek import tally_meek
@@ -310,12 +323,113 @@ class STVTallyTests(TestCase):
 
         rounds = result.get("rounds") or []
         self.assertGreaterEqual(len(rounds), 1)
-        first_round = rounds[0]
+        forced_rounds = [r for r in rounds if isinstance(r, dict) and list(r.get("forced_exclusions") or [])]
+        self.assertGreaterEqual(len(forced_rounds), 1)
+        first_forced_round = forced_rounds[0]
 
-        audit_text = str(first_round.get("audit_text") or "")
-        self.assertIn("reached the election quota", audit_text)
-        self.assertIn("could not be elected despite reaching the quota", audit_text)
+        audit_text = str(first_forced_round.get("audit_text") or "")
+        # Narration may omit a separate "reached quota" sentence to avoid redundancy, but
+        # must still be clear that a quota threshold was met and why election did not occur.
+        self.assertIn("meeting the quota", audit_text)
+        self.assertIn("could not be elected", audit_text)
         self.assertIn('Incompatibles', audit_text)
+
+        # Trustworthiness: if the count is complete, don't imply that excluded
+        # candidates' vote value will transfer and affect remaining candidates.
+        if bool(first_forced_round.get("count_complete")):
+            self.assertNotIn("will be redistributed to remaining candidates", audit_text)
+            self.assertNotIn("will transfer to remaining eligible candidates", audit_text)
+
+    def test_meek_does_not_mark_count_complete_when_eligible_less_than_remaining_seats(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # Regression: `count_complete` must NOT be set merely because the number of eligible
+        # candidates is less than the number of remaining seats.
+        # In this scenario:
+        # - Two candidates are elected immediately by quota.
+        # - An exclusion group forces another candidate out.
+        # - One eligible candidate remains, but there are still two seats open.
+        # The count is not complete at that point.
+        candidates = [
+            {"id": 10, "name": "A", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000010")},
+            {"id": 11, "name": "B", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000011")},
+            {"id": 12, "name": "C", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000012")},
+            {"id": 13, "name": "D", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000013")},
+        ]
+        ballots = [
+            {"weight": 1, "ranking": [10, 12]},
+            {"weight": 1, "ranking": [11, 10]},
+            {"weight": 1, "ranking": [12, 11]},
+            {"weight": 1, "ranking": [11, 12, 10]},
+            {"weight": 5, "ranking": [11, 10]},
+            {"weight": 2, "ranking": [12, 11, 10]},
+            {"weight": 5, "ranking": [10, 12, 11]},
+        ]
+        exclusion_groups = [
+            {
+                "public_id": "incompat",
+                "name": "Incompatibles",
+                "max_elected": 1,
+                # If A is elected, D becomes ineligible.
+                "candidate_ids": [10, 13],
+            }
+        ]
+
+        result = tally_meek(ballots=ballots, candidates=candidates, seats=4, exclusion_groups=exclusion_groups)
+        rounds = list(result.get("rounds") or [])
+        self.assertGreaterEqual(len(rounds), 1)
+
+        r0 = rounds[0]
+        self.assertEqual(set(r0.get("elected") or []), {10, 11})
+        self.assertEqual(r0.get("eligible_candidates"), [12])
+        self.assertFalse(bool(r0.get("count_complete")))
+
+        # Exact-fit must not trigger when eligible candidates are fewer than remaining seats.
+        self.assertEqual(list(r0.get("elected_to_fill_remaining_seats") or []), [])
+        self.assertNotIn(12, set(r0.get("elected") or []))
+
+    def test_meek_vacant_seats_does_not_emit_extra_empty_round(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # Regression: When the count becomes complete due to a vacancy (no eligible candidates
+        # remain but seats are still open), the tally should stop cleanly and not emit a
+        # redundant additional round with no actions.
+        candidates = [
+            {"id": 10, "name": "A", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000010")},
+            {"id": 11, "name": "B", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000011")},
+            {"id": 12, "name": "C", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000012")},
+            {"id": 13, "name": "D", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000013")},
+        ]
+        ballots = [
+            {"weight": 1, "ranking": [10, 12]},
+            {"weight": 1, "ranking": [11, 10]},
+            {"weight": 1, "ranking": [12, 11]},
+            {"weight": 1, "ranking": [11, 12, 10]},
+            {"weight": 5, "ranking": [11, 10]},
+            {"weight": 2, "ranking": [12, 11, 10]},
+            {"weight": 5, "ranking": [10, 12, 11]},
+        ]
+        exclusion_groups = [
+            {
+                "public_id": "incompat",
+                "name": "Incompatibles",
+                "max_elected": 1,
+                "candidate_ids": [10, 13],
+            }
+        ]
+
+        result = tally_meek(ballots=ballots, candidates=candidates, seats=4, exclusion_groups=exclusion_groups)
+        rounds = list(result.get("rounds") or [])
+
+        # The count should end in 2 rounds for this deterministic scenario:
+        # - Round 1: A/B elected, D excluded.
+        # - Round 2: C elected; no eligible candidates remain so 1 seat is vacant.
+        self.assertEqual(len(rounds), 2)
+
+        last = rounds[-1]
+        self.assertTrue(bool(last.get("count_complete")))
+        self.assertEqual(list(last.get("eligible_candidates") or []), [])
+        self.assertIn("seat remains vacant", str(last.get("audit_text") or ""))
 
 
 class ElectionPrivacyFlowTests(TestCase):
@@ -349,3 +463,239 @@ class ElectionPrivacyFlowTests(TestCase):
         # This test will be expanded once vote submission view exists.
         # For now: ensure models exist and can be created.
         self.assertEqual(election.candidates.count(), 1)
+
+
+class MeekTieBreakSummaryTests(TestCase):
+    def _render_round(self, *, tie_break: dict[str, object]) -> tuple[str, str]:
+        from core.elections_meek import generate_meek_round_explanations
+
+        round_data: dict[str, object] = {
+            "iteration": 1,
+            "quota_reached": [],
+            "elected": [],
+            "elected_to_fill_remaining_seats": [],
+            "eliminated": None,
+            "forced_exclusions": [],
+            "tie_breaks": [tie_break],
+            "eligible_candidates": [1, 2],
+            "retention_factors": {"1": "1", "2": "1"},
+            "retained_totals": {"1": "0", "2": "0"},
+            "numerically_converged": False,
+            "max_retention_delta": "0",
+            "seats": 1,
+            "elected_total": 0,
+            "count_complete": False,
+        }
+
+        rendered = generate_meek_round_explanations(
+            round_data,
+            quota=Decimal("1"),
+            candidate_name_by_id={1: "A", 2: "B"},
+        )
+        return str(rendered["audit_text"]), str(rendered["summary_text"])
+
+    def test_tie_break_rule_1_resolves(self) -> None:
+        audit_text, summary_text = self._render_round(
+            tie_break={
+                "type": "election_order",
+                "candidate_ids": [1, 2],
+                "ordered": [1, 2],
+                "rule_trace": [
+                    {"rule": 1, "title": "prior round totals", "result": "resolved"},
+                ],
+            }
+        )
+        self.assertIn("tie resolved deterministically", summary_text)
+        self.assertIn("The tie was resolved using prior round totals.", audit_text)
+        self.assertNotIn("No distinction could be made based on", audit_text)
+
+    def test_tie_break_rule_2_resolves(self) -> None:
+        audit_text, summary_text = self._render_round(
+            tie_break={
+                "type": "election_order",
+                "candidate_ids": [1, 2],
+                "ordered": [1, 2],
+                "rule_trace": [
+                    {"rule": 1, "title": "prior round totals", "result": "tied"},
+                    {"rule": 2, "title": "current support totals", "result": "resolved"},
+                ],
+            }
+        )
+        self.assertIn("tie resolved deterministically", summary_text)
+        self.assertIn("No distinction could be made based on prior round totals.", audit_text)
+        self.assertIn("The tie was resolved using current support totals.", audit_text)
+
+    def test_tie_break_rule_3_resolves(self) -> None:
+        audit_text, summary_text = self._render_round(
+            tie_break={
+                "type": "election_order",
+                "candidate_ids": [1, 2],
+                "ordered": [1, 2],
+                "rule_trace": [
+                    {"rule": 1, "title": "prior round totals", "result": "tied"},
+                    {"rule": 2, "title": "current support totals", "result": "tied"},
+                    {"rule": 3, "title": "first-preference votes", "result": "resolved"},
+                ],
+            }
+        )
+        self.assertIn("tie resolved deterministically", summary_text)
+        self.assertIn(
+            "No distinction could be made based on prior round totals or current support totals.",
+            audit_text,
+        )
+        self.assertIn("The tie was resolved using first-preference votes.", audit_text)
+
+    def test_tie_break_rule_4_resolves(self) -> None:
+        audit_text, summary_text = self._render_round(
+            tie_break={
+                "type": "election_order",
+                "candidate_ids": [1, 2],
+                "ordered": [1, 2],
+                "rule_trace": [
+                    {"rule": 1, "title": "prior round totals", "result": "tied"},
+                    {"rule": 2, "title": "current support totals", "result": "tied"},
+                    {"rule": 3, "title": "first-preference votes", "result": "tied"},
+                    {"rule": 4, "title": "fixed candidate ordering identifier", "result": "resolved"},
+                ],
+            }
+        )
+        self.assertIn("tie resolved deterministically", summary_text)
+        self.assertIn(
+            "No distinction could be made based on prior round totals, current support totals, or first-preference votes.",
+            audit_text,
+        )
+        self.assertIn("The tie was resolved using a fixed candidate ordering identifier.", audit_text)
+
+
+class MeekTieBreakEndToEndTests(TestCase):
+    def _base_candidates(self) -> list[dict[str, object]]:
+        return [
+            {"id": 1, "name": "A", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000001")},
+            {"id": 2, "name": "B", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000002")},
+            {"id": 3, "name": "C", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000003")},
+            {"id": 4, "name": "D", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000004")},
+        ]
+
+    def _find_resolved_rule(self, rounds: list[dict[str, object]], *, rule: int) -> tuple[dict[str, object], dict[str, object]]:
+        for rnd in rounds:
+            for tb in list(rnd.get("tie_breaks") or []):
+                resolved = [
+                    step
+                    for step in list(tb.get("rule_trace") or [])
+                    if step.get("result") == "resolved"
+                ]
+                if resolved and resolved[0].get("rule") == rule:
+                    return rnd, tb
+        raise AssertionError(f"No tie-break resolved by rule {rule} was found")
+
+    def test_tally_meek_emits_rule_4_tie_break_in_summary(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # End-to-end: a deterministic processing-order tie resolved by rule 4.
+        candidates = self._base_candidates()
+        ballots = [
+            {"weight": 1, "ranking": [3, 4, 1, 2]},
+            {"weight": 1, "ranking": [4, 3, 1, 2]},
+        ]
+
+        result = tally_meek(ballots=ballots, candidates=candidates, seats=2)
+        rounds = list(result.get("rounds") or [])
+        self.assertGreaterEqual(len(rounds), 1)
+
+        r0 = rounds[0]
+        self.assertTrue(list(r0.get("tie_breaks") or []))
+        summary_text = str(r0.get("summary_text") or "")
+        audit_text = str(r0.get("audit_text") or "")
+        self.assertIn("tie resolved deterministically", summary_text)
+        self.assertIn("fixed candidate ordering identifier", audit_text)
+
+        tb0 = list(r0.get("tie_breaks") or [])[0]
+        resolved = [step for step in list(tb0.get("rule_trace") or []) if step.get("result") == "resolved"]
+        self.assertTrue(resolved)
+        self.assertEqual(resolved[0].get("rule"), 4)
+
+    def test_tally_meek_emits_rule_4_elimination_tie_break_in_summary(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # End-to-end: elimination tie resolved by rule 4 (UUID fallback).
+        candidates = [
+            {"id": 10, "name": "A", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000010")},
+            {"id": 11, "name": "B", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000011")},
+            {"id": 12, "name": "C", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000012")},
+        ]
+        ballots = [
+            {"weight": 1, "ranking": [12]},
+            {"weight": 1, "ranking": [12]},
+        ]
+
+        result = tally_meek(ballots=ballots, candidates=candidates, seats=2)
+        elimination_rounds = [r for r in result["rounds"] if r.get("eliminated") is not None]
+        self.assertGreaterEqual(len(elimination_rounds), 1)
+
+        r = elimination_rounds[0]
+        summary_text = str(r.get("summary_text") or "")
+        audit_text = str(r.get("audit_text") or "")
+        self.assertIn("tie resolved deterministically", summary_text)
+        self.assertIn("fixed candidate ordering identifier", audit_text)
+
+        tb = [tb for tb in list(r.get("tie_breaks") or []) if tb.get("type") == "elimination"][0]
+        resolved = [step for step in list(tb.get("rule_trace") or []) if step.get("result") == "resolved"]
+        self.assertTrue(resolved)
+        self.assertEqual(resolved[0].get("rule"), 4)
+
+    def test_tally_meek_resolves_tie_by_rule_1_prior_round_totals(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # Deterministic profile that produces an election-order tie resolved by rule 1.
+        candidates = self._base_candidates()
+        ballots = [
+            {"weight": 1, "ranking": [2, 1, 3, 4]},
+            {"weight": 2, "ranking": [3, 4, 1, 2]},
+            {"weight": 1, "ranking": [4, 3, 1, 2]},
+            {"weight": 2, "ranking": [1, 3, 2, 4]},
+            {"weight": 3, "ranking": [2, 4, 1, 3]},
+        ]
+
+        result = tally_meek(
+            ballots=ballots,
+            candidates=candidates,
+            seats=2,
+            epsilon=Decimal("1e-18"),
+            max_iterations=60,
+        )
+        rounds = [r for r in list(result.get("rounds") or []) if isinstance(r, dict)]
+        rnd, _tb = self._find_resolved_rule(rounds, rule=1)
+        self.assertIn("tie resolved deterministically", str(rnd.get("summary_text") or ""))
+        self.assertIn("The tie was resolved using prior round totals.", str(rnd.get("audit_text") or ""))
+
+    def test_tally_meek_rule_2_is_not_observable_in_current_implementation(self) -> None:
+        # At present, tie groups are formed only when retained totals are exactly equal, and for
+        # non-elected candidates retained totals equal incoming totals. That makes rule 2 (current
+        # support totals) effectively unable to resolve a tie end-to-end. We still have unit tests
+        # covering rule-2 narration in `MeekTieBreakSummaryTests`.
+        self.skipTest("Rule 2 resolution is not observable end-to-end with current tie semantics.")
+
+    def test_tally_meek_resolves_tie_by_rule_3_first_preferences(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # Deterministic profile that produces an elimination tie resolved by rule 3.
+        candidates = self._base_candidates()
+        ballots = [
+            {"weight": 2, "ranking": [2, 1, 3, 4]},
+            {"weight": 2, "ranking": [3, 4, 1, 2]},
+            {"weight": 1, "ranking": [4, 3, 1, 2]},
+            {"weight": 2, "ranking": [1, 3, 2, 4]},
+            {"weight": 3, "ranking": [2, 4, 1, 3]},
+        ]
+
+        result = tally_meek(
+            ballots=ballots,
+            candidates=candidates,
+            seats=2,
+            epsilon=Decimal("1e-18"),
+            max_iterations=60,
+        )
+        rounds = [r for r in list(result.get("rounds") or []) if isinstance(r, dict)]
+        rnd, _tb = self._find_resolved_rule(rounds, rule=3)
+        self.assertIn("tie resolved deterministically", str(rnd.get("summary_text") or ""))
+        self.assertIn("The tie was resolved using first-preference votes.", str(rnd.get("audit_text") or ""))

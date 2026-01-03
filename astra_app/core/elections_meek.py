@@ -173,10 +173,35 @@ def generate_meek_round_explanations(
     quota_reached_str = _format_candidate_list(quota_reached, candidate_name_by_id=names)
     elected_str = _format_candidate_list(elected, candidate_name_by_id=names)
 
+    elected_by_rule = [cid for cid in elected_to_fill_remaining_seats if cid in elected]
+    elected_by_quota = [cid for cid in elected if cid in quota_reached and cid not in elected_by_rule]
+    elected_other = [cid for cid in elected if cid not in elected_by_rule and cid not in elected_by_quota]
+    quota_reached_not_elected = [cid for cid in quota_reached if cid not in elected]
+
+    forced_excluded_ids = {
+        int(fx["candidate_id"]) for fx in forced_exclusions if isinstance(fx.get("candidate_id"), int)
+    }
+    quota_reached_not_elected_without_forced = [
+        cid for cid in quota_reached_not_elected if cid not in forced_excluded_ids
+    ]
+
     audit_parts: list[str] = [f"Iteration {iteration} summary", ""]
 
     remaining_seats = max(seats - elected_total, 0) if seats > 0 else 0
     seats_filled = bool(seats and elected_total >= seats)
+
+    elected_total_before_iteration = max(elected_total - len(elected), 0)
+    remaining_seats_before_iteration = (
+        max(seats - elected_total_before_iteration, 0) if seats > 0 else 0
+    )
+
+    def _plural_s(n: int) -> str:
+        return "" if n == 1 else "s"
+
+    def _was_were(n: int) -> str:
+        return "was" if n == 1 else "were"
+
+    elimination_emitted = False
 
     for tie_break in tie_breaks:
         kind = str(tie_break.get("type") or "").strip()
@@ -188,8 +213,12 @@ def generate_meek_round_explanations(
             continue
 
         tied_str = _format_candidate_list(tied_candidate_ids, candidate_name_by_id=names)
+        tie_context = (
+            "for elimination" if kind == "elimination" else "when determining a deterministic processing order"
+        )
         paragraph = [
-            f"Candidates {tied_str} were tied. The predefined deterministic tie-breaking rules were applied in sequence."
+            f"Candidates {tied_str} were tied {tie_context}. "
+            "The election uses predefined deterministic tie-breaking rules applied in sequence so outcomes are repeatable."
         ]
 
         rule_trace_obj = tie_break.get("rule_trace")
@@ -198,59 +227,125 @@ def generate_meek_round_explanations(
         failed_rules = [str(rule.get("title", "unnamed rule")) for rule in rule_trace if rule.get("result") == "tied"]
         successful_rule = [rule for rule in rule_trace if rule.get("result") == "resolved"][0]
 
-        if len(failed_rules) > 0:
+        if failed_rules:
             paragraph.append(f"No distinction could be made based on {_format_list(failed_rules, joiner='or')}.")
 
-        paragraph.append("The tie was resolved using")
-        if successful_rule.get("rule") == 4:
-            paragraph.append("the final deterministic rule defined at election setup: a fixed candidate ordering identifier.")
-        else:
-            paragraph.append(str(successful_rule.get("title", "an unnamed rule")) + ".")
+        resolved_by = (
+            "a fixed candidate ordering identifier"
+            if successful_rule.get("rule") == 4
+            else str(successful_rule.get("title", "a predefined rule"))
+        )
+        paragraph.append(f"The tie was resolved using {resolved_by}.")
 
         if kind == "elimination":
             selected_obj = tie_break.get("selected")
             selected = int(selected_obj) if isinstance(selected_obj, int) else None
             if selected is not None:
                 selected_str = _format_candidate_list([selected], candidate_name_by_id=names)
-                paragraph.append(f"Under this rule, candidate{'' if len([selected]) == 2 else 's'}")
-                paragraph.append(f"{selected_str} {'was' if len([selected]) == 1 else 'were'} selected for elimination.")
+                paragraph.append(f"Under these rules, candidate {selected_str} was selected for elimination.")
         else:
             ordered_obj = tie_break.get("ordered")
             ordered: list[int] = [int(x) for x in ordered_obj] if isinstance(ordered_obj, list) else []
-            paragraph.append(f"Under this rule, candidate {_format_candidate_list([ordered[0]], candidate_name_by_id=names)} was ordered ahead of candidate{'' if len(ordered) == 2 else 's'} {_format_candidate_list(ordered[1:], candidate_name_by_id=names)}.")
-        
-        paragraph.append("This ordering was used only to determine processing order and does not imply a difference in vote totals.")
+            if ordered:
+                paragraph.append(
+                    f"Under these rules, candidate {_format_candidate_list([ordered[0]], candidate_name_by_id=names)} was ordered ahead of candidate{_plural_s(max(len(ordered) - 1, 1))} {_format_candidate_list(ordered[1:], candidate_name_by_id=names)}."
+                )
+
+        closing_sentence = (
+            "This deterministic selection resolves the tie."
+            if kind == "elimination"
+            else "This tie-break outcome is used only to decide which action to take first and does not imply a difference in vote totals."
+        )
+        paragraph.append(closing_sentence)
 
         audit_parts.append(" ".join(paragraph))
         audit_parts.append("")
 
-    if quota_reached:
-        audit_parts.append(f"During this iteration, candidate{'' if len(quota_reached) == 1 else 's'} {quota_reached_str} reached the election quota ({quota:.4f}).")
+    if quota_reached_not_elected_without_forced:
+        audit_parts.append(
+            f"During this iteration, candidate{_plural_s(len(quota_reached))} {quota_reached_str} reached the election quota ({quota:.4f}), but not all could be elected under the election rules."
+        )
         audit_parts.append("")
+
+    if eliminated is not None and elected_by_rule:
+        eliminated_str = _format_candidate_list([eliminated], candidate_name_by_id=names)
+
+        elimination_tie_break = any(
+            str(tb.get("type") or "").strip() == "elimination" and tb.get("selected") == eliminated
+            for tb in tie_breaks
+            if isinstance(tb, Mapping)
+        )
+
+        elimination_clause = " (tied for the lowest vote total)" if elimination_tie_break else ""
+        eliminated_reason = "had the lowest vote total and " if not elimination_tie_break else ""
+
+        transfer_sentence = (
+            "Since the count is complete, no further redistribution is needed to determine the final outcome."
+            if count_complete
+            else "Their vote value will transfer to remaining eligible candidates according to voter preferences under the counting method."
+        )
+        audit_parts.append(
+            f"Candidate {eliminated_str} {eliminated_reason}was eliminated from the count{elimination_clause}. {transfer_sentence}"
+        )
+        audit_parts.append("")
+        elimination_emitted = True
 
     if elected:
-        elected_by_quota = [cid for cid in elected if cid in quota_reached]
-        elected_by_rule = [cid for cid in elected_to_fill_remaining_seats if cid in elected]
+        election_sentences: list[str] = []
 
         if elected_by_quota:
-            audit_parts.append(
-                f"Candidate{'' if len(elected) == 1 else 's'} {elected_str} {'was' if len(elected) == 1 else 'were'} elected. "
-                f"To ensure a fair count, {elected_str} retain{'s' if len(elected) == 1 else ''} only the number of votes needed to reach the election quota. "
-                "Any surplus votes are released and redistributed to remaining candidates based on voter preferences, as defined by the Meek STV method."
+            elected_by_quota_str = _format_candidate_list(elected_by_quota, candidate_name_by_id=names)
+            if quota_reached_not_elected:
+                election_sentences.append(
+                    f"Candidate{_plural_s(len(elected_by_quota))} {elected_by_quota_str} {_was_were(len(elected_by_quota))} elected after meeting the election quota ({quota:.4f})."
+                )
+
+                if quota_reached_not_elected_without_forced:
+                    quota_not_elected_str = _format_candidate_list(
+                        quota_reached_not_elected_without_forced,
+                        candidate_name_by_id=names,
+                    )
+                    election_sentences.append(
+                        f"Candidate{_plural_s(len(quota_reached_not_elected_without_forced))} {quota_not_elected_str} also reached the quota but could not be elected under the election rules."
+                    )
+
+                seat_limited_quota = (
+                    not forced_exclusions
+                    and remaining_seats_before_iteration > 0
+                    and len(quota_reached) > remaining_seats_before_iteration
+                )
+                if seat_limited_quota:
+                    election_sentences.append(
+                        f"More candidates reached the quota than there were remaining seat{_plural_s(remaining_seats_before_iteration)}, so only {remaining_seats_before_iteration} could be elected this iteration."
+                    )
+                    if any(str(tb.get("type") or "").strip() == "election_order" for tb in tie_breaks):
+                        election_sentences.append(
+                            "When needed, deterministic tie-breaking rules decide which quota-meeting candidates are elected."
+                        )
+            else:
+                election_sentences.append(
+                    f"Candidate{_plural_s(len(elected_by_quota))} {elected_by_quota_str} {_was_were(len(elected_by_quota))} elected after meeting the election quota ({quota:.4f})."
+                )
+
+            election_sentences.append(
+                "Under Meek STV, an elected candidate keeps only enough vote to reach the quota; any excess vote value is transferred to next preferences."
             )
 
-        elif elected_by_rule:
+        if elected_by_rule:
             elected_by_rule_str = _format_candidate_list(elected_by_rule, candidate_name_by_id=names)
-            audit_parts.append(
-                f"Candidate{'' if len(elected_by_rule) == 1 else 's'} {elected_by_rule_str} {'was' if len(elected_by_rule) == 1 else 'were'} elected because the remaining eligible candidates exactly filled the remaining seat{'' if len(elected_by_rule) == 1 else 's'} under the election rules."
+            election_sentences.append(
+                f"{'After this elimination, the' if eliminated is not None else 'The'} remaining eligible candidate{_plural_s(len(elected_by_rule))} exactly filled the remaining seat{_plural_s(len(elected_by_rule))}, so candidate{_plural_s(len(elected_by_rule))} {elected_by_rule_str} {_was_were(len(elected_by_rule))} elected under the election rules."
             )
 
-        else:
-            audit_parts.append(
-                f"Candidate{'' if len(elected) == 1 else 's'} {elected_str} {'was' if len(elected) == 1 else 'were'} elected."
+        if elected_other:
+            elected_other_str = _format_candidate_list(elected_other, candidate_name_by_id=names)
+            election_sentences.append(
+                f"Candidate{_plural_s(len(elected_other))} {elected_other_str} {_was_were(len(elected_other))} elected."
             )
-        
-        audit_parts.append("")
+
+        if election_sentences:
+            audit_parts.append(" ".join(election_sentences))
+            audit_parts.append("")
 
     if forced_exclusions:
         # Group forced exclusions by group name (fallback to public_id).
@@ -282,46 +377,74 @@ def generate_meek_round_explanations(
                 if triggered_by is not None:
                     trigger_name = _format_candidate_list([triggered_by], candidate_name_by_id=names)
                     paragraph.append(
-                        f"Because candidate {trigger_name}'s election satisfied an exclusion group constraint, no additional candidates from the group \"{group_name}\" could be elected."
+                        f"Because candidate {trigger_name} was elected, the exclusion group constraint for \"{group_name}\" reached its maximum, so no additional candidates from that group could be elected."
                     )
                 else:
                     paragraph.append(
-                        f"Because an exclusion group constraint was satisfied, no additional candidates from the group \"{group_name}\" could be elected."
+                        f"Because an exclusion group constraint for \"{group_name}\" reached its maximum, no additional candidates from that group could be elected."
                     )
 
                 if excluded_reached_quota:
                     excluded_str = _format_candidate_list(excluded_reached_quota, candidate_name_by_id=names)
                     verb = "was" if len(excluded_reached_quota) == 1 else "were"
                     paragraph.append(
-                        f"As a result, candidate {excluded_str} could not be elected despite reaching the quota and {verb} excluded from further consideration under the election rules. "
-                        "This exclusion was rule-based and not the result of a vote comparison. "
-                        f"Since {excluded_str} {'is' if len(excluded_reached_quota) == 1 else 'are'} no longer eligible, {f'{excluded_str}\'s' if len(excluded_reached_quota) == 1 else 'their'} votes will be redistributed to remaining candidates according to voter preferences and current retention factors."
+                        f"As a result, candidate {excluded_str} could not be elected despite meeting the quota and {verb} removed from further consideration. "
+                        "This is rule-based and not a vote comparison."
                     )
+
+                    if not count_complete and eligible_candidates:
+                        who = "candidate" if len(excluded_reached_quota) == 1 else "candidates"
+                        paragraph.append(
+                            f"Any vote value currently assigned to {who} {excluded_str} will transfer to remaining eligible candidates according to voter preferences and current retention factors."
+                        )
+                    elif count_complete:
+                        paragraph.append("Since the count is complete, this exclusion does not affect the final outcome.")
                 else:
                     excluded_str = _format_candidate_list(excluded_ids, candidate_name_by_id=names)
                     paragraph.append(
-                        f"As a result, candidate {excluded_str} was excluded from further consideration under the election rules. "
-                        "This exclusion was rule-based and not the result of a vote comparison. "
-                        f"Since {excluded_str} {'is' if len(excluded_ids) == 1 else 'are'} no longer eligible, {f'{excluded_str}\'s' if len(excluded_ids) == 1 else 'their'} votes will be redistributed to remaining candidates according to voter preferences and current retention factors."
+                        f"As a result, candidate {excluded_str} was removed from further consideration. "
+                        "This is rule-based and not a vote comparison."
                     )
+
+                    if not count_complete and eligible_candidates:
+                        who = "candidate" if len(excluded_ids) == 1 else "candidates"
+                        paragraph.append(
+                            f"Any vote value currently assigned to {who} {excluded_str} will transfer to remaining eligible candidates according to voter preferences and current retention factors."
+                        )
+                    elif count_complete:
+                        paragraph.append("Since the count is complete, this exclusion does not affect the final outcome.")
 
                 audit_parts.append(" ".join(paragraph))
                 audit_parts.append("")
 
-    if eliminated is not None:
+    if eliminated is not None and not elimination_emitted:
         eliminated_str = _format_candidate_list([eliminated], candidate_name_by_id=names)
+
+        elimination_tie_break = any(
+            str(tb.get("type") or "").strip() == "elimination" and tb.get("selected") == eliminated
+            for tb in tie_breaks
+            if isinstance(tb, Mapping)
+        )
+
+        elimination_clause = " (tied for the lowest vote total)" if elimination_tie_break else ""
+        eliminated_reason = "had the lowest vote total and " if not elimination_tie_break else ""
+
+        transfer_sentence = (
+            "Since the count is complete, no further redistribution is needed to determine the final outcome."
+            if count_complete
+            else "Their vote value will transfer to remaining eligible candidates according to voter preferences under the counting method."
+        )
         audit_parts.append(
-            f"Candidate {eliminated_str} had the lowest vote total and was eliminated from the count. "
-            f"{eliminated_str}'s votes will be redistributed to remaining candidates according to voter preferences and current retention factors under the counting method."
-        )           
+            f"Candidate {eliminated_str} {eliminated_reason}was eliminated from the count{elimination_clause}. {transfer_sentence}"
+        )
         audit_parts.append("")
 
-    if eligible_candidates:
-        if not numerically_converged:
-            eligible_str = _format_candidate_list(eligible_candidates, candidate_name_by_id=names)
-            audit_parts.append(f"Candidate{'' if len(eligible_candidates) == 1 else 's'} {eligible_str} remain{'' if len(eligible_candidates) > 1 else 's'} eligible and will continue to receive redistributed votes.")
-            audit_parts.append("")
-    elif remaining_seats > 0:
+    has_iteration_events = bool(elected or eliminated is not None or forced_exclusions)
+
+    if eligible_candidates and remaining_seats > 0 and not count_complete and not numerically_converged and has_iteration_events:
+        audit_parts.append("Vote transfers will be recalculated in subsequent iterations.")
+        audit_parts.append("")
+    elif remaining_seats > 0 and not eligible_candidates and not count_complete:
         audit_parts.append("No candidates remain eligible.")
         audit_parts.append("")
 
@@ -337,13 +460,17 @@ def generate_meek_round_explanations(
             )
         elif not eligible_candidates and remaining_seats > 0:
             audit_parts.append(
-                f"No candidates remain eligible for the remaining seats, so no further elections or eliminations are possible under the election rules. {remaining_seats} seat{'' if remaining_seats == 1 else 's'} remain{'s' if remaining_seats == 1 else ''} vacant."
+                f"No candidates remain eligible for the remaining seats, so no further elections or eliminations are possible under the election rules. {remaining_seats} seat{_plural_s(remaining_seats)} remain{'s' if remaining_seats == 1 else ''} vacant."
             )
         else:
             audit_parts.append("The outcome is determined under the election rules. Final results are now determined.")
     else:
         if numerically_converged and eliminated is None and not elected and not forced_exclusions:
             audit_parts.append("Vote transfers have stabilized. Further counting steps are still required.")
+        elif not numerically_converged and eliminated is None and not elected and not forced_exclusions:
+            audit_parts.append(
+                "Vote transfers are still stabilizing. Further iterations are required to determine the final outcome."
+            )
         else:
             audit_parts.append("The count is not yet complete. Further iterations are required to determine the final outcome.")
 
@@ -439,10 +566,14 @@ def tally_meek(
 
         def is_count_complete(*, elected_total: int, eligible_candidates: list[int]) -> bool:
             remaining_seats = seats - elected_total
-            return bool(
-                elected_total >= seats
-                or len(eligible_candidates) <= remaining_seats
-            )
+            if remaining_seats <= 0:
+                return True
+
+            # Count is complete if no candidates remain eligible (the remaining seats are vacant),
+            # or if the remaining eligible candidates exactly fill the remaining seats.
+            # If there are fewer eligible candidates than remaining seats, the count is not
+            # complete: those candidates may still be elected in subsequent iterations.
+            return not eligible_candidates or len(eligible_candidates) == remaining_seats
 
         def eligible_candidates_list() -> list[int]:
             elected_set = set(elected)
@@ -516,7 +647,7 @@ def tally_meek(
             remaining = [cid for cid in remaining if values1[cid] == pick1]
             _trace_step(
                 rule=1,
-                title="prior round performance",
+                title="prior round totals",
                 values={cid: values1.get(cid, Decimal(0)) for cid in ordered},
                 remaining=remaining,
             )
@@ -530,7 +661,7 @@ def tally_meek(
             remaining = [cid for cid in remaining if values2[cid] == pick2]
             _trace_step(
                 rule=2,
-                title="cumulative support",
+                title="current support totals",
                 values={cid: cumulative_support.get(cid, Decimal(0)) for cid in ordered},
                 remaining=remaining,
             )
@@ -559,7 +690,7 @@ def tally_meek(
             remaining = [cid for cid in remaining if values4[cid] == pick4]
             _trace_step(
                 rule=4,
-                title="deterministic lexical fallback",
+                title="fixed candidate ordering identifier",
                 values={cid: retention_uuid.get(cid, "") for cid in ordered},
                 remaining=remaining,
             )
@@ -750,7 +881,7 @@ def tally_meek(
 
                 previous_totals = {cid: retained_totals.get(cid, Decimal(0)) for cid in continuing_ids}
 
-                if count_complete and len(elected) >= seats:
+                if count_complete and (len(elected) >= seats or not eligible_candidates):
                     break
                 if numerically_converged:
                     break
@@ -760,11 +891,15 @@ def tally_meek(
             if len(elected) >= seats:
                 break
 
+            # If no candidates remain eligible, the count is complete even if seats remain vacant.
+            remaining_candidates = [cid for cid in continuing_ids if cid not in elected]
+            if not remaining_candidates:
+                break
+
             # If the remaining continuing candidates exactly fill the remaining seats,
             # elect them all deterministically and finish.
             remaining_seats = seats - len(elected)
-            remaining_candidates = [cid for cid in continuing_ids if cid not in elected]
-            if len(remaining_candidates) <= remaining_seats:
+            if len(remaining_candidates) == remaining_seats:
                 # Compute current vote distribution for tie-break rule 2 (cumulative support).
                 incoming_totals, _retained_totals = _distribute_votes(
                     ballots=ballots,
