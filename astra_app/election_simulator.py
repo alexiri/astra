@@ -4,6 +4,13 @@ import uuid
 
 from core.elections_meek import tally_meek
 
+def id_to_candidate(candidate_id: int, candidates: list[dict]) -> str:
+    if isinstance(candidate_id, list) and len(candidate_id) == 0:
+        return '[]'
+    try:
+        return [c for c in candidates if c["id"] == candidate_id][0]["name"]
+    except:
+        return f"Unknown ({candidate_id})"
 
 def main() -> None:
     candidates = [
@@ -18,16 +25,16 @@ def main() -> None:
         {"weight": 1, "ranking": [11, 10]},
         {"weight": 1, "ranking": [12, 11]},
         {"weight": 1, "ranking": [11, 12, 10]},
-        {"weight": 5, "ranking": [11, 10]},
+        # {"weight": 5, "ranking": [11, 10]},
         # {"weight": 2, "ranking": [12, 11, 10]},
         # {"weight": 5, "ranking": [10, 12, 11]},
     ]
 
     exclusions = [
-        {"public_id": 1, "name": "Incompatibles", "max_elected": 1, "candidate_ids": [10, 11]},
+        # {"public_id": 1, "name": "Incompatibles", "max_elected": 1, "candidate_ids": [10, 11]},
     ]
 
-    result = tally_meek(seats=2, ballots=ballots, candidates=candidates, exclusion_groups=exclusions)
+    result = tally_meek(seats=4, ballots=ballots, candidates=candidates, exclusion_groups=exclusions)
     print("Rounds detail:")
     for round_detail in result["rounds"]:
         data = round_detail.copy()
@@ -38,9 +45,9 @@ def main() -> None:
         print()
         # break
 
-    print(f"Elected: {result['elected']}")
-    print(f"Eliminated: {result['eliminated']}")
-    print(f"Forced Excluded: {result['forced_excluded']}")
+    print(f"Elected: {[id_to_candidate(cid, candidates) for cid in result['elected']]}")
+    print(f"Eliminated: {id_to_candidate(result['eliminated'], candidates)}")
+    print(f"Force Excluded: {[id_to_candidate(cid, candidates) for cid in result['forced_excluded']]}")
     print(f"Quota: {result['quota']:.2f}, Rounds: {len(result['rounds'])}")
 
 if __name__ == "__main__":
