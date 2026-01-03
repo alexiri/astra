@@ -23,11 +23,11 @@
             <dd class="col-sm-7">{{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}</dd>
             <dt class="col-sm-5">Seats</dt>
             <dd class="col-sm-7">{{ election.number_of_seats }}</dd>
-            <dt class="col-sm-5">Ballots cast</dt>
+            <dt class="col-sm-5">Unique voters</dt>
             <dd class="col-sm-7">{{ ballots_cast }}</dd>
-            <dt class="col-sm-5">Votes cast (weight)</dt>
+            <dt class="col-sm-5">Votes cast</dt>
             <dd class="col-sm-7">{{ votes_cast }}</dd>
-            <dt class="col-sm-5">Quota</dt>
+            <dt class="col-sm-5">STV election quota</dt>
             <dd class="col-sm-7">{{ quota|floatformat:4 }}</dd>
           </dl>
 

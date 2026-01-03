@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Max, Min, Prefetch, Q, Sum
+from django.db.models import Count, Max, Min, Prefetch, Sum
 from django.db.models.functions import TruncDate
 from django.http import Http404, HttpResponseBadRequest, HttpResponseGone, JsonResponse
 from django.shortcuts import redirect, render
@@ -45,7 +45,6 @@ from core.models import (
     Election,
     ExclusionGroup,
     ExclusionGroupCandidate,
-    Membership,
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
@@ -1010,7 +1009,7 @@ def election_detail(request, election_id: int):
 
     turnout_stats: dict[str, object] = {}
     turnout_chart_data: dict[str, object] = {}
-    if can_manage_elections:
+    if can_manage_elections or election.status == Election.Status.tallied:
         status = election_quorum_status(election=election)
         eligible_voter_count = int(status.get("eligible_voter_count") or 0)
         eligible_vote_weight_total = int(status.get("eligible_vote_weight_total") or 0)
@@ -1046,7 +1045,7 @@ def election_detail(request, election_id: int):
             "participating_vote_weight_percent": participating_vote_weight_percent,
         }
 
-        if election.status == Election.Status.open:
+        if can_manage_elections and election.status == Election.Status.open:
             rows = (
                 AuditLogEntry.objects.filter(election=election, event_type="ballot_submitted")
                 .annotate(day=TruncDate("timestamp"))
@@ -1080,46 +1079,6 @@ def election_detail(request, election_id: int):
                 "counts": counts,
             }
 
-    results_stats: dict[str, object] = {}
-    if election.status == Election.Status.tallied:
-        ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
-            ballots=Count("id"),
-            weight_total=Sum("weight"),
-        )
-
-        eligible_voters = admin_context.get("eligible_voters") or eligible_voters_from_memberships(election=election)
-        eligible_voter_count = len(eligible_voters)
-        eligible_weight_total = sum(v.weight for v in eligible_voters)
-
-        cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
-        eligible_breakdown = list(
-            Membership.objects.filter(
-                membership_type__isIndividual=True,
-                membership_type__enabled=True,
-                membership_type__votes__gt=0,
-                created_at__lte=cutoff,
-            )
-            .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
-            .values(
-                "membership_type__code",
-                "membership_type__name",
-                "membership_type__votes",
-            )
-            .annotate(
-                voters=Count("target_username", distinct=True),
-                vote_weight_total=Sum("membership_type__votes"),
-            )
-            .order_by("-vote_weight_total", "membership_type__code")
-        )
-
-        results_stats = {
-            "ballots_cast": int(ballot_agg.get("ballots") or 0),
-            "votes_cast": int(ballot_agg.get("weight_total") or 0),
-            "eligible_voters": eligible_voter_count,
-            "eligible_votes": eligible_weight_total,
-            "eligible_breakdown": eligible_breakdown,
-        }
-
     return render(
         request,
         "core/election_detail.html",
@@ -1137,7 +1096,6 @@ def election_detail(request, election_id: int):
             "tally_elected": tally_elected,
             "tally_winners": tally_winners,
             "empty_seats": empty_seats if election.status == Election.Status.tallied else 0,
-            "results_stats": results_stats,
         },
     )
 

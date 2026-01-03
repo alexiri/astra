@@ -197,13 +197,13 @@
       <div class="col-12">
         <div class="card card-outline card-secondary">
           <div class="card-header">
-            <h3 class="card-title">Turnout so far</h3>
+            <h3 class="card-title">Participation so far</h3>
           </div>
           <div class="card-body">
             <div class="row">
               <div class="col-12 col-lg-5">
                 <div class="mb-2">
-                  <strong>Number of voters</strong>
+                  <strong>Number of unique voters</strong>
                   —
                   {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
                 </div>
@@ -232,7 +232,7 @@
                 </div>
 
                 <div class="mb-2">
-                  <strong>Votes cast (weight)</strong>
+                  <strong>Votes cast</strong>
                   —
                   {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
                 </div>
@@ -287,45 +287,55 @@
               {% endif %}
             {% endif %}
 
-            {% if results_stats.ballots_cast is not None %}
+            {% if turnout_stats %}
               <h5 class="mb-2"><strong>Participation</strong></h5>
-              <dl class="row mb-3">
-                <dt class="col-sm-5">Ballots cast</dt>
-                <dd class="col-sm-7 mb-0">{{ results_stats.ballots_cast }}</dd>
-                <dt class="col-sm-5">Votes cast (weight)</dt>
-                <dd class="col-sm-7 mb-0">{{ results_stats.votes_cast }}</dd>
-                <dt class="col-sm-5">Eligible voters</dt>
-                <dd class="col-sm-7 mb-0">{{ results_stats.eligible_voters }}</dd>
-                <dt class="col-sm-5">Eligible votes (weight)</dt>
-                <dd class="col-sm-7 mb-0">{{ results_stats.eligible_votes }}</dd>
-              </dl>
 
-              {% if results_stats.eligible_breakdown %}
-                <p class="mb-2"><strong>Eligibility by membership type</strong></p>
-                <p class="text-muted small mb-2">Users with multiple memberships may appear in multiple rows.</p>
-                <div class="table-responsive">
-                  <table class="table table-sm table-striped mb-3">
-                    <thead>
-                      <tr>
-                        <th>Type</th>
-                        <th class="text-right">Votes each</th>
-                        <th class="text-right">Eligible voters</th>
-                        <th class="text-right">Eligible votes (weight)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for row in results_stats.eligible_breakdown %}
-                        <tr>
-                          <td>{{ row.membership_type__name }} ({{ row.membership_type__code }})</td>
-                          <td class="text-right">{{ row.membership_type__votes }}</td>
-                          <td class="text-right">{{ row.voters }}</td>
-                          <td class="text-right">{{ row.vote_weight_total }}</td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
+              <div class="mb-2">
+                <strong>Number of unique voters</strong>
+                —
+                {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
+              </div>
+
+              <div class="progress mb-2">
+                <div
+                  class="progress-bar bg-success"
+                  role="progressbar"
+                  aria-valuenow="{{ turnout_stats.participating_voter_count }}"
+                  aria-valuemin="0"
+                  aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
+                  style="width: {{ turnout_stats.participating_voter_percent }}%"
+                >
+                  <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
                 </div>
-              {% endif %}
+              </div>
+
+              <div class="mb-3 text-muted">
+                Quorum:
+                {{ turnout_stats.required_participating_voter_count }} voters ({{ turnout_stats.quorum_percent }}%)
+                {% if turnout_stats.quorum_met %}
+                  <span class="ml-1 badge badge-success">met</span>
+                {% else %}
+                  <span class="ml-1 badge badge-danger">not met</span>
+                {% endif %}
+              </div>
+
+              <div class="mb-2">
+                <strong>Votes cast</strong>
+                —
+                {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
+              </div>
+              <div class="progress mb-0">
+                <div
+                  class="progress-bar bg-info"
+                  role="progressbar"
+                  aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
+                  aria-valuemin="0"
+                  aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
+                  style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
+                >
+                  <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
+                </div>
+              </div>
             {% endif %}
           </div>
         </div>
