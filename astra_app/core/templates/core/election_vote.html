@@ -23,7 +23,7 @@
           <div class="text-muted small mb-3">
             Voting window: {{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}
             <br />
-            Note: the end date may be extended if quorum is not reached.
+            Note: Election administrators may extend the end date if quorum is not reached.
           </div>
           <form id="election-vote-form" method="post" action="{% url 'election-vote-submit' election.id %}">
             {% csrf_token %}

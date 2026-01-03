@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
+from decimal import Decimal, localcontext, ROUND_DOWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +30,17 @@ def _ballot_ranking(ballot: Mapping[str, object]) -> list[int]:
     ranking = ballot.get("ranking")
     if not isinstance(ranking, list):
         return []
-    return [int(x) for x in ranking]
+    result: list[int] = []
+    for x in ranking:
+        try:
+            cid = int(x)
+            # Reasonable bounds: candidate IDs should be positive and not absurdly large
+            if 0 <= cid <= 1_000_000:
+                result.append(cid)
+        except (ValueError, TypeError, OverflowError):
+            # Skip malformed candidate IDs
+            continue
+    return result
 
 
 def _distribute_votes(
@@ -43,7 +53,14 @@ def _distribute_votes(
     retained: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
 
     for ballot in ballots:
-        remaining = _decimal(int(ballot.get("weight") or 0))
+        try:
+            weight_val = int(ballot.get("weight") or 0)
+            # Reasonable bounds: weights should be positive and not absurdly large
+            if weight_val < 0 or weight_val > 1_000_000:
+                continue
+            remaining = _decimal(weight_val)
+        except (ValueError, TypeError, OverflowError):
+            continue
         if remaining <= 0:
             continue
 
@@ -513,21 +530,53 @@ def tally_meek(
     - Privacy-preserving: operates on anonymous ballots and candidate IDs only.
 
     Notes:
-    - Quota is the Meek quota: total / (seats + 1).
+    - Quota is the Meek quota: [1 + T/(S+1)].
     - Ballots are distributed fractionally using per-candidate retention factors.
     - Elected candidates remain in circulation with retention adjusted towards quota.
     - If no new elections occur after convergence, the lowest candidate is eliminated.
     - Exclusion groups force-exclude candidates once a group reaches its max elected.
     """
 
+    # Input validation to prevent crashes and DoS attacks
     if seats <= 0:
         raise ValueError("seats must be positive")
+    if seats > 10_000:
+        raise ValueError("seats must not exceed 10,000")
+    if not isinstance(ballots, list):
+        raise TypeError("ballots must be a list")
+    if len(ballots) > 1_000_000:
+        raise ValueError("ballot count must not exceed 1,000,000")
+    if not isinstance(candidates, list):
+        raise TypeError("candidates must be a list")
+    if len(candidates) == 0:
+        raise ValueError("must have at least one candidate")
+    if len(candidates) > 10_000:
+        raise ValueError("candidate count must not exceed 10,000")
+    if epsilon <= 0:
+        raise ValueError("epsilon must be positive")
+    if max_iterations < 1 or max_iterations > 1000:
+        raise ValueError("max_iterations must be between 1 and 1000")
 
     parsed_candidates: list[_Candidate] = []
     for c in candidates:
-        cid = int(c["id"])
+        if not isinstance(c, dict):
+            raise TypeError("each candidate must be a dict")
+        if "id" not in c:
+            raise ValueError("candidate missing required 'id' field")
+        try:
+            cid = int(c["id"])
+            if cid < 0 or cid > 1_000_000:
+                raise ValueError(f"candidate id {cid} out of valid range [0, 1000000]")
+        except (ValueError, TypeError, OverflowError) as e:
+            raise ValueError(f"invalid candidate id: {e}") from e
+        
         name = str(c.get("name") or "")
         tiebreak_uuid = str(c.get("tiebreak_uuid") or "")
+        
+        # Validate tiebreak_uuid is present and reasonable
+        if not tiebreak_uuid or len(tiebreak_uuid) > 200:
+            raise ValueError(f"candidate {cid} has invalid or missing tiebreak_uuid")
+        
         parsed_candidates.append(_Candidate(id=cid, name=name, tiebreak_uuid=tiebreak_uuid))
 
     candidate_name_by_id: dict[int, str] = {c.id: c.name for c in parsed_candidates if c.name}
@@ -536,12 +585,32 @@ def tally_meek(
 
     groups: list[_ExclusionGroup] = []
     for g in exclusion_groups or []:
+        if not isinstance(g, dict):
+            raise TypeError("each exclusion group must be a dict")
+        
+        try:
+            max_elected = int(g.get("max_elected") or 0)
+            if max_elected < 0 or max_elected > seats:
+                raise ValueError(f"exclusion group max_elected {max_elected} out of valid range")
+        except (ValueError, TypeError, OverflowError) as e:
+            raise ValueError(f"invalid exclusion group max_elected: {e}") from e
+        
+        # Safely parse candidate IDs
+        group_candidate_ids: set[int] = set()
+        for x in (g.get("candidate_ids") or []):
+            try:
+                cid = int(x)
+                if 0 <= cid <= 1_000_000:
+                    group_candidate_ids.add(cid)
+            except (ValueError, TypeError, OverflowError):
+                continue
+        
         groups.append(
             _ExclusionGroup(
                 public_id=str(g.get("public_id") or ""),
                 name=str(g.get("name") or ""),
-                max_elected=int(g.get("max_elected") or 0),
-                candidate_ids=frozenset(int(x) for x in (g.get("candidate_ids") or [])),
+                max_elected=max_elected,
+                candidate_ids=frozenset(group_candidate_ids),
             )
         )
 
@@ -549,7 +618,7 @@ def tally_meek(
         ctx.prec = 80
 
         total_weight = sum((_decimal(int(b.get("weight") or 0)) for b in ballots), start=Decimal(0))
-        quota = total_weight / Decimal(seats + 1)
+        quota = (total_weight / Decimal(seats + 1)).to_integral_value(rounding=ROUND_DOWN) + Decimal(1)
 
         retention: dict[int, Decimal] = {cid: Decimal(1) for cid in all_candidate_ids}
         elected: list[int] = []

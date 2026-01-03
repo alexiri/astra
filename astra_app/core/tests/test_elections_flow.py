@@ -23,7 +23,8 @@ from core.elections_services import (
     tally_election,
 )
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
-from core.tests.ballot_chain import GENESIS_CHAIN_HASH, compute_chain_hash
+from core.tests.ballot_chain import compute_chain_hash
+from core.tokens import election_genesis_chain_hash
 
 
 class ElectionCredentialAndBallotTests(TestCase):
@@ -342,14 +343,15 @@ class ElectionPublicExportTests(TestCase):
             weight=1,
             nonce="0" * 32,
         )
-        chain_hash = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash)
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-export-1",
             ranking=[c1.id],
             weight=1,
             ballot_hash=ballot_hash,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
 
@@ -544,14 +546,15 @@ class ElectionCloseAndTallyTests(TestCase):
             weight=1,
             nonce="0" * 32,
         )
-        chain_hash_1 = compute_chain_hash(previous_chain_hash=GENESIS_CHAIN_HASH, ballot_hash=ballot_hash_1)
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_hash_1 = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash_1)
         Ballot.objects.create(
             election=election,
             credential_public_id="cred-1",
             ranking=[],
             weight=1,
             ballot_hash=ballot_hash_1,
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=genesis_hash,
             chain_hash=chain_hash_1,
         )
 
@@ -580,6 +583,46 @@ class ElectionCloseAndTallyTests(TestCase):
         self.assertIsInstance(entry.payload, dict)
         self.assertEqual(entry.payload.get("chain_head"), chain_hash_2)
 
+    def test_different_elections_have_unique_genesis_hashes(self) -> None:
+        """
+        Verify that different elections have different genesis chain hashes.
+        This prevents cross-election chain splicing attacks where ballots
+        from one election could be incorrectly spliced into another election.
+        """
+        now = timezone.now()
+        election1 = Election.objects.create(
+            name="Election 1",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        election2 = Election.objects.create(
+            name="Election 2",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        genesis1 = election_genesis_chain_hash(election1.id)
+        genesis2 = election_genesis_chain_hash(election2.id)
+
+        # Verify each election has a unique genesis hash
+        self.assertNotEqual(genesis1, genesis2, "Different elections must have different genesis hashes")
+
+        # Verify genesis hashes are deterministic
+        self.assertEqual(genesis1, election_genesis_chain_hash(election1.id))
+        self.assertEqual(genesis2, election_genesis_chain_hash(election2.id))
+
+        # Verify format (64 hex characters)
+        self.assertEqual(len(genesis1), 64)
+        self.assertEqual(len(genesis2), 64)
+        self.assertTrue(all(c in "0123456789abcdef" for c in genesis1))
+        self.assertTrue(all(c in "0123456789abcdef" for c in genesis2))
+
     def test_tally_election_persists_result_and_emits_public_round_audit(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
@@ -605,9 +648,9 @@ class ElectionCloseAndTallyTests(TestCase):
                 weight=1,
                 nonce="0" * 32,
             ),
-            previous_chain_hash=GENESIS_CHAIN_HASH,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             chain_hash=compute_chain_hash(
-                previous_chain_hash=GENESIS_CHAIN_HASH,
+                previous_chain_hash=election_genesis_chain_hash(election.id),
                 ballot_hash=Ballot.compute_hash(
                     election_id=election.id,
                     credential_public_id="c1",
@@ -679,7 +722,7 @@ class ElectionCloseAndTallyTests(TestCase):
         ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c1)
         ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c2)
 
-        previous = GENESIS_CHAIN_HASH
+        previous = election_genesis_chain_hash(election.id)
         for i in range(3):
             ballot_hash = Ballot.compute_hash(
                 election_id=election.id,
@@ -777,7 +820,7 @@ class ElectionEmailTimezoneTests(TestCase):
             ranking=[],
             weight=1,
             ballot_hash="b" * 64,
-            previous_chain_hash="0" * 64,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
             chain_hash="1" * 64,
         )
         receipt = BallotReceipt(ballot=ballot, nonce="n" * 32)

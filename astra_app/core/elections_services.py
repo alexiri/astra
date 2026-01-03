@@ -31,6 +31,7 @@ from core.models import (
     OrganizationSponsorship,
     VotingCredential,
 )
+from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 
 class ElectionError(Exception):
@@ -164,12 +165,14 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
     for row in ballots:
         row["superseded_by"] = row.pop("superseded_by__ballot_hash")
 
-    chain_head = ballots[-1]["chain_hash"] if ballots else "0" * 64
+    genesis_hash = election_genesis_chain_hash(election.id)
+    chain_head = ballots[-1]["chain_hash"] if ballots else genesis_hash
 
     return {
         "election_id": election.id,
         "ballots": ballots,
         "chain_head": chain_head,
+        "genesis_hash": genesis_hash,
     }
 
 
@@ -376,8 +379,8 @@ def send_voting_credential_email(
 
 
 def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
-    # Eligibility: must hold a non-expired individual membership that started at least 3
-    # months before election start. Using days avoids month-length ambiguity.
+    # Eligibility: must hold a non-expired individual membership that started at least
+    # ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS (configured as 90 days) before election start.
     cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
     eligible_qs = (
         Membership.objects.filter(
@@ -639,8 +642,9 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
         .order_by("-created_at", "-id")
         .first()
     )
-    previous_chain_hash = str(last_ballot.chain_hash if last_ballot is not None else "0" * 64)
-    chain_hash = hashlib.sha256(f"{previous_chain_hash}:{ballot_hash}".encode()).hexdigest()
+    genesis_hash = election_genesis_chain_hash(election.id)
+    previous_chain_hash = str(last_ballot.chain_hash if last_ballot is not None else genesis_hash)
+    chain_hash = election_chain_next_hash(previous_chain_hash=previous_chain_hash, ballot_hash=ballot_hash)
 
     current = (
         Ballot.objects.select_for_update()
@@ -828,7 +832,8 @@ def close_election(*, election: Election) -> None:
         .values_list("chain_hash", flat=True)
         .first()
     )
-    chain_head = str(last_chain_hash or "0" * 64)
+    genesis_hash = election_genesis_chain_hash(election.id)
+    chain_head = str(last_chain_hash or genesis_hash)
 
     election.status = Election.Status.closed
     election.end_datetime = ended_at
