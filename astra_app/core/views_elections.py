@@ -89,6 +89,8 @@ def ballot_verify(request):
                 "election__id",
                 "election__name",
                 "election__status",
+                "election__public_ballots_file",
+                "election__public_audit_file",
             )
             .filter(ballot_hash=receipt)
             .first()
@@ -104,11 +106,11 @@ def ballot_verify(request):
     # Privacy guardrail: never reveal ranking, credential IDs, IPs, or precise timestamps.
     submitted_date = ballot.created_at.date().isoformat() if ballot is not None else ""
 
-    public_ballots_url = (
-        reverse("election-public-ballots", args=[election.id])
-        if election is not None and election.status == Election.Status.tallied
-        else ""
-    )
+    public_ballots_url = ""
+    if election is not None and election.status == Election.Status.tallied:
+        public_ballots_url = election.public_ballots_file.url if election.public_ballots_file else reverse(
+            "election-public-ballots", args=[election.id]
+        )
     audit_log_url = (
         reverse("election-audit-log", args=[election.id])
         if election is not None and election.status == Election.Status.tallied
@@ -1318,7 +1320,7 @@ def _get_exportable_election(*, election_id: int) -> Election:
     election = (
         Election.objects.exclude(status=Election.Status.deleted)
         .filter(pk=election_id)
-        .only("id", "status")
+        .only("id", "status", "public_ballots_file", "public_audit_file")
         .first()
     )
     if election is None:
@@ -1332,55 +1334,20 @@ def _get_exportable_election(*, election_id: int) -> Election:
 def election_public_ballots(request, election_id: int):
     election = _get_exportable_election(election_id=election_id)
 
-    ballots = list(
-        Ballot.objects.filter(election=election)
-        .order_by("created_at", "id")
-        .values(
-            "ranking",
-            "weight",
-            "ballot_hash",
-            "is_counted",
-            "chain_hash",
-            "previous_chain_hash",
-            "superseded_by__ballot_hash",
-        )
-    )
-    for row in ballots:
-        row["superseded_by"] = row.pop("superseded_by__ballot_hash")
+    if election.status == Election.Status.tallied and election.public_ballots_file:
+        return redirect(election.public_ballots_file.url)
 
-    chain_head = ballots[-1]["chain_hash"] if ballots else "0" * 64
-
-    return JsonResponse(
-        {
-            "election_id": election.id,
-            "ballots": ballots,
-            "chain_head": chain_head,
-        }
-    )
+    return JsonResponse(elections_services.build_public_ballots_export(election=election))
 
 
 @require_GET
 def election_public_audit(request, election_id: int):
     election = _get_exportable_election(election_id=election_id)
 
-    rows = list(
-        AuditLogEntry.objects.filter(election=election, is_public=True)
-        .order_by("timestamp", "id")
-        .values(
-            "timestamp",
-            "event_type",
-            "payload",
-        )
-    )
-    for row in rows:
-        row["timestamp"] = row["timestamp"].isoformat()
+    if election.status == Election.Status.tallied and election.public_audit_file:
+        return redirect(election.public_audit_file.url)
 
-    return JsonResponse(
-        {
-            "election_id": election.id,
-            "audit_log": rows,
-        }
-    )
+    return JsonResponse(elections_services.build_public_audit_export(election=election))
 
 
 @require_GET

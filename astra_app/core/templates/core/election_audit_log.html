@@ -34,8 +34,16 @@
           <hr class="my-3" />
 
           <a class="btn btn-outline-primary btn-block" href="{% url 'election-detail' election.id %}">Back to election page</a>
-          <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}">Download ballots (JSON)</a>
-          <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}">Download audit log (JSON)</a>
+          {% if election.public_ballots_file %}
+            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}">Download ballots (JSON)</a>
+          {% else %}
+            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}">Download ballots (JSON)</a>
+          {% endif %}
+          {% if election.public_audit_file %}
+            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}">Download audit log (JSON)</a>
+          {% else %}
+            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}">Download audit log (JSON)</a>
+          {% endif %}
         </div>
       </div>
 

@@ -119,10 +119,10 @@ class STVTallyTests(TestCase):
         audit_text = str(elim_round.get("audit_text") or "")
         self.assertIn("Final results", audit_text)
         self.assertTrue(
-            (
+            
                 "After this elimination, the remaining eligible candidate exactly filled" in audit_text
                 or "After this elimination, the remaining eligible candidates exactly filled" in audit_text
-            )
+            
         )
 
     def test_meek_fill_remaining_seats_explains_rule_election(self) -> None:
@@ -154,10 +154,10 @@ class STVTallyTests(TestCase):
 
         audit_text = str(r.get("audit_text") or "")
         self.assertTrue(
-            (
+            
                 "remaining eligible candidate exactly filled" in audit_text
                 or "remaining eligible candidates exactly filled" in audit_text
-            )
+            
         )
         # Guardrail: do not imply every elected candidate had quota-reduction / surplus.
         self.assertNotIn("each elected candidate's retained vote total was reduced", audit_text)

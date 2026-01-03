@@ -35,6 +35,17 @@
     hidden.value = readRankingFromDom().join(',');
   }
 
+  function updateRankingNumbers() {
+    var list = $('election-ranking-list');
+    if (!list) return;
+    var items = list.querySelectorAll('[data-candidate-id]');
+    for (var i = 0; i < items.length; i++) {
+      var badge = items[i].querySelector('[data-rank-number]');
+      if (!badge) continue;
+      badge.textContent = String(i + 1);
+    }
+  }
+
   function updateRankingGuidance(form) {
     var hint = $('election-ranking-hint');
     var order = $('election-ranking-order');
@@ -215,8 +226,19 @@
       item.setAttribute('data-candidate-id', String(cid));
 
       var left = document.createElement('div');
-      left.className = 'text-truncate pr-2';
-      left.textContent = label;
+      left.className = 'd-flex align-items-center text-truncate pr-2';
+
+      var number = document.createElement('span');
+      number.className = 'badge badge-secondary mr-2';
+      number.setAttribute('data-rank-number', '1');
+      number.textContent = '1';
+
+      var labelSpan = document.createElement('span');
+      labelSpan.className = 'text-truncate';
+      labelSpan.textContent = label;
+
+      left.appendChild(number);
+      left.appendChild(labelSpan);
 
       var right = document.createElement('div');
 
@@ -228,6 +250,7 @@
         var prev = item.previousElementSibling;
         if (prev) list.insertBefore(item, prev);
         syncRankingField();
+        updateRankingNumbers();
         clearRankingError();
         updateRankingGuidance(form);
       });
@@ -240,6 +263,7 @@
         var next = item.nextElementSibling;
         if (next) list.insertBefore(next, item);
         syncRankingField();
+        updateRankingNumbers();
         clearRankingError();
         updateRankingGuidance(form);
       });
@@ -251,6 +275,7 @@
       remove.addEventListener('click', function () {
         item.remove();
         syncRankingField();
+        updateRankingNumbers();
         clearRankingError();
         updateRankingGuidance(form);
       });
@@ -263,6 +288,7 @@
       item.appendChild(right);
       list.appendChild(item);
       syncRankingField();
+      updateRankingNumbers();
       clearRankingError();
       updateRankingGuidance(form);
     }
@@ -364,6 +390,7 @@
     attachReceiptCopy();
     prefillCredentialFromUrlFragment();
     syncRankingField();
+    updateRankingNumbers();
 
     var form = $('election-vote-form');
     if (form) updateRankingGuidance(form);

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import post_office.mail
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
@@ -144,6 +145,94 @@ def _jsonify_tally_result(result: dict[str, object]) -> dict[str, object]:
         "forced_excluded": list(result.get("forced_excluded") or []),
         "rounds": list(result.get("rounds") or []),
     }
+
+
+def build_public_ballots_export(*, election: Election) -> dict[str, object]:
+    ballots = list(
+        Ballot.objects.filter(election=election)
+        .order_by("created_at", "id")
+        .values(
+            "ranking",
+            "weight",
+            "ballot_hash",
+            "is_counted",
+            "chain_hash",
+            "previous_chain_hash",
+            "superseded_by__ballot_hash",
+        )
+    )
+    for row in ballots:
+        row["superseded_by"] = row.pop("superseded_by__ballot_hash")
+
+    chain_head = ballots[-1]["chain_hash"] if ballots else "0" * 64
+
+    return {
+        "election_id": election.id,
+        "ballots": ballots,
+        "chain_head": chain_head,
+    }
+
+
+def build_public_audit_export(*, election: Election) -> dict[str, object]:
+    rows = list(
+        AuditLogEntry.objects.filter(election=election, is_public=True)
+        .order_by("timestamp", "id")
+        .values(
+            "timestamp",
+            "event_type",
+            "payload",
+        )
+    )
+    for row in rows:
+        row["timestamp"] = row["timestamp"].isoformat()
+
+    return {
+        "election_id": election.id,
+        "audit_log": rows,
+    }
+
+
+def persist_public_election_artifacts(*, election: Election) -> None:
+    ballots_payload = build_public_ballots_export(election=election)
+    audit_payload = build_public_audit_export(election=election)
+
+    ballots_json = json.dumps(ballots_payload, sort_keys=True, cls=DjangoJSONEncoder, ensure_ascii=False).encode(
+        "utf-8"
+    )
+    audit_json = json.dumps(audit_payload, sort_keys=True, cls=DjangoJSONEncoder, ensure_ascii=False).encode("utf-8")
+
+    try:
+        if election.public_ballots_file:
+            election.public_ballots_file.delete(save=False)
+        if election.public_audit_file:
+            election.public_audit_file.delete(save=False)
+
+        election.public_ballots_file.save("public_ballots.json", ContentFile(ballots_json), save=False)
+        election.public_audit_file.save("public_audit_log.json", ContentFile(audit_json), save=False)
+
+        election.artifacts_generated_at = timezone.now()
+        election.save(
+            update_fields=[
+                "public_ballots_file",
+                "public_audit_file",
+                "artifacts_generated_at",
+                "updated_at",
+            ]
+        )
+    except Exception as exc:
+        # Best effort: avoid leaving orphaned artifact keys referenced by the DB.
+        election.public_ballots_file = ""
+        election.public_audit_file = ""
+        election.artifacts_generated_at = None
+        election.save(
+            update_fields=[
+                "public_ballots_file",
+                "public_audit_file",
+                "artifacts_generated_at",
+                "updated_at",
+            ]
+        )
+        raise ElectionError(f"Failed to store election artifacts: {exc}") from exc
 
 
 def _sanitize_ranking(*, election: Election, ranking: list[int]) -> list[int]:
@@ -813,6 +902,8 @@ def tally_election(*, election: Election) -> dict[str, object]:
     election.status = Election.Status.tallied
     election.save(update_fields=["tally_result", "status"])
 
+    persist_public_election_artifacts(election=election)
+    
     for idx, round_payload in enumerate(result.get("rounds") or [], start=1):
         AuditLogEntry.objects.create(
             election=election,

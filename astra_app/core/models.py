@@ -917,6 +917,12 @@ class MembershipLog(models.Model):
         )
 
 
+def election_artifact_upload_to(election: Election, filename: str) -> str:
+    if not election.pk:
+        raise ValueError("Election must be saved before writing artifacts")
+    return f"elections/{election.pk}/{filename}"
+
+
 class Election(models.Model):
     class Status(models.TextChoices):
         draft = "draft", "Draft"
@@ -948,6 +954,18 @@ class Election(models.Model):
 
     # Published machine-readable tally output.
     tally_result = models.JSONField(blank=True, default=dict)
+
+    public_ballots_file = models.FileField(
+        upload_to=election_artifact_upload_to,
+        blank=True,
+        default="",
+    )
+    public_audit_file = models.FileField(
+        upload_to=election_artifact_upload_to,
+        blank=True,
+        default="",
+    )
+    artifacts_generated_at = models.DateTimeField(blank=True, null=True)
 
     # Per-election voting credential email configuration.
     # We snapshot the subject/body at election configuration time so the election can
