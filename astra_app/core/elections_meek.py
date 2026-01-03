@@ -668,6 +668,15 @@ def tally_meek(
 
                     newly_elected = reordered
 
+                remaining_seats = seats - len(elected)
+                if remaining_seats <= 0:
+                    newly_elected = []
+                elif len(newly_elected) > remaining_seats:
+                    # In edge cases (especially with fractional quotas), more candidates can meet the
+                    # quota than there are remaining seats. Elect deterministically in the computed
+                    # order, but never elect more than the remaining number of seats.
+                    newly_elected = newly_elected[:remaining_seats]
+
                 forced_events: list[dict[str, object]] = []
                 elected_this_iteration: list[int] = []
                 if newly_elected:

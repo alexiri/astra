@@ -9,6 +9,31 @@ from django.utils import timezone
 
 
 class STVTallyTests(TestCase):
+    def test_meek_does_not_elect_more_than_seats_in_single_iteration(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # With the Hagenbach-Bischoff quota (total/(seats+1)), it is possible for more
+        # candidates to meet the quota than there are remaining seats. The tally must
+        # deterministically elect at most the remaining number of seats.
+        candidates = [
+            {"id": 1, "name": "A", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000001")},
+            {"id": 2, "name": "B", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000002")},
+        ]
+        ballots = [
+            {"weight": 1, "ranking": [1]},
+            {"weight": 1, "ranking": [2]},
+        ]
+
+        result = tally_meek(ballots=ballots, candidates=candidates, seats=1)
+        rounds = list(result.get("rounds") or [])
+        self.assertGreaterEqual(len(rounds), 1)
+
+        r0 = rounds[0]
+        self.assertIsNone(r0.get("eliminated"))
+        self.assertIsInstance(r0.get("elected"), list)
+        self.assertLessEqual(len(list(r0.get("elected") or [])), 1)
+        self.assertEqual(len(result["elected"]), 1)
+
     def test_meek_numerical_convergence_does_not_imply_count_complete(self) -> None:
         from core.elections_meek import tally_meek
 
