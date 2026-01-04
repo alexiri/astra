@@ -3,10 +3,10 @@ from django.urls import path
 from core import (
     views_elections,
     views_groups,
-    views_mailmerge,
     views_membership,
     views_organizations,
     views_search,
+    views_send_mail,
     views_settings,
     views_settings_otp,
     views_templated_email,
@@ -109,11 +109,11 @@ urlpatterns = [
         name="election-vote-submit",
     ),
 
-    path("email-tools/mail-merge/", views_mailmerge.mail_merge, name="mail-merge"),
+    path("email-tools/send-mail/", views_send_mail.send_mail, name="send-mail"),
     path(
-        "email-tools/mail-merge/render-preview/",
-        views_mailmerge.mail_merge_render_preview,
-        name="mail-merge-render-preview",
+        "email-tools/send-mail/render-preview/",
+        views_send_mail.send_mail_render_preview,
+        name="send-mail-render-preview",
     ),
 
     path(

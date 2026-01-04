@@ -6,7 +6,7 @@
   }
 
   function setAction(value) {
-    var el = $('mailmerge-action');
+    var el = $('send-mail-action');
     if (el) el.value = value;
   }
 
@@ -16,18 +16,18 @@
   }
 
   function setRecipientCount(value) {
-    var el = $('mailmerge-recipient-count');
+    var el = $('send-mail-recipient-count');
     if (!el) return;
     el.textContent = String(value == null ? '' : value);
 
-    var sendCount = $('mailmerge-send-count');
+    var sendCount = $('send-mail-send-count');
     if (sendCount) {
       sendCount.textContent = String(value == null ? '' : value);
     }
   }
 
   function setRecipientCountLoading() {
-    var el = $('mailmerge-recipient-count');
+    var el = $('send-mail-recipient-count');
     if (!el) return;
     el.innerHTML = `
      <div class="spinner-border spinner-border-sm" style="vertical-align: middle;" role="status">
@@ -35,7 +35,7 @@
      </div>
     `;
 
-    var sendCount = $('mailmerge-send-count');
+    var sendCount = $('send-mail-send-count');
     if (sendCount) {
       sendCount.innerHTML = `
        <div class="spinner-border spinner-border-sm" style="vertical-align: middle;" role="status">
@@ -85,7 +85,7 @@
     var ms = typeof delayMs === 'number' ? delayMs : 250;
     cancelScheduledPreviewSubmit();
     previewSubmitTimer = window.setTimeout(function () {
-      var form = $('mailmerge-form');
+      var form = $('send-mail-form');
       if (!form) return;
       setAction('preview');
       if (!validateRecipientsBeforeSubmit(null)) return;
@@ -98,7 +98,7 @@
   }
 
   function getActiveRecipientModeFromTabs() {
-    var tabs = document.querySelectorAll('#mailmerge-recipient-tabs .nav-link');
+    var tabs = document.querySelectorAll('#send-mail-recipient-tabs .nav-link');
     for (var i = 0; i < tabs.length; i++) {
       var t = tabs[i];
       if (t && t.classList && t.classList.contains('active')) {
@@ -109,7 +109,7 @@
   }
 
   function syncRecipientModeFromTabs() {
-    var modeEl = $('mailmerge-recipient-mode');
+    var modeEl = $('send-mail-recipient-mode');
     if (!modeEl) return;
 
     modeEl.value = getActiveRecipientModeFromTabs();
@@ -119,7 +119,7 @@
     var wanted = String(mode || '').trim();
     if (!wanted) return;
 
-    var tabs = document.querySelectorAll('#mailmerge-recipient-tabs .nav-link');
+    var tabs = document.querySelectorAll('#send-mail-recipient-tabs .nav-link');
     var target = null;
     for (var i = 0; i < tabs.length; i++) {
       var t = tabs[i];
@@ -142,7 +142,7 @@
     }
     target.classList.add('active');
 
-    var panes = document.querySelectorAll('#mailmerge-recipient-tab-content .tab-pane');
+    var panes = document.querySelectorAll('#send-mail-recipient-tab-content .tab-pane');
     for (var k = 0; k < panes.length; k++) {
       panes[k].classList.remove('active');
       panes[k].classList.remove('show');
@@ -156,7 +156,7 @@
   }
 
   function hideRecipientsWarning(kind) {
-    var box = $('mailmerge-recipients-inline-warning');
+    var box = $('send-mail-recipients-inline-warning');
     if (!box) return;
     if (kind && String(box.getAttribute('data-warning-kind') || '') !== String(kind || '')) {
       return;
@@ -167,7 +167,7 @@
   }
 
   function showRecipientsWarning(message, kind) {
-    var box = $('mailmerge-recipients-inline-warning');
+    var box = $('send-mail-recipients-inline-warning');
     if (!box) return;
     box.textContent = String(message || '');
     box.classList.remove('d-none');
@@ -179,7 +179,7 @@
   }
 
   function hasSavedCsvRecipients() {
-    var el = $('mailmerge-has-saved-csv');
+    var el = $('send-mail-has-saved-csv');
     return !!(el && String(el.value || '') === '1');
   }
 
@@ -208,7 +208,7 @@
       }
     }
 
-    var modeEl = $('mailmerge-recipient-mode');
+    var modeEl = $('send-mail-recipient-mode');
     var mode = modeEl ? String(modeEl.value || '').trim() : '';
 
     if (mode === 'group') {
@@ -288,7 +288,7 @@
   function onReady() {
     document.addEventListener('templated-email-compose:save-confirmed', function () {
       setAction('save');
-      var form = $('mailmerge-form');
+      var form = $('send-mail-form');
       if (form) form.submit();
     });
 
@@ -296,9 +296,9 @@
       var detail = e && e.detail ? e.detail : {};
       var name = String((detail && detail.name) || '').trim();
       if (!name) return;
-      $('mailmerge-save-as-name').value = name;
+      $('send-mail-save-as-name').value = name;
       setAction('save_as');
-      var form = $('mailmerge-form');
+      var form = $('send-mail-form');
       if (form) form.submit();
     });
 
@@ -320,7 +320,7 @@
       // After a successful "Save as", the server re-renders with the new template
       // selected. The form fields already contain the correct content, so we only
       // need to set Restore/baseline so the user can start editing immediately.
-      var autoloadEl = $('mailmerge-autoload-template-id');
+      var autoloadEl = $('send-mail-autoload-template-id');
       if (autoloadEl) {
         var autoloadId = String(autoloadEl.value || '').trim();
         if (autoloadId) {
@@ -347,11 +347,11 @@
     // and we refresh preview off that signal.
 
     // Keep recipient_mode in sync with the tabs selection.
-    var tabLinks = document.querySelectorAll('#mailmerge-recipient-tabs .nav-link');
+    var tabLinks = document.querySelectorAll('#send-mail-recipient-tabs .nav-link');
 
     function maybeAutoloadPreviewForActiveTab() {
       syncRecipientModeFromTabs();
-      var modeEl = $('mailmerge-recipient-mode');
+      var modeEl = $('send-mail-recipient-mode');
       var mode = modeEl ? String(modeEl.value || '').trim() : '';
 
       if (mode === 'group') {
@@ -417,13 +417,13 @@
       });
     }
 
-    var loadFileBtn = $('mailmerge-load-file-btn');
+    var loadFileBtn = $('send-mail-load-file-btn');
     if (loadFileBtn) {
       loadFileBtn.addEventListener('click', validateRecipientsBeforeSubmit);
     }
 
     function showSendConfirmModal() {
-      var modalEl = $('mailmerge-send-confirm-modal');
+      var modalEl = $('send-mail-send-confirm-modal');
       if (!modalEl) return false;
       var jq = window.jQuery;
       if (jq && jq.fn && typeof jq.fn.modal === 'function') {
@@ -433,7 +433,7 @@
       return false;
     }
 
-    var sendBtn = $('mailmerge-send-btn');
+    var sendBtn = $('send-mail-send-btn');
     if (sendBtn) {
       sendBtn.addEventListener('click', function (evt) {
         hideRecipientsWarning();
@@ -444,8 +444,8 @@
 
         // Prefer Bootstrap modal confirmation; fallback to built-in confirm.
         if (!showSendConfirmModal()) {
-          if (window.confirm('Send mail merge now?')) {
-            var form = $('mailmerge-form');
+          if (window.confirm('Send mail now?')) {
+            var form = $('send-mail-form');
             if (!form) return;
             setAction('send');
             form.submit();
@@ -454,12 +454,12 @@
       });
     }
 
-    var sendConfirmBtn = $('mailmerge-send-confirm-btn');
+    var sendConfirmBtn = $('send-mail-send-confirm-btn');
     if (sendConfirmBtn) {
       sendConfirmBtn.addEventListener('click', function () {
         cancelScheduledPreviewSubmit();
 
-        var form = $('mailmerge-form');
+        var form = $('send-mail-form');
         if (!form) return;
         setAction('send');
 
@@ -574,7 +574,7 @@
     }
 
     // Respect server-provided initial mode (e.g. deep links).
-    var modeEl = $('mailmerge-recipient-mode');
+    var modeEl = $('send-mail-recipient-mode');
     var initialMode = modeEl ? String(modeEl.value || '').trim() : '';
     if (initialMode) {
       activateRecipientTab(initialMode);

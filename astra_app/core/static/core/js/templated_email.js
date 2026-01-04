@@ -1,7 +1,7 @@
 (function (window, document) {
   'use strict';
 
-  // Compose widget + helpers. This file is intended to be shared by Mail Merge,
+  // Compose widget + helpers. This file is intended to be shared by Send Mail,
   // Elections, and Template editing to avoid duplicated JS and keep fixes centralized.
   if (window.TemplatedEmailComposeRegistry && window.TemplatedEmailComposeRegistry._composeLibLoaded) return;
 

@@ -11,7 +11,7 @@ ASTRA_CHANGE_MEMBERSHIP = "astra.change_membership"
 ASTRA_DELETE_MEMBERSHIP = "astra.delete_membership"
 ASTRA_VIEW_MEMBERSHIP = "astra.view_membership"
 
-ASTRA_ADD_MAILMERGE = "astra.add_mailmerge"
+ASTRA_ADD_SEND_MAIL = "astra.add_sendmail"
 
 ASTRA_ADD_ELECTION = "astra.add_election"
 
@@ -25,7 +25,7 @@ MEMBERSHIP_PERMISSIONS: frozenset[str] = frozenset(
 )
 
 
-MAILMERGE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_MAILMERGE})
+SEND_MAIL_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_SEND_MAIL})
 
 
 P = ParamSpec("P")

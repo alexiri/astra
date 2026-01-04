@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from core.models import MembershipRequest
 from core.permissions import (
-    ASTRA_ADD_MAILMERGE,
     ASTRA_ADD_MEMBERSHIP,
+    ASTRA_ADD_SEND_MAIL,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
@@ -18,7 +18,7 @@ def membership_review(request) -> dict[str, object]:
             "membership_can_change": False,
             "membership_can_delete": False,
             "membership_can_view": False,
-            "mailmerge_can_add": False,
+            "send_mail_can_add": False,
             "membership_requests_pending_count": 0,
         }
 
@@ -29,13 +29,13 @@ def membership_review(request) -> dict[str, object]:
         membership_can_change = bool(user.has_perm(ASTRA_CHANGE_MEMBERSHIP))
         membership_can_delete = bool(user.has_perm(ASTRA_DELETE_MEMBERSHIP))
         membership_can_view = bool(user.has_perm(ASTRA_VIEW_MEMBERSHIP))
-        mailmerge_can_add = bool(user.has_perm(ASTRA_ADD_MAILMERGE))
+        send_mail_can_add = bool(user.has_perm(ASTRA_ADD_SEND_MAIL))
     except Exception:
         membership_can_add = False
         membership_can_change = False
         membership_can_delete = False
         membership_can_view = False
-        mailmerge_can_add = False
+        send_mail_can_add = False
 
     # Requests UI + approve/reject/ignore is guarded by "add".
     pending_count = (
@@ -47,7 +47,7 @@ def membership_review(request) -> dict[str, object]:
         "membership_can_change": membership_can_change,
         "membership_can_delete": membership_can_delete,
         "membership_can_view": membership_can_view,
-        "mailmerge_can_add": mailmerge_can_add,
+        "send_mail_can_add": send_mail_can_add,
         "membership_requests_pending_count": pending_count,
     }
 

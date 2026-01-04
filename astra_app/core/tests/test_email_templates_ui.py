@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
-from core.permissions import ASTRA_ADD_MAILMERGE
+from core.permissions import ASTRA_ADD_SEND_MAIL
 
 
 class EmailTemplatesUiTests(TestCase):
@@ -19,7 +19,7 @@ class EmailTemplatesUiTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
         FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_ADD_MAILMERGE,
+            permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name="membership-committee",
         )

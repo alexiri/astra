@@ -215,9 +215,9 @@
               </li>
             {% endif %}
             
-            {% if mailmerge_can_add %}
-              <li class="nav-item {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'mail-merge' %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'mail-merge' %}active{% endif %}">
+            {% if send_mail_can_add %}
+              <li class="nav-item {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' %}menu-open{% endif %}">
+                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' %}active{% endif %}">
                   <i class="nav-icon fas fa-envelope-open-text mt-1"></i>
                   <p class="mb-0 ml-2 flex-grow-1">
                     Mail Tools
@@ -225,7 +225,7 @@
                   </p>
                 </a>
 
-                <ul class="nav nav-treeview" {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'mail-merge' %}style="display: block;"{% endif %}>
+                <ul class="nav nav-treeview" {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' %}style="display: block;"{% endif %}>
                   <li class="nav-item">
                     <a href="{% url 'email-templates' %}" class="nav-link {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' %}active{% endif %}">
                       <i class="nav-icon fas fa-file-alt"></i>
@@ -234,9 +234,9 @@
                   </li>
 
                   <li class="nav-item">
-                    <a href="{% url 'mail-merge' %}" class="nav-link {% if current_url_name == 'mail-merge' %}active{% endif %}">
+                    <a href="{% url 'send-mail' %}" class="nav-link {% if current_url_name == 'send-mail' %}active{% endif %}">
                       <i class="nav-icon fas fa-envelope"></i>
-                      <p>Mail Merge</p>
+                      <p>Send Mail</p>
                     </a>
                   </li>
                 </ul>

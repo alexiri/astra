@@ -9,10 +9,10 @@ from django.urls import reverse
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
-from core.permissions import ASTRA_ADD_MAILMERGE
+from core.permissions import ASTRA_ADD_SEND_MAIL
 
 
-class MailMergeTests(TestCase):
+class SendMailTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -21,7 +21,7 @@ class MailMergeTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
         FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_ADD_MAILMERGE,
+            permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name="membership-committee",
         )
@@ -31,7 +31,7 @@ class MailMergeTests(TestCase):
 
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            resp = self.client.get(reverse("mail-merge"))
+            resp = self.client.get(reverse("send-mail"))
 
         self.assertEqual(resp.status_code, 302)
 
@@ -85,7 +85,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "group",
                     "group_cn": "example-group",
@@ -94,7 +94,7 @@ class MailMergeTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Mail Merge")
+        self.assertContains(resp, "Send Mail")
         self.assertContains(resp, "Recipients")
         self.assertContains(resp, "2")
         self.assertContains(resp, "{{ full_name }}")
@@ -110,7 +110,7 @@ class MailMergeTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "csv",
                     "csv_file": csv_file,
@@ -133,7 +133,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "manual",
                     "manual_to": "jim@example.com, bob@example.com",
@@ -195,10 +195,10 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
-            resp = self.client.get(reverse("mail-merge") + "?type=group&to=example-group")
+            resp = self.client.get(reverse("send-mail") + "?type=group&to=example-group")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="mailmerge-recipient-mode" value="group"')
+        self.assertContains(resp, 'id="send-mail-recipient-mode" value="group"')
         # Deep-link should auto-load recipients on GET.
         self.assertContains(resp, "Recipient count")
         self.assertContains(resp, "2")
@@ -221,7 +221,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.get", return_value=_EmptyGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_EmptyGroup()]),
         ):
-            resp = self.client.get(reverse("mail-merge") + "?type=group&to=empty-group")
+            resp = self.client.get(reverse("send-mail") + "?type=group&to=empty-group")
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Recipient count")
@@ -247,10 +247,10 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
         ):
-            resp = self.client.get(reverse("mail-merge") + "?type=manual&to=jim@example.com")
+            resp = self.client.get(reverse("send-mail") + "?type=manual&to=jim@example.com")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="mailmerge-recipient-mode" value="manual"')
+        self.assertContains(resp, 'id="send-mail-recipient-mode" value="manual"')
         self.assertContains(resp, 'name="manual_to"')
         # Deep-link should auto-load recipients on GET.
         self.assertContains(resp, "Recipient count")
@@ -267,7 +267,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get(
-                reverse("mail-merge") + "?type=manual&to=jim@example.com&foo=bar&project-name=Atomic+SIG"
+                reverse("send-mail") + "?type=manual&to=jim@example.com&foo=bar&project-name=Atomic+SIG"
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -323,10 +323,10 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAUser.all", return_value=[alice, bob]),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
         ):
-            resp = self.client.get(reverse("mail-merge") + "?type=users&to=alice,bob")
+            resp = self.client.get(reverse("send-mail") + "?type=users&to=alice,bob")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="mailmerge-recipient-mode" value="users"')
+        self.assertContains(resp, 'id="send-mail-recipient-mode" value="users"')
         # Deep-link should auto-load recipients on GET.
         self.assertContains(resp, "Recipient count")
         self.assertContains(resp, "2")
@@ -382,7 +382,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
-            resp = self.client.get(reverse("mail-merge") + "?type=group&to=example-group")
+            resp = self.client.get(reverse("send-mail") + "?type=group&to=example-group")
 
         self.assertEqual(resp.status_code, 200)
         # Examples should be taken from Bob (more fields filled) rather than Alice.
@@ -399,7 +399,7 @@ class MailMergeTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
 
         tpl = EmailTemplate.objects.create(
-            name="mailmerge-prefill",
+            name="send-mail-prefill",
             subject="Hello {{ email }}",
             content="Text body for {{ email }}",
             html_content="<p>HTML body for {{ email }}</p>",
@@ -409,7 +409,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
         ):
-            resp = self.client.get(reverse("mail-merge") + "?type=manual&to=jim@example.com&template=mailmerge-prefill")
+            resp = self.client.get(reverse("send-mail") + "?type=manual&to=jim@example.com&template=send-mail-prefill")
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, f'<option value="{tpl.pk}" selected>')
@@ -455,7 +455,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "group",
                     "group_cn": "example-group",
@@ -501,7 +501,7 @@ class MailMergeTests(TestCase):
             return None
 
         original = EmailTemplate.objects.create(
-            name="Original MailMerge Template",
+            name="Original Send Mail Template",
             subject="Original subject",
             content="Original text",
             html_content="<p>Original html</p>",
@@ -513,7 +513,7 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "group",
                     "group_cn": "example-group",
@@ -522,17 +522,17 @@ class MailMergeTests(TestCase):
                     "text_content": "Hi {{ full_name }}",
                     "html_content": "<p>Hi {{ full_name }}</p>",
                     "action": "save_as",
-                    "save_as_name": "New MailMerge Template",
+                    "save_as_name": "New Send Mail Template",
                 },
                 follow=True,
             )
 
         self.assertEqual(resp.status_code, 200)
-        tpl = EmailTemplate.objects.get(name="New MailMerge Template")
-        self.assertContains(resp, "New MailMerge Template")
+        tpl = EmailTemplate.objects.get(name="New Send Mail Template")
+        self.assertContains(resp, "New Send Mail Template")
         self.assertContains(resp, f'<option value="{tpl.pk}" selected>')
         self.assertNotContains(resp, f'<option value="{original.pk}" selected>')
-        self.assertContains(resp, f'id="mailmerge-autoload-template-id" value="{tpl.pk}"')
+        self.assertContains(resp, f'id="send-mail-autoload-template-id" value="{tpl.pk}"')
 
     def test_send_emails_renders_per_recipient(self) -> None:
         from post_office.models import EmailTemplate
@@ -567,7 +567,7 @@ class MailMergeTests(TestCase):
             return None
 
         EmailTemplate.objects.create(
-            name="mailmerge-test",
+            name="send-mail-test",
             subject="Hello {{ first_name }}",
             content="Hi {{ full_name }}",
             html_content="<p>Hi {{ full_name }}</p>",
@@ -577,10 +577,10 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
-            patch("core.views_mailmerge.mail.send", autospec=True) as send,
+            patch("core.views_send_mail.mail.send", autospec=True) as send,
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "group",
                     "group_cn": "example-group",
@@ -637,7 +637,7 @@ class MailMergeTests(TestCase):
             return None
 
         EmailTemplate.objects.create(
-            name="mailmerge-test",
+            name="send-mail-test",
             subject="Hello {{ first_name }}",
             content="Hi {{ full_name }}",
             html_content="<p>Hi {{ full_name }}</p>",
@@ -647,10 +647,10 @@ class MailMergeTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
-            patch("core.views_mailmerge.mail.send", autospec=True) as send,
+            patch("core.views_send_mail.mail.send", autospec=True) as send,
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "group",
                     "group_cn": "example-group",
@@ -677,10 +677,10 @@ class MailMergeTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.views_mailmerge.mail.send", autospec=True) as send,
+            patch("core.views_send_mail.mail.send", autospec=True) as send,
         ):
             resp = self.client.post(
-                reverse("mail-merge"),
+                reverse("send-mail"),
                 data={
                     "recipient_mode": "manual",
                     "manual_to": "jim@example.com",
@@ -699,7 +699,7 @@ class MailMergeTests(TestCase):
         self.assertEqual(kwargs["subject"], "Hello Atomic")
 
 
-class UnifiedEmailPreviewMailMergeTests(TestCase):
+class UnifiedEmailPreviewSendMailTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -708,7 +708,7 @@ class UnifiedEmailPreviewMailMergeTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
         FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_ADD_MAILMERGE,
+            permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name="membership-committee",
         )
@@ -719,7 +719,7 @@ class UnifiedEmailPreviewMailMergeTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("mail-merge-render-preview"),
+                reverse("send-mail-render-preview"),
                 data={
                     "subject": "Hello {{ full_name }}",
                     "html_content": "<p>{{ full_name }}</p>",

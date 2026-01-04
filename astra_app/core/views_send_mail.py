@@ -21,7 +21,7 @@ from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import user_email_context_from_user
-from core.permissions import ASTRA_ADD_MAILMERGE, json_permission_required
+from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.templated_email import (
     create_email_template_unique,
     render_template_string,
@@ -33,8 +33,8 @@ from core.templated_email import (
 logger = logging.getLogger(__name__)
 
 
-_CSV_SESSION_KEY = "mailmerge_csv_payload_v1"
-_PREVIEW_CONTEXT_SESSION_KEY = "mailmerge_preview_first_context_v1"
+_CSV_SESSION_KEY = "send_mail_csv_payload_v1"
+_PREVIEW_CONTEXT_SESSION_KEY = "send_mail_preview_first_context_v1"
 
 
 def _variable_placeholder(var_name: str) -> str:
@@ -349,7 +349,7 @@ def _parse_email_list(raw: str) -> list[str]:
     return emails
 
 
-class MailMergeForm(forms.Form):
+class SendMailForm(forms.Form):
     RECIPIENT_MODE_GROUP = "group"
     RECIPIENT_MODE_USERS = "users"
     RECIPIENT_MODE_CSV = "csv"
@@ -502,8 +502,8 @@ def _preview_for_users(usernames: list[str]) -> tuple[RecipientPreview, list[dic
     return preview, recipients
 
 
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
-def mail_merge(request: HttpRequest) -> HttpResponse:
+@permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
+def send_mail(request: HttpRequest) -> HttpResponse:
     group_choices = _group_select_choices()
     user_choices = _user_select_choices()
 
@@ -543,15 +543,15 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
         to_raw = str(request.GET.get("to") or "").strip()
         if to_raw:
             if prefill_type == "group":
-                initial["recipient_mode"] = MailMergeForm.RECIPIENT_MODE_GROUP
+                initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_GROUP
                 initial["group_cn"] = to_raw
                 deep_link_autoload_recipients = True
             elif prefill_type == "manual":
-                initial["recipient_mode"] = MailMergeForm.RECIPIENT_MODE_MANUAL
+                initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_MANUAL
                 initial["manual_to"] = to_raw
                 deep_link_autoload_recipients = True
             elif prefill_type == "users":
-                initial["recipient_mode"] = MailMergeForm.RECIPIENT_MODE_USERS
+                initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_USERS
                 initial["user_usernames"] = _parse_username_list(to_raw)
                 deep_link_autoload_recipients = True
 
@@ -559,7 +559,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
             initial["extra_context_json"] = json.dumps(extra_context)
 
     if request.method == "POST":
-        form = MailMergeForm(request.POST, request.FILES, group_choices=group_choices, user_choices=user_choices)
+        form = SendMailForm(request.POST, request.FILES, group_choices=group_choices, user_choices=user_choices)
         if form.is_valid():
             group_cn = str(form.cleaned_data.get("group_cn") or "").strip()
             csv_file = form.cleaned_data.get("csv_file")
@@ -573,11 +573,11 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
             posted_extra_context = form.cleaned_data.get("extra_context_json") or {}
 
             try:
-                if recipient_mode == MailMergeForm.RECIPIENT_MODE_GROUP:
+                if recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:
                     if not group_cn:
                         raise ValueError("Select a group.")
                     preview, recipients = _preview_for_group(group_cn)
-                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_CSV:
+                elif recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
                     if csv_file is not None:
                         preview, recipients, header_to_var = _parse_csv_upload(csv_file)
                         request.session[_CSV_SESSION_KEY] = json.dumps(
@@ -594,11 +594,11 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                         if not isinstance(payload, dict):
                             raise ValueError("Upload a CSV.")
                         preview, recipients = _preview_from_csv_session_payload(payload)
-                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_MANUAL:
+                elif recipient_mode == SendMailForm.RECIPIENT_MODE_MANUAL:
                     if not manual_to:
                         raise ValueError("Add one or more recipient email addresses.")
                     preview, recipients = _preview_for_manual(list(manual_to))
-                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_USERS:
+                elif recipient_mode == SendMailForm.RECIPIENT_MODE_USERS:
                     if not user_usernames:
                         raise ValueError("Select one or more users.")
                     preview, recipients = _preview_for_users(list(user_usernames))
@@ -674,7 +674,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                             sent += 1
                         except Exception:
                             failures += 1
-                            logger.exception("Mail merge send failed email=%s", to_email)
+                            logger.exception("Send mail failed email=%s", to_email)
 
                     if sent:
                         messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")
@@ -710,7 +710,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                 initial["user_usernames"] = request.POST.getlist("user_usernames")
             form.initial.update(initial)
     else:
-        form = MailMergeForm(initial=initial, group_choices=group_choices, user_choices=user_choices)
+        form = SendMailForm(initial=initial, group_choices=group_choices, user_choices=user_choices)
         selected_recipient_mode = str(initial.get("recipient_mode") or "").strip().lower()
 
         # Deep-links should be able to preconfigure and immediately load recipients.
@@ -718,18 +718,18 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
         if deep_link_autoload_recipients:
             try:
                 recipient_mode = str(initial.get("recipient_mode") or "").strip().lower()
-                if recipient_mode == MailMergeForm.RECIPIENT_MODE_GROUP:
+                if recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:
                     group_cn = str(initial.get("group_cn") or "").strip()
                     if not group_cn:
                         raise ValueError("Select a group.")
                     preview, recipients = _preview_for_group(group_cn)
-                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_MANUAL:
+                elif recipient_mode == SendMailForm.RECIPIENT_MODE_MANUAL:
                     manual_to_raw = str(initial.get("manual_to") or "")
                     manual_to = _parse_email_list(manual_to_raw)
                     if not manual_to:
                         raise ValueError("Add one or more recipient email addresses.")
                     preview, recipients = _preview_for_manual(manual_to)
-                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_USERS:
+                elif recipient_mode == SendMailForm.RECIPIENT_MODE_USERS:
                     raw_usernames = initial.get("user_usernames")
                     if isinstance(raw_usernames, list):
                         usernames = [str(u) for u in raw_usernames]
@@ -778,7 +778,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
 
     return render(
         request,
-        "core/mail_merge.html",
+        "core/send_mail.html",
         {
             "form": form,
             "templates": templates,
@@ -793,8 +793,8 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
-@json_permission_required(ASTRA_ADD_MAILMERGE)
-def mail_merge_render_preview(request: HttpRequest) -> JsonResponse:
+@json_permission_required(ASTRA_ADD_SEND_MAIL)
+def send_mail_render_preview(request: HttpRequest) -> JsonResponse:
     raw_context = request.session.get(_PREVIEW_CONTEXT_SESSION_KEY)
     if not raw_context:
         return JsonResponse({"error": "Load recipients first."}, status=400)

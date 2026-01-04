@@ -11,7 +11,7 @@ from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods, require_POST, require_safe
 from post_office.models import EmailTemplate
 
-from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_MAILMERGE, json_permission_required_any
+from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
     create_email_template_unique,
     email_template_to_dict,
@@ -21,7 +21,7 @@ from core.templated_email import (
     update_email_template,
 )
 
-_MANAGE_TEMPLATE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_ELECTION, ASTRA_ADD_MAILMERGE})
+_MANAGE_TEMPLATE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL})
 
 
 class EmailTemplateManageForm(forms.Form):
@@ -48,14 +48,14 @@ class EmailTemplateManageForm(forms.Form):
 
 
 @require_safe
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
+@permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_templates(request: HttpRequest):
     templates = list(EmailTemplate.objects.all().order_by("name"))
     return render(request, "core/email_templates.html", {"templates": templates})
 
 
 @require_http_methods(["GET", "POST"])
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
+@permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_template_create(request: HttpRequest):
     rendered_preview = {"html": "", "text": "", "subject": ""}
     available_variables: list[tuple[str, str]] = []
@@ -112,7 +112,7 @@ def email_template_create(request: HttpRequest):
 
 
 @require_http_methods(["GET", "POST"])
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
+@permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_template_edit(request: HttpRequest, template_id: int):
     tpl = EmailTemplate.objects.filter(pk=template_id).first()
     if tpl is None:
@@ -197,7 +197,7 @@ def email_template_edit(request: HttpRequest, template_id: int):
 
 
 @require_POST
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
+@permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_template_delete(request: HttpRequest, template_id: int):
     tpl = EmailTemplate.objects.filter(pk=template_id).first()
     if tpl is None:
@@ -224,7 +224,7 @@ def email_template_json(request: HttpRequest, template_id: int) -> JsonResponse:
 
 
 @require_POST
-@permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
+@permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_template_render_preview(request: HttpRequest) -> JsonResponse:
     return render_templated_email_preview_response(request=request, context={})
 
