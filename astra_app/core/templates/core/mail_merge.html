@@ -3,6 +3,35 @@
 
 {% block title %}Mail Merge{% endblock %}
 
+{% block extra_head %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+  <style>
+    /* Select2 default theme needs small tweaks to match AdminLTE/Bootstrap form-control sizing. */
+    .select2-container {
+      width: 100% !important;
+    }
+
+    .select2-container--default .select2-selection--multiple {
+      min-height: calc(1.5em + 0.75rem + 2px);
+      border: 1px solid #ced4da;
+      border-radius: 0.25rem;
+    }
+
+    .select2-container--default.select2-container--focus .select2-selection--multiple {
+      border-color: #80bdff;
+      box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+
+    /* Select2 multiple "pill" text should be readable on light theme. */
+    .select2-container--default .select2-selection--multiple .select2-selection__choice,
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__display,
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+      color: #000;
+    }
+  </style>
+{% endblock %}
+
 {% block header %}
   <h1 class="m-0">Mail Merge</h1>
 {% endblock %}
@@ -24,7 +53,8 @@
 
     <input type="hidden" name="action" id="mailmerge-action" value="" />
     <input type="hidden" name="save_as_name" id="mailmerge-save-as-name" value="" />
-    <input type="hidden" name="recipient_mode" id="mailmerge-recipient-mode" value="" />
+    <input type="hidden" name="recipient_mode" id="mailmerge-recipient-mode" value="{% if selected_recipient_mode %}{{ selected_recipient_mode }}{% endif %}" />
+    {{ form.extra_context_json }}
     <input type="hidden" id="mailmerge-has-saved-csv" value="{% if has_saved_csv_recipients %}1{% else %}0{% endif %}" />
     <input type="hidden" id="mailmerge-autoload-template-id" value="{% if created_template_id %}{{ created_template_id }}{% endif %}" />
 
@@ -37,47 +67,125 @@
           <div class="card-body">
             <div class="row">
               <div class="col-md-6">
-                <div class="accordion" id="mailmerge-recipients-accordion">
-                  <div class="card">
-                    <div class="card-header" id="mailmerge-heading-group">
-                      <h2 class="mb-0">
-                        <button class="btn btn-link" type="button" data-toggle="collapse" data-target="#mailmerge-collapse-group" aria-expanded="true" aria-controls="mailmerge-collapse-group">
-                          Recipients from Group
-                        </button>
-                      </h2>
-                    </div>
-
-                    <div id="mailmerge-collapse-group" class="collapse show" aria-labelledby="mailmerge-heading-group" data-parent="#mailmerge-recipients-accordion">
-                      <div class="card-body">
-                        <div class="form-group mb-0">
-                          <label for="id_group_cn">Group</label>
-                          {{ form.group_cn }}
-                          <small class="form-text text-muted">Includes nested group members.</small>
-                        </div>
+                <ul class="nav nav-tabs" id="mailmerge-recipient-tabs" role="tablist">
+                  <li class="nav-item">
+                    <a
+                      class="nav-link {% if selected_recipient_mode == 'csv' or selected_recipient_mode == 'manual' or selected_recipient_mode == 'users' %}{% else %}active{% endif %}"
+                      id="mailmerge-recipients-group-tab"
+                      data-toggle="pill"
+                      href="#mailmerge-recipients-group"
+                      role="tab"
+                      aria-controls="mailmerge-recipients-group"
+                      aria-selected="true"
+                      data-recipient-mode="group"
+                    >Group</a>
+                  </li>
+                  <li class="nav-item">
+                    <a
+                      class="nav-link {% if selected_recipient_mode == 'users' %}active{% endif %}"
+                      id="mailmerge-recipients-users-tab"
+                      data-toggle="pill"
+                      href="#mailmerge-recipients-users"
+                      role="tab"
+                      aria-controls="mailmerge-recipients-users"
+                      aria-selected="false"
+                      data-recipient-mode="users"
+                    >Users</a>
+                  </li>
+                  <li class="nav-item">
+                    <a
+                      class="nav-link {% if selected_recipient_mode == 'csv' %}active{% endif %}"
+                      id="mailmerge-recipients-csv-tab"
+                      data-toggle="pill"
+                      href="#mailmerge-recipients-csv"
+                      role="tab"
+                      aria-controls="mailmerge-recipients-csv"
+                      aria-selected="false"
+                      data-recipient-mode="csv"
+                    >CSV file</a>
+                  </li>
+                  <li class="nav-item">
+                    <a
+                      class="nav-link {% if selected_recipient_mode == 'manual' %}active{% endif %}"
+                      id="mailmerge-recipients-manual-tab"
+                      data-toggle="pill"
+                      href="#mailmerge-recipients-manual"
+                      role="tab"
+                      aria-controls="mailmerge-recipients-manual"
+                      aria-selected="false"
+                      data-recipient-mode="manual"
+                    >Manual</a>
+                  </li>
+                </ul>
+                <div class="tab-content mb-3" id="mailmerge-recipient-tab-content">
+                  <div
+                    class="tab-pane fade {% if selected_recipient_mode == 'csv' or selected_recipient_mode == 'manual' or selected_recipient_mode == 'users' %}{% else %}active show{% endif %}"
+                    id="mailmerge-recipients-group"
+                    role="tabpanel"
+                    aria-labelledby="mailmerge-recipients-group-tab"
+                  >
+                    <div class="mt-3">
+                      <div class="form-group mb-0">
+                        <label for="id_group_cn">Group</label>
+                        {{ form.group_cn }}
+                        <small class="form-text text-muted">Includes nested group members.</small>
                       </div>
                     </div>
                   </div>
-
-                  <div class="card">
-                    <div class="card-header" id="mailmerge-heading-csv">
-                      <h2 class="mb-0">
-                        <button class="btn btn-link collapsed" type="button" data-toggle="collapse" data-target="#mailmerge-collapse-csv" aria-expanded="false" aria-controls="mailmerge-collapse-csv">
-                          Recipients from CSV file
-                        </button>
-                      </h2>
+                  <div
+                    class="tab-pane fade {% if selected_recipient_mode == 'users' %}active show{% endif %}"
+                    id="mailmerge-recipients-users"
+                    role="tabpanel"
+                    aria-labelledby="mailmerge-recipients-users-tab"
+                  >
+                    <div class="mt-3">
+                      <div class="form-group mb-0">
+                        <label for="id_user_usernames">Users</label>
+                        {{ form.user_usernames }}
+                        <small class="form-text text-muted">Select one or more users.</small>
+                      </div>
                     </div>
+                  </div>
+                  <div
+                    class="tab-pane fade {% if selected_recipient_mode == 'csv' %}active show{% endif %}"
+                    id="mailmerge-recipients-csv"
+                    role="tabpanel"
+                    aria-labelledby="mailmerge-recipients-csv-tab"
+                  >
+                    <div class="mt-3">
+                      <div class="form-group mb-0">
+                        <label for="id_csv_file">Upload CSV</label>
+                        {{ form.csv_file }}
+                        <small class="form-text text-muted">CSV should include an Email column. If you previously uploaded a CSV, you can leave this blank to reuse it.</small>
+                      </div>
 
-                    <div id="mailmerge-collapse-csv" class="collapse" aria-labelledby="mailmerge-heading-csv" data-parent="#mailmerge-recipients-accordion">
-                      <div class="card-body">
-                        <div class="form-group mb-0">
-                          <label for="id_csv_file">Upload CSV</label>
-                          {{ form.csv_file }}
-                          <small class="form-text text-muted">CSV should include an Email column. If you previously uploaded a CSV, you can leave this blank to reuse it.</small>
-                        </div>
+                      <button
+                        type="submit"
+                        class="mt-3 btn btn-primary"
+                        id="mailmerge-load-file-btn"
+                        onclick="document.getElementById('mailmerge-action').value='preview'"
+                      >
+                        Load file
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    class="tab-pane fade {% if selected_recipient_mode == 'manual' %}active show{% endif %}"
+                    id="mailmerge-recipients-manual"
+                    role="tabpanel"
+                    aria-labelledby="mailmerge-recipients-manual-tab"
+                  >
+                    <div class="mt-3">
+                      <div class="form-group mb-0">
+                        <label for="id_manual_to">To</label>
+                        {{ form.manual_to }}
+                        <small class="form-text text-muted">Comma-separated email addresses.</small>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                <div class="alert alert-warning mt-2 d-none" id="mailmerge-recipients-inline-warning" role="alert"></div>
 
                 <div class="mb-2">
                   <a class="text-muted" id="mailmerge-extra-options-toggle" data-toggle="collapse" href="#mailmerge-extra-options" role="button" aria-expanded="false" aria-controls="mailmerge-extra-options">
@@ -99,22 +207,19 @@
                     </div>
                   </div>
                 </div>
-
-                <button type="submit" class="mt-2 btn btn-primary" id="mailmerge-load-recipients-btn" onclick="document.getElementById('mailmerge-action').value='preview'">
-                  Load recipients
-                </button>
-
-                <div class="alert alert-warning mt-2 d-none" id="mailmerge-recipients-inline-warning" role="alert"></div>
               </div>
 
               <div class="col-md-6">
                 <div class="alert alert-info mb-3">
-                  <strong>Recipient count:</strong>
-                  {% if preview %}
-                    {{ preview.recipient_count }}
-                  {% else %}
-                    0
-                  {% endif %}
+                  Recipient count:
+                  <strong>
+                    <span
+                      id="mailmerge-recipient-count"
+                      data-server-count="{% if preview %}{{ preview.recipient_count }}{% else %}0{% endif %}"
+                    >
+                      {% if preview %}{{ preview.recipient_count }}{% else %}0{% endif %}
+                    </span>
+                  </strong>
                 </div>
 
               </div>
@@ -139,8 +244,8 @@
           </div>
           <div class="card-body d-flex align-items-center justify-content-center flex-wrap">
             <div>
-              <button type="submit" class="btn btn-danger" onclick="document.getElementById('mailmerge-action').value='send'" {% if not preview or preview.recipient_count == 0 %}disabled{% endif %}>
-                Send {% if preview %}<b>{{ preview.recipient_count }}</b>{% else %}0{% endif %} Email{% if preview %}{{ preview.recipient_count|pluralize }}{% else %}s{% endif %}
+              <button type="button" class="btn btn-danger" id="mailmerge-send-btn" {% if not preview or preview.recipient_count == 0 %}disabled{% endif %}>
+                Send <b><span id="mailmerge-send-count" data-server-count="{{ preview.recipient_count }}">{{ preview.recipient_count }}</span></b> Email{{ preview.recipient_count|pluralize }}
               </button>
             </div>
           </div>
@@ -149,5 +254,35 @@
     </div>
   </form>
 
+  <div
+    class="modal fade"
+    id="mailmerge-send-confirm-modal"
+    tabindex="-1"
+    role="dialog"
+    aria-hidden="true"
+  >
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Send emails?</h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">Queue {{ preview.recipient_count }} email{{ preview.recipient_count|pluralize }} for delivery using the current recipients and message contents?</div>
+          <div class="d-flex justify-content-between">
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+            <button type="button" class="btn btn-danger" id="mailmerge-send-confirm-btn">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
   <script src="{% static 'core/js/mailmerge.js' %}"></script>
 {% endblock %}

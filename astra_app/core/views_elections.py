@@ -270,7 +270,7 @@ def election_eligible_users_search(request, election_id: int):
             # during a request. Eligibility is computed from local DB state, so
             # degrade gracefully by returning usernames without full names.
             user = None
-        full_name = user.get_full_name() if user is not None else ""
+        full_name = user.full_name if user is not None else ""
         text = username
         if full_name and full_name != username:
             text = f"{full_name} ({username})"
@@ -340,7 +340,7 @@ def election_nomination_users_search(request, election_id: int):
             user = FreeIPAUser.get(username)
         except Exception:
             user = None
-        full_name = user.get_full_name() if user is not None else ""
+        full_name = user.full_name if user is not None else ""
         text = username
         if full_name and full_name != username:
             text = f"{full_name} ({username})"
@@ -953,7 +953,7 @@ def election_detail(request, election_id: int):
 
     def _candidate_display_name(username: str) -> str:
         user = users_by_username.get(username)
-        full_name = user.get_full_name() if user is not None else ""
+        full_name = user.full_name if user is not None else ""
         full_name = str(full_name or "").strip()
         if not full_name:
             full_name = username
@@ -992,7 +992,7 @@ def election_detail(request, election_id: int):
     tally_winners: list[dict[str, str]] = []
     for c in tally_elected:
         user = users_by_username.get(c.freeipa_username)
-        full_name = user.get_full_name() if user is not None else c.freeipa_username
+        full_name = user.full_name if user is not None else c.freeipa_username
         tally_winners.append({"username": c.freeipa_username, "full_name": full_name})
 
     empty_seats = election.number_of_seats - len(tally_elected)
@@ -1886,7 +1886,7 @@ def election_vote(request, election_id: int):
     candidate_display: list[dict[str, object]] = []
     for c in candidates:
         user = users_by_username.get(c.freeipa_username)
-        full_name = user.get_full_name() if user is not None else c.freeipa_username
+        full_name = user.full_name if user is not None else c.freeipa_username
         label = f"{full_name} ({c.freeipa_username})"
         candidate_display.append({"candidate": c, "label": label})
 

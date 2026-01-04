@@ -28,7 +28,7 @@ class FASIsPrivateAnonymizeTests(TestCase):
         finally:
             clear_current_viewer_username()
 
-        self.assertEqual(bob.get_full_name(), "bob")
+        self.assertEqual(bob.full_name, "bob")
         self.assertNotIn("fasPronoun", bob._user_data)
 
     def test_private_user_cache_is_not_poisoned_by_other_viewer(self) -> None:
@@ -51,7 +51,7 @@ class FASIsPrivateAnonymizeTests(TestCase):
                 bob_for_alice = FreeIPAUser.get("bob")
                 self.assertIsNotNone(bob_for_alice)
                 assert bob_for_alice is not None
-                self.assertEqual(bob_for_alice.get_full_name(), "bob")
+                self.assertEqual(bob_for_alice.full_name, "bob")
             finally:
                 clear_current_viewer_username()
 
@@ -61,7 +61,7 @@ class FASIsPrivateAnonymizeTests(TestCase):
                 bob_for_bob = FreeIPAUser.get("bob")
                 self.assertIsNotNone(bob_for_bob)
                 assert bob_for_bob is not None
-                self.assertEqual(bob_for_bob.get_full_name(), "Bob User")
+                self.assertEqual(bob_for_bob.full_name, "Bob User")
             finally:
                 clear_current_viewer_username()
         finally:

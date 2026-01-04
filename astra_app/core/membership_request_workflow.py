@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
+from core.email_context import organization_sponsor_email_context, user_email_context_from_user
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, OrganizationSponsorship
 
 logger = logging.getLogger(__name__)
@@ -160,7 +161,7 @@ def record_membership_request_created(
                         sender=settings.DEFAULT_FROM_EMAIL,
                         template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
                         context={
-                            "username": target.username,
+                            **user_email_context_from_user(user=target),
                             "membership_type": membership_type.name,
                             "membership_type_code": membership_type.code,
                         },
@@ -374,6 +375,7 @@ def approve_membership_request(
                     template=template_name,
                     context={
                         "organization_name": org.name,
+                        **organization_sponsor_email_context(organization=org),
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
                     },
@@ -547,7 +549,7 @@ def approve_membership_request(
                 sender=settings.DEFAULT_FROM_EMAIL,
                 template=template_name,
                 context={
-                    "username": target.username,
+                    **user_email_context_from_user(user=target),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
                     "group_cn": membership_type.group_cn,

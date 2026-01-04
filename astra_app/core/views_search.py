@@ -18,7 +18,7 @@ def global_search(request: HttpRequest) -> JsonResponse:
         if not u.username:
             continue
 
-        full_name = u.get_full_name()
+        full_name = u.full_name
         if q_lower not in u.username.lower() and q_lower not in full_name.lower():
             continue
 

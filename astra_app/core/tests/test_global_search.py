@@ -23,9 +23,9 @@ class GlobalSearchTests(TestCase):
         self._login_as_freeipa("admin")
 
         users = [
-            SimpleNamespace(username="jim", get_full_name=lambda: "Jim Jones"),
-            SimpleNamespace(username="jimbo", get_full_name=lambda: "Jimbo Jones"),
-            SimpleNamespace(username="bob", get_full_name=lambda: "Bob User"),
+            SimpleNamespace(username="jim", full_name="Jim Jones"),
+            SimpleNamespace(username="jimbo", full_name="Jimbo Jones"),
+            SimpleNamespace(username="bob", full_name="Bob User"),
         ]
 
         groups = [
@@ -52,7 +52,7 @@ class GlobalSearchTests(TestCase):
         self._login_as_freeipa("admin")
 
         with (
-            patch("core.backends.FreeIPAUser.all", return_value=[SimpleNamespace(username="alice", get_full_name=lambda: "")]),
+            patch("core.backends.FreeIPAUser.all", return_value=[SimpleNamespace(username="alice", full_name="")]),
             patch("core.backends.FreeIPAGroup.all", return_value=[SimpleNamespace(cn="fas1", description="", fas_group=True)]),
         ):
             resp = self.client.get("/search/?q=")

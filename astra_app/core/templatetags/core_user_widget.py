@@ -24,6 +24,17 @@ def _is_avatar_compatible_user(user: object) -> bool:
 
 
 def _try_get_full_name(user: object) -> str:
+    # This is a template tag and may receive different "user-like" objects
+    # (FreeIPAUser, Django User, stubs in tests), so use feature detection.
+    full_name = getattr(user, "full_name", None)
+    if isinstance(full_name, str):
+        return full_name.strip()
+    if full_name is not None:
+        try:
+            return str(full_name).strip()
+        except Exception:
+            return ""
+
     get_full_name = getattr(user, "get_full_name", None)
     if callable(get_full_name):
         try:

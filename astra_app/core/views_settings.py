@@ -17,6 +17,7 @@ from python_freeipa import ClientMeta
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.backends import FreeIPAFASAgreement, FreeIPAUser
+from core.email_context import user_email_context
 from core.forms_selfservice import EmailsForm, KeysForm, PasswordChangeFreeIPAForm, ProfileForm
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import (
@@ -47,9 +48,10 @@ def _send_email_validation_email(
     username: str,
     name: str,
     attr: str,
-    address: str,
+    email_to_validate: str,
 ) -> None:
-    token = make_signed_token({"u": username, "a": attr, "v": address})
+    base_ctx = user_email_context(username=username)
+    token = make_signed_token({"u": username, "a": attr, "v": email_to_validate})
     validate_url = request.build_absolute_uri(reverse("settings-email-validate")) + f"?token={quote(token)}"
     ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
@@ -57,14 +59,14 @@ def _send_email_validation_email(
     valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
 
     post_office.mail.send(
-        recipients=[address],
+        recipients=[email_to_validate],
         sender=settings.DEFAULT_FROM_EMAIL,
         template=settings.EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME,
         context={
-            "username": username,
-            "name": name or username,
+            **base_ctx,
+            "name": name or base_ctx["full_name"],
             "attr": attr,
-            "address": address,
+            "email_to_validate": email_to_validate,
             "validate_url": validate_url,
             "ttl_minutes": ttl_minutes,
             "valid_until_utc": valid_until_utc,
@@ -361,9 +363,15 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
                     messages.info(request, "No changes were applied.")
 
             if pending_validations:
-                name = fu.get_full_name()
+                name = fu.full_name
                 for attr, address in pending_validations:
-                    _send_email_validation_email(request, username=username, name=name, attr=attr, address=address)
+                    _send_email_validation_email(
+                        request,
+                        username=username,
+                        name=name,
+                        attr=attr,
+                        email_to_validate=address,
+                    )
 
                 messages.success(
                     request,

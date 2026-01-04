@@ -19,6 +19,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
+from core.email_context import organization_sponsor_email_context, user_email_context_from_user
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
@@ -315,7 +316,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             )
         else:
             fu = FreeIPAUser.get(r.requested_username)
-            full_name = fu.get_full_name() if fu is not None else ""
+            full_name = fu.full_name if fu is not None else ""
             status_note = fu.fasstatusnote if fu is not None else ""
             request_rows.append(
                 {
@@ -357,7 +358,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if target_user is None:
             target_user_deleted = True
         else:
-            target_full_name = target_user.get_full_name()
+            target_full_name = target_user.full_name
             target_email = target_user.email or ""
     else:
         org = req.requested_organization
@@ -590,7 +591,7 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
                     context={
-                        "username": target.username,
+                        **user_email_context_from_user(user=target),
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
                         "rejection_reason": reason,
@@ -764,6 +765,7 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
                 template=reject_template,
                 context={
                     "organization_name": org.name if org is not None else (req.requested_organization_name or ""),
+                    **(organization_sponsor_email_context(organization=org) if org is not None else {}),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
                     "rejection_reason": reason,
@@ -813,7 +815,7 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
             sender=settings.DEFAULT_FROM_EMAIL,
             template=reject_template,
             context={
-                "username": target.username,
+                **user_email_context_from_user(user=target),
                 "membership_type": membership_type.name,
                 "membership_type_code": membership_type.code,
                 "rejection_reason": reason,

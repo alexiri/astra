@@ -12,7 +12,7 @@ from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.validators import validate_email
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import render
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
@@ -20,6 +20,7 @@ from post_office import mail
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.email_context import user_email_context_from_user
 from core.permissions import ASTRA_ADD_MAILMERGE, json_permission_required
 from core.templated_email import (
     create_email_template_unique,
@@ -36,11 +37,51 @@ _CSV_SESSION_KEY = "mailmerge_csv_payload_v1"
 _PREVIEW_CONTEXT_SESSION_KEY = "mailmerge_preview_first_context_v1"
 
 
+def _variable_placeholder(var_name: str) -> str:
+    return f"-{var_name}-"
+
+
 @dataclass(frozen=True)
 class RecipientPreview:
     variables: list[tuple[str, str]]
     recipient_count: int
     first_context: dict[str, str]
+
+
+def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[str]) -> dict[str, str]:
+    if not recipients:
+        return {var: _variable_placeholder(var) for var in var_names}
+
+    best: dict[str, str] = recipients[0]
+    best_score = -1
+
+    for ctx in recipients:
+        score = 0
+        for var in var_names:
+            if str(ctx.get(var, "") or "").strip():
+                score += 1
+        if score > best_score:
+            best = ctx
+            best_score = score
+            if best_score >= len(var_names):
+                break
+
+    filled = dict(best)
+    for var in var_names:
+        value = str(filled.get(var, "") or "").strip()
+        if not value:
+            filled[var] = _variable_placeholder(var)
+    return filled
+
+
+def _preview_from_recipients(*, recipients: list[dict[str, str]], var_names: list[str]) -> RecipientPreview:
+    example_context = _best_example_context(recipients=recipients, var_names=var_names)
+    variables = [(v, str(example_context.get(v, ""))) for v in var_names]
+    return RecipientPreview(
+        variables=variables,
+        recipient_count=len(recipients),
+        first_context=example_context,
+    )
 
 
 def _normalize_identifier(value: str) -> str:
@@ -67,17 +108,82 @@ def _unique_identifiers(names: Iterable[str]) -> list[str]:
     return out
 
 
-def _context_for_freeipa_user(user: FreeIPAUser) -> dict[str, str]:
-    return {
-        "username": str(user.username or ""),
-        "email": str(user.email or ""),
-        "first_name": str(user.first_name or ""),
-        "last_name": str(user.last_name or ""),
-        "displayname": str(user.displayname or ""),
-        "gecos": str(user.gecos or ""),
-        "commonname": str(user.commonname or ""),
-        "full_name": str(user.get_full_name() or ""),
+def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
+    reserved = {
+        "template",
+        "type",
+        "to",
     }
+
+    raw_items: list[tuple[str, str]] = []
+    for key, values in query.lists():
+        skey = str(key or "").strip()
+        if not skey or skey in reserved:
+            continue
+        cleaned_values = [str(v or "").strip() for v in values]
+        joined = ", ".join([v for v in cleaned_values if v])
+        if not joined:
+            continue
+        raw_items.append((skey, joined))
+
+    extra: dict[str, str] = {}
+    used: set[str] = set()
+    for key, value in raw_items:
+        base = _normalize_identifier(key)
+        candidate = base
+        n = 2
+        while candidate in used:
+            candidate = f"{base}_{n}"
+            n += 1
+        used.add(candidate)
+        extra[candidate] = value
+
+    return extra
+
+
+def _apply_extra_context(
+    *,
+    preview: RecipientPreview | None,
+    recipients: list[dict[str, str]],
+    extra_context: dict[str, str],
+) -> tuple[RecipientPreview | None, list[dict[str, str]]]:
+    if not extra_context:
+        return preview, recipients
+
+    merged_recipients: list[dict[str, str]] = []
+    for recipient in recipients:
+        merged = dict(recipient)
+        for k, v in extra_context.items():
+            # Do not override recipient-provided values.
+            if k not in merged:
+                merged[k] = v
+        merged_recipients.append(merged)
+
+    base_var_names: list[str]
+    if preview is not None and preview.variables:
+        base_var_names = [v for v, _example in preview.variables]
+    elif recipients:
+        base_var_names = list(recipients[0].keys())
+    else:
+        base_var_names = []
+
+    var_names = list(base_var_names)
+    for v in extra_context.keys():
+        if v not in var_names:
+            var_names.append(v)
+
+    if preview is None:
+        return preview, merged_recipients
+
+    if not merged_recipients:
+        example_context = {v: str(extra_context.get(v) or _variable_placeholder(v)) for v in var_names}
+        variables = [(v, str(example_context.get(v, ""))) for v in var_names]
+        return (
+            RecipientPreview(variables=variables, recipient_count=0, first_context=example_context),
+            merged_recipients,
+        )
+
+    return _preview_from_recipients(recipients=merged_recipients, var_names=var_names), merged_recipients
 
 
 def _preview_for_group(group_cn: str) -> tuple[RecipientPreview, list[dict[str, str]]]:
@@ -91,25 +197,13 @@ def _preview_for_group(group_cn: str) -> tuple[RecipientPreview, list[dict[str, 
         user = FreeIPAUser.get(username)
         if user is None:
             continue
-        ctx = _context_for_freeipa_user(user)
+        ctx = user_email_context_from_user(user=user)
         if not ctx["email"].strip():
             continue
         recipients.append(ctx)
 
-    variables = [
-        ("username", recipients[0]["username"] if recipients else ""),
-        ("displayname", recipients[0]["displayname"] if recipients else ""),
-        ("first_name", recipients[0]["first_name"] if recipients else ""),
-        ("last_name", recipients[0]["last_name"] if recipients else ""),
-        ("email", recipients[0]["email"] if recipients else ""),
-        ("full_name", recipients[0]["full_name"] if recipients else ""),
-    ]
-
-    preview = RecipientPreview(
-        variables=variables,
-        recipient_count=len(recipients),
-        first_context=recipients[0] if recipients else {},
-    )
+    var_names = ["username", "first_name", "last_name", "email", "full_name"]
+    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
     return preview, recipients
 
 
@@ -159,9 +253,7 @@ def _parse_csv_upload(file_obj) -> tuple[RecipientPreview, list[dict[str, str]],
             continue
         recipients.append(ctx)
 
-    first = recipients[0] if recipients else {}
-    variables = [(v, first.get(v, "")) for v in var_names]
-    preview = RecipientPreview(variables=variables, recipient_count=len(recipients), first_context=first)
+    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
     return preview, recipients, header_to_var
 
 
@@ -181,6 +273,7 @@ def _preview_from_csv_session_payload(payload: dict[str, object]) -> tuple[Recip
         return preview, recipients
 
     first = recipients[0]
+
     # Preserve variable order if we have a mapping; otherwise show keys from first row.
     header_to_var_raw = payload.get("header_to_var")
     if isinstance(header_to_var_raw, dict):
@@ -198,8 +291,7 @@ def _preview_from_csv_session_payload(payload: dict[str, object]) -> tuple[Recip
         seen.add(sv)
         var_names.append(sv)
 
-    variables = [(v, first.get(v, "")) for v in var_names]
-    preview = RecipientPreview(variables=variables, recipient_count=len(recipients), first_context=first)
+    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
     return preview, recipients
 
 
@@ -218,30 +310,81 @@ def _group_select_choices() -> list[tuple[str, str]]:
     return choices
 
 
-def _parse_email_list(raw: str) -> list[str]:
-    items = [s.strip() for s in str(raw or "").split(",")]
-    emails: list[str] = []
-    for item in items:
-        if not item:
+def _user_select_choices() -> list[tuple[str, str]]:
+    users = FreeIPAUser.all()
+    users_sorted = sorted(users, key=lambda u: str(u.username).lower())
+    choices: list[tuple[str, str]] = []
+    for u in users_sorted:
+        username = str(u.username or "").strip()
+        if not username:
             continue
-        validate_email(item)
-        emails.append(item)
+        full_name = str(u.full_name or "").strip()
+        if full_name and full_name.lower() != username.lower():
+            label = f"{username} — {full_name}"
+        else:
+            label = username
+        choices.append((username, label))
+    return choices
+
+
+def _parse_username_list(raw: str) -> list[str]:
+    items = [s.strip() for s in str(raw or "").split(",")]
+    out: list[str] = []
+    for item in items:
+        if item:
+            out.append(item)
+    return out
+
+
+def _parse_email_list(raw: str) -> list[str]:
+    # Be liberal in what we accept here: users often paste addresses
+    # separated by commas, whitespace/newlines, or semicolons.
+    tokens = re.split(r"[,\s;]+", str(raw or "").strip())
+    emails: list[str] = []
+    for token in tokens:
+        if not token:
+            continue
+        validate_email(token)
+        emails.append(token)
     return emails
 
 
 class MailMergeForm(forms.Form):
     RECIPIENT_MODE_GROUP = "group"
+    RECIPIENT_MODE_USERS = "users"
     RECIPIENT_MODE_CSV = "csv"
+    RECIPIENT_MODE_MANUAL = "manual"
 
     recipient_mode = forms.ChoiceField(
         required=False,
-        choices=[(RECIPIENT_MODE_GROUP, "Group"), (RECIPIENT_MODE_CSV, "CSV")],
+        choices=[
+            (RECIPIENT_MODE_GROUP, "Group"),
+            (RECIPIENT_MODE_USERS, "Users"),
+            (RECIPIENT_MODE_CSV, "CSV"),
+            (RECIPIENT_MODE_MANUAL, "Manual"),
+        ],
     )
 
     group_cn = forms.ChoiceField(required=False, choices=[], widget=forms.Select(attrs={"class": "form-control"}))
+
+    user_usernames = forms.MultipleChoiceField(
+        required=False,
+        choices=[],
+        widget=forms.SelectMultiple(attrs={"class": "form-control alx-select2", "multiple": "multiple"}),
+    )
     csv_file = forms.FileField(
         required=False,
         widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".csv,text/csv"}),
+    )
+
+    manual_to = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "clara@example.com, alex@example.com",
+            }
+        ),
     )
 
     cc = forms.CharField(
@@ -267,9 +410,13 @@ class MailMergeForm(forms.Form):
     action = forms.CharField(required=False)
     save_as_name = forms.CharField(required=False)
 
+    extra_context_json = forms.CharField(required=False, widget=forms.HiddenInput())
+
     def __init__(self, *args, group_choices: list[tuple[str, str]] | None = None, **kwargs):
+        user_choices: list[tuple[str, str]] | None = kwargs.pop("user_choices", None)
         super().__init__(*args, **kwargs)
         self.fields["group_cn"].choices = group_choices or [("", "(Select a group)")]
+        self.fields["user_usernames"].choices = user_choices or []
 
     def clean_cc(self) -> list[str]:
         try:
@@ -283,10 +430,82 @@ class MailMergeForm(forms.Form):
         except Exception as e:
             raise forms.ValidationError(f"Invalid BCC address list: {e}") from e
 
+    def clean_manual_to(self) -> list[str]:
+        try:
+            return _parse_email_list(str(self.cleaned_data.get("manual_to") or ""))
+        except Exception as e:
+            raise forms.ValidationError(f"Invalid manual recipient list: {e}") from e
+
+    def clean_user_usernames(self) -> list[str]:
+        raw = self.cleaned_data.get("user_usernames")
+        if raw is None:
+            return []
+        return [str(v) for v in raw]
+
+    def clean_extra_context_json(self) -> dict[str, str]:
+        raw = str(self.cleaned_data.get("extra_context_json") or "").strip()
+        if not raw:
+            return {}
+
+        try:
+            parsed = json.loads(raw)
+        except Exception as e:
+            raise forms.ValidationError(f"Invalid extra context: {e}") from e
+
+        if not isinstance(parsed, dict):
+            raise forms.ValidationError("Invalid extra context: expected JSON object")
+
+        out: dict[str, str] = {}
+        for k, v in parsed.items():
+            key = _normalize_identifier(str(k))
+            value = str(v or "").strip()
+            if not value:
+                continue
+            out[key] = value
+        return out
+
+
+def _preview_for_manual(emails: list[str]) -> tuple[RecipientPreview, list[dict[str, str]]]:
+    recipients: list[dict[str, str]] = []
+    for email in emails:
+        recipients.append(
+            {
+                "username": "",
+                "first_name": "",
+                "last_name": "",
+                "full_name": "",
+                "email": str(email or "").strip(),
+            }
+        )
+
+    var_names = ["username", "first_name", "last_name", "email", "full_name"]
+    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
+    return preview, recipients
+
+
+def _preview_for_users(usernames: list[str]) -> tuple[RecipientPreview, list[dict[str, str]]]:
+    recipients: list[dict[str, str]] = []
+    for username in usernames:
+        normalized = str(username or "").strip()
+        if not normalized:
+            continue
+        user = FreeIPAUser.get(normalized)
+        if user is None:
+            continue
+        ctx = user_email_context_from_user(user=user)
+        if not ctx["email"].strip():
+            continue
+        recipients.append(ctx)
+
+    var_names = ["username", "first_name", "last_name", "email", "full_name"]
+    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
+    return preview, recipients
+
 
 @permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
 def mail_merge(request: HttpRequest) -> HttpResponse:
     group_choices = _group_select_choices()
+    user_choices = _user_select_choices()
 
     created_template_id: int | None = None
 
@@ -295,16 +514,63 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
     header_to_var: dict[str, str] | None = None
 
     initial: dict[str, object] = {}
+    selected_recipient_mode = ""
+    deep_link_autoload_recipients = False
+    extra_context = _extra_context_from_query(request.GET)
+
+    if request.method != "POST":
+        template_key = str(request.GET.get("template") or "").strip()
+        if template_key:
+            selected_template: EmailTemplate | None = None
+            if template_key.isdigit():
+                selected_template = EmailTemplate.objects.filter(pk=int(template_key)).first()
+            if selected_template is None:
+                selected_template = EmailTemplate.objects.filter(name=template_key).first()
+
+            if selected_template is None:
+                messages.error(request, f"Email template not found: {template_key!r}.")
+            else:
+                initial.update(
+                    {
+                        "email_template_id": selected_template.pk,
+                        "subject": str(selected_template.subject or ""),
+                        "html_content": str(selected_template.html_content or ""),
+                        "text_content": str(selected_template.content or ""),
+                    }
+                )
+
+        prefill_type = str(request.GET.get("type") or "").strip().lower()
+        to_raw = str(request.GET.get("to") or "").strip()
+        if to_raw:
+            if prefill_type == "group":
+                initial["recipient_mode"] = MailMergeForm.RECIPIENT_MODE_GROUP
+                initial["group_cn"] = to_raw
+                deep_link_autoload_recipients = True
+            elif prefill_type == "manual":
+                initial["recipient_mode"] = MailMergeForm.RECIPIENT_MODE_MANUAL
+                initial["manual_to"] = to_raw
+                deep_link_autoload_recipients = True
+            elif prefill_type == "users":
+                initial["recipient_mode"] = MailMergeForm.RECIPIENT_MODE_USERS
+                initial["user_usernames"] = _parse_username_list(to_raw)
+                deep_link_autoload_recipients = True
+
+        if extra_context:
+            initial["extra_context_json"] = json.dumps(extra_context)
 
     if request.method == "POST":
-        form = MailMergeForm(request.POST, request.FILES, group_choices=group_choices)
+        form = MailMergeForm(request.POST, request.FILES, group_choices=group_choices, user_choices=user_choices)
         if form.is_valid():
             group_cn = str(form.cleaned_data.get("group_cn") or "").strip()
             csv_file = form.cleaned_data.get("csv_file")
             recipient_mode = str(form.cleaned_data.get("recipient_mode") or "").strip().lower()
+            manual_to = form.cleaned_data.get("manual_to") or []
+            user_usernames = form.cleaned_data.get("user_usernames") or []
 
             cc = form.cleaned_data.get("cc") or []
             bcc = form.cleaned_data.get("bcc") or []
+
+            posted_extra_context = form.cleaned_data.get("extra_context_json") or {}
 
             try:
                 if recipient_mode == MailMergeForm.RECIPIENT_MODE_GROUP:
@@ -328,13 +594,26 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                         if not isinstance(payload, dict):
                             raise ValueError("Upload a CSV.")
                         preview, recipients = _preview_from_csv_session_payload(payload)
+                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_MANUAL:
+                    if not manual_to:
+                        raise ValueError("Add one or more recipient email addresses.")
+                    preview, recipients = _preview_for_manual(list(manual_to))
+                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_USERS:
+                    if not user_usernames:
+                        raise ValueError("Select one or more users.")
+                    preview, recipients = _preview_for_users(list(user_usernames))
                 else:
-                    raise ValueError("Choose Group or CSV recipients.")
+                    raise ValueError("Choose Group, Users, CSV, or Manual recipients.")
             except ValueError as e:
                 messages.error(request, str(e))
                 preview = None
                 recipients = []
 
+            preview, recipients = _apply_extra_context(
+                preview=preview,
+                recipients=recipients,
+                extra_context=posted_extra_context,
+            )
             if preview and preview.first_context:
                 request.session[_PREVIEW_CONTEXT_SESSION_KEY] = json.dumps(preview.first_context)
 
@@ -407,14 +686,19 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                 {
                     "recipient_mode": recipient_mode,
                     "group_cn": group_cn,
+                    "user_usernames": list(user_usernames),
+                    "manual_to": ", ".join(manual_to),
                     "cc": ", ".join(cc),
                     "bcc": ", ".join(bcc),
                     "email_template_id": selected_template.pk if selected_template else selected_template_id,
                     "subject": subject,
                     "html_content": html_content,
                     "text_content": text_content,
+                    "extra_context_json": json.dumps(posted_extra_context) if posted_extra_context else "",
                 }
             )
+
+            selected_recipient_mode = recipient_mode
 
             # The template dropdown uses form.data/form.initial (not a bound field), so
             # keep form.initial in sync with our computed state.
@@ -422,9 +706,55 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
         else:
             messages.error(request, "Fix the form errors and try again.")
             initial.update(request.POST.dict())
+            if "user_usernames" in request.POST:
+                initial["user_usernames"] = request.POST.getlist("user_usernames")
             form.initial.update(initial)
     else:
-        form = MailMergeForm(initial=initial, group_choices=group_choices)
+        form = MailMergeForm(initial=initial, group_choices=group_choices, user_choices=user_choices)
+        selected_recipient_mode = str(initial.get("recipient_mode") or "").strip().lower()
+
+        # Deep-links should be able to preconfigure and immediately load recipients.
+        # This avoids requiring an extra POST just to see counts/variables.
+        if deep_link_autoload_recipients:
+            try:
+                recipient_mode = str(initial.get("recipient_mode") or "").strip().lower()
+                if recipient_mode == MailMergeForm.RECIPIENT_MODE_GROUP:
+                    group_cn = str(initial.get("group_cn") or "").strip()
+                    if not group_cn:
+                        raise ValueError("Select a group.")
+                    preview, recipients = _preview_for_group(group_cn)
+                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_MANUAL:
+                    manual_to_raw = str(initial.get("manual_to") or "")
+                    manual_to = _parse_email_list(manual_to_raw)
+                    if not manual_to:
+                        raise ValueError("Add one or more recipient email addresses.")
+                    preview, recipients = _preview_for_manual(manual_to)
+                elif recipient_mode == MailMergeForm.RECIPIENT_MODE_USERS:
+                    raw_usernames = initial.get("user_usernames")
+                    if isinstance(raw_usernames, list):
+                        usernames = [str(u) for u in raw_usernames]
+                    else:
+                        usernames = _parse_username_list(str(raw_usernames or ""))
+                    if not usernames:
+                        raise ValueError("Select one or more users.")
+                    preview, recipients = _preview_for_users(usernames)
+                else:
+                    # CSV cannot be deep-linked without an uploaded/saved payload.
+                    preview = None
+                    recipients = []
+            except ValueError as e:
+                messages.error(request, str(e))
+                preview = None
+                recipients = []
+
+            preview, recipients = _apply_extra_context(
+                preview=preview,
+                recipients=recipients,
+                extra_context=extra_context,
+            )
+
+            if preview and preview.first_context:
+                request.session[_PREVIEW_CONTEXT_SESSION_KEY] = json.dumps(preview.first_context)
 
     # Compute templates at the end so any newly-created template is visible
     # immediately after Save as.
@@ -457,6 +787,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
             "csv_session_key": _CSV_SESSION_KEY,
             "has_saved_csv_recipients": bool(request.session.get(_CSV_SESSION_KEY)),
             "created_template_id": created_template_id,
+            "selected_recipient_mode": selected_recipient_mode,
         },
     )
 

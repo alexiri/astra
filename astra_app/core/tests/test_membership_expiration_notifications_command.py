@@ -44,6 +44,8 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             "alice",
             {
                 "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
                 "mail": ["alice@example.com"],
                 "memberof_group": [],
             },
@@ -61,6 +63,16 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 context__membership_type_code="individual",
             ).exists()
         )
+
+        email = Email.objects.filter(
+            to="alice@example.com",
+            template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+        ).latest("created")
+        ctx = dict(email.context or {})
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
 
     def test_command_does_not_send_expired_email_for_expired_memberships(self) -> None:
         MembershipType.objects.update_or_create(

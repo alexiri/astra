@@ -51,6 +51,8 @@ class MembershipRequestsFlowTests(TestCase):
             "alice",
             {
                 "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
                 "mail": ["alice@example.com"],
                 "memberof_group": [],
             },
@@ -86,6 +88,10 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["sender"], settings.DEFAULT_FROM_EMAIL)
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
         self.assertEqual(kwargs["context"]["username"], "alice")
+        self.assertIn("first_name", kwargs["context"])
+        self.assertIn("last_name", kwargs["context"])
+        self.assertIn("full_name", kwargs["context"])
+        self.assertNotIn("displayname", kwargs["context"])
         self.assertEqual(kwargs["context"]["membership_type"], "Individual")
 
     def test_membership_request_form_hides_membership_types_with_pending_request(self) -> None:
@@ -120,6 +126,8 @@ class MembershipRequestsFlowTests(TestCase):
             "alice",
             {
                 "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
                 "mail": ["alice@example.com"],
                 "memberof_group": [],
             },
@@ -405,6 +413,94 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["recipients"], ["cern@example.com"])
         self.assertEqual(kwargs["template"], "membership-request-approved-silver")
 
+    def test_committee_can_approve_org_request_email_includes_org_contacts_and_representative_context(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            representative="bob",
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "givenname": ["Bob"],
+                "sn": ["User"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-approve", args=[req.pk]),
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        ctx = kwargs["context"]
+        self.assertEqual(kwargs["recipients"], ["biz@example.com"])
+
+        # Organization contact variables must always be present.
+        self.assertEqual(ctx["business_contact_name"], "Biz")
+        self.assertEqual(ctx["business_contact_email"], "biz@example.com")
+        self.assertEqual(ctx["pr_marketing_contact_name"], "PR")
+        self.assertEqual(ctx["pr_marketing_contact_email"], "pr@example.com")
+        self.assertEqual(ctx["technical_contact_name"], "Tech")
+        self.assertEqual(ctx["technical_contact_email"], "tech@example.com")
+
+        # Representative context should be available via canonical user variables.
+        self.assertEqual(ctx["username"], "bob")
+        self.assertEqual(ctx["email"], "bob@example.com")
+        self.assertEqual(ctx["first_name"], "Bob")
+        self.assertEqual(ctx["last_name"], "User")
+        self.assertEqual(ctx["full_name"], "Bob User")
+
     def test_committee_can_approve_org_request_skip_email_does_not_send(self) -> None:
         from core.models import MembershipRequest, MembershipType, Organization
 
@@ -618,6 +714,10 @@ class MembershipRequestsFlowTests(TestCase):
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
+        self.assertIn("first_name", kwargs["context"])
+        self.assertIn("last_name", kwargs["context"])
+        self.assertIn("full_name", kwargs["context"])
+        self.assertNotIn("displayname", kwargs["context"])
         self.assertIn("Missing required info", kwargs["context"]["rejection_reason"])
 
     def test_committee_can_reject_request_skip_email_does_not_send(self) -> None:
@@ -804,6 +904,93 @@ class MembershipRequestsFlowTests(TestCase):
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["cern@example.com"])
         self.assertEqual(kwargs["template"], "membership-request-rejected-custom")
+
+    def test_committee_can_reject_org_request_email_includes_org_contacts_and_representative_context(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            representative="bob",
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "givenname": ["Bob"],
+                "sn": ["User"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("post_office.mail.send", autospec=True) as send_mock:
+                resp = self.client.post(
+                    reverse("membership-request-reject", args=[req.pk]),
+                    data={"reason": "Nope"},
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        ctx = kwargs["context"]
+        self.assertEqual(kwargs["recipients"], ["biz@example.com"])
+
+        self.assertEqual(ctx["business_contact_name"], "Biz")
+        self.assertEqual(ctx["business_contact_email"], "biz@example.com")
+        self.assertEqual(ctx["pr_marketing_contact_name"], "PR")
+        self.assertEqual(ctx["pr_marketing_contact_email"], "pr@example.com")
+        self.assertEqual(ctx["technical_contact_name"], "Tech")
+        self.assertEqual(ctx["technical_contact_email"], "tech@example.com")
+
+        self.assertEqual(ctx["username"], "bob")
+        self.assertEqual(ctx["email"], "bob@example.com")
+        self.assertEqual(ctx["first_name"], "Bob")
+        self.assertEqual(ctx["last_name"], "User")
+        self.assertEqual(ctx["full_name"], "Bob User")
 
         def test_reject_requires_post(self) -> None:
             from core.models import MembershipRequest, MembershipType

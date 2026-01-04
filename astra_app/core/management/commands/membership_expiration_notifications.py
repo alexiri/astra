@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
+from core.email_context import user_email_context_from_user
 from core.membership_notifications import send_membership_notification
 from core.models import Membership
 from core.views_utils import _first
@@ -74,6 +75,7 @@ class Command(BaseCommand):
                 days=days_until,
                 force=force,
                 tz_name=tz_name,
+                user_context=user_email_context_from_user(user=fu),
             )
             if did_queue:
                 queued += 1

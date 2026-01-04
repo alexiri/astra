@@ -306,7 +306,7 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
         if not u.username:
             continue
 
-        full_name = u.get_full_name()
+        full_name = u.full_name
         if q_lower not in u.username.lower() and q_lower not in full_name.lower():
             continue
 
@@ -334,7 +334,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     if representative_username:
         representative_user = FreeIPAUser.get(representative_username)
         if representative_user is not None:
-            representative_full_name = representative_user.get_full_name()
+            representative_full_name = representative_user.full_name
 
     sponsorship: OrganizationSponsorship | None = OrganizationSponsorship.objects.select_related("membership_type").filter(
         organization=organization

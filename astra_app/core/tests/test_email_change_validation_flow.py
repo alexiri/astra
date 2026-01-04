@@ -64,6 +64,10 @@ class EmailChangeValidationFlowTests(TestCase):
 
         ctx = send_mock.call_args.kwargs.get("context") or {}
         self.assertEqual(ctx.get("username"), "alice")
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
         self.assertEqual(ctx.get("address"), "new@example.org")
         self.assertIn("validate_url", ctx)
 

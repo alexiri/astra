@@ -55,6 +55,8 @@ def _send_registration_email(request: HttpRequest, *, username: str, email: str,
     # Use a stable UTC string for emails.
     valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
 
+    full_name = f"{first_name} {last_name}".strip() or username
+
     post_office.mail.send(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
@@ -64,6 +66,7 @@ def _send_registration_email(request: HttpRequest, *, username: str, email: str,
             "email": email,
             "first_name": first_name,
             "last_name": last_name,
+            "full_name": full_name,
             "activate_url": activate_url,
             "confirm_url": confirm_url,
             "ttl_minutes": ttl_minutes,

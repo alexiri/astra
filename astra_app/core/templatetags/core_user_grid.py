@@ -30,6 +30,15 @@ def _get_username_for_sort(user: object) -> str:
 
 
 def _get_full_name_for_filter(user: object) -> str:
+    full_name = getattr(user, "full_name", None)
+    if isinstance(full_name, str):
+        return full_name.strip()
+    if full_name is not None:
+        try:
+            return str(full_name).strip()
+        except Exception:
+            return ""
+
     get_full_name = getattr(user, "get_full_name", None)
     if callable(get_full_name):
         try:

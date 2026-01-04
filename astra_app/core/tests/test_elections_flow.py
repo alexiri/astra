@@ -836,6 +836,10 @@ class ElectionEmailTimezoneTests(TestCase):
             )
 
         ctx = send_mock.call_args.kwargs.get("context", {})
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
         self.assertIn("(Europe/Paris)", str(ctx.get("election_end_datetime") or ""))
         self.assertIn("15:00", str(ctx.get("election_end_datetime") or ""))
 
@@ -862,6 +866,10 @@ class ElectionEmailTimezoneTests(TestCase):
             )
 
         ctx = send_mock.call_args.kwargs.get("context", {})
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
         self.assertIn("(Europe/Paris)", str(ctx.get("election_start_datetime") or ""))
         self.assertIn("13:00", str(ctx.get("election_start_datetime") or ""))
 
@@ -994,6 +1002,10 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(send_mock.call_args.kwargs.get("template"), settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME)
 
         ctx = send_mock.call_args.kwargs.get("context", {})
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
         self.assertEqual(ctx.get("ballot_hash"), payload.get("ballot_hash"))
         self.assertEqual(ctx.get("nonce"), payload.get("nonce"))
         self.assertEqual(ctx.get("previous_chain_hash"), payload.get("previous_chain_hash"))

@@ -25,7 +25,14 @@ class PasswordResetFlowTests(TestCase):
     def test_password_reset_request_sends_email_for_existing_user(self):
         client = Client()
 
-        user = SimpleNamespace(username="alice", email="alice@example.com", last_password_change="")
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
 
         with (
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
@@ -44,6 +51,10 @@ class PasswordResetFlowTests(TestCase):
         ctx = post_office_send_mock.call_args.kwargs.get("context", {})
         self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "password-reset")
         self.assertEqual(ctx.get("username"), "alice")
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
         reset_url = ctx.get("reset_url", "")
         self.assertTrue(reset_url.startswith("http://testserver/"))
         self.assertIn("/password-reset/confirm/?token=", reset_url)
@@ -74,7 +85,14 @@ class PasswordResetFlowTests(TestCase):
         client = Client()
 
         # Arrange: request reset (generates token inside email context).
-        user = SimpleNamespace(username="alice", email="alice@example.com", last_password_change="")
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
 
         with (
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
@@ -157,6 +175,10 @@ class AdminPasswordResetEmailTests(TestCase):
         self.assertEqual(post_office_send_mock.call_count, 1)
         ctx = post_office_send_mock.call_args.kwargs.get("context", {})
         self.assertEqual(ctx.get("username"), "bob")
+        self.assertIn("first_name", ctx)
+        self.assertIn("last_name", ctx)
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
         self.assertTrue((ctx.get("reset_url") or "").startswith("http://testserver/"))
 
     def test_admin_change_form_shows_password_reset_and_disable_otp_tools(self):

@@ -6,7 +6,7 @@ from core.backends import FreeIPAUser
 
 
 class DisplayNamePreferenceTests(TestCase):
-    def test_get_full_name_prefers_freeipa_displayname_when_present(self) -> None:
+    def test_full_name_prefers_freeipa_displayname_when_present(self) -> None:
         user = FreeIPAUser(
             "alice",
             user_data={
@@ -19,9 +19,9 @@ class DisplayNamePreferenceTests(TestCase):
             },
         )
 
-        self.assertEqual(user.get_full_name(), "Alice Display")
+        self.assertEqual(user.full_name, "Alice Display")
 
-    def test_get_full_name_falls_back_to_gecos_when_no_displayname(self) -> None:
+    def test_full_name_falls_back_to_gecos_when_no_displayname(self) -> None:
         user = FreeIPAUser(
             "alice",
             user_data={
@@ -34,9 +34,9 @@ class DisplayNamePreferenceTests(TestCase):
             },
         )
 
-        self.assertEqual(user.get_full_name(), "Alice Gecos")
+        self.assertEqual(user.full_name, "Alice Gecos")
 
-    def test_get_full_name_falls_back_to_common_name_when_no_displayname_or_gecos(self) -> None:
+    def test_full_name_falls_back_to_common_name_when_no_displayname_or_gecos(self) -> None:
         user = FreeIPAUser(
             "alice",
             user_data={
@@ -48,9 +48,9 @@ class DisplayNamePreferenceTests(TestCase):
             },
         )
 
-        self.assertEqual(user.get_full_name(), "Alice CN")
+        self.assertEqual(user.full_name, "Alice CN")
 
-    def test_get_full_name_falls_back_to_first_and_last_name(self) -> None:
+    def test_full_name_falls_back_to_first_and_last_name(self) -> None:
         user = FreeIPAUser(
             "alice",
             user_data={
@@ -61,5 +61,5 @@ class DisplayNamePreferenceTests(TestCase):
             },
         )
 
-        self.assertEqual(user.get_full_name(), "Alice User")
+        self.assertEqual(user.full_name, "Alice User")
 

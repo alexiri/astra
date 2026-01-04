@@ -22,6 +22,7 @@ from django.utils import timezone
 from post_office.models import Email
 
 from core.backends import FreeIPAGroup
+from core.email_context import user_email_context
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -293,8 +294,7 @@ def send_vote_receipt_email(
     tz_name: str | None = None,
 ) -> None:
     context: dict[str, object] = {
-        "username": username,
-        "email": email,
+        **user_email_context(username=username),
         "election_id": election.id,
         "election_name": election.name,
         "election_description": election.description,
@@ -310,7 +310,7 @@ def send_vote_receipt_email(
     }
 
     context = _post_office_json_context(context)
-    
+
     post_office.mail.send(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
@@ -333,8 +333,7 @@ def send_voting_credential_email(
     text_template: str | None = None,
 ) -> None:
     context: dict[str, object] = {
-        "username": username,
-        "email": email,
+        **user_email_context(username=username),
         "election_id": election.id,
         "election_name": election.name,
         "election_description": election.description,
@@ -501,7 +500,7 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
     group_cn = str(election.eligible_group_cn or "").strip()
     if group_cn:
         eligible_usernames = _freeipa_group_recursive_member_usernames(group_cn=group_cn)
-        if username.lower() not in eligible_usernames:
+        if not eligible_usernames or username.lower() not in eligible_usernames:
             return 0
 
     cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)

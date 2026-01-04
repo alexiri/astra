@@ -76,16 +76,41 @@
   }
 
   function htmlToPlainText(html) {
+    // Normalize a common signature block into a conventional plain-text signature.
+    // This avoids rendering it as emphasized text ("*The AlmaLinux Team*").
+    var rawHtml = String(html || '').replace(
+      /<p>\s*<em>\s*The AlmaLinux Team\s*<\/em>\s*<\/p>/gi,
+      '\n<p>-- The AlmaLinux Team</p>'
+    );
     var doc = null;
     try {
-      doc = new window.DOMParser().parseFromString(String(html || ''), 'text/html');
+      doc = new window.DOMParser().parseFromString(rawHtml, 'text/html');
     } catch (_e) {
       doc = null;
     }
-    if (!doc || !doc.body) return normalizeText(String(html || ''));
+    if (!doc || !doc.body) return normalizeText(rawHtml);
 
     function collapseInlineWhitespace(s) {
       return String(s || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function renderTextNodeValue(value) {
+      // Preserve leading/trailing whitespace as a single space so we don't
+      // accidentally glue formatting markers to surrounding words.
+      // Example: "election: <strong>X</strong>" should become "election: **X**".
+      var raw = String(value || '');
+      if (!raw) return '';
+
+      var hasLeading = /^\s/.test(raw);
+      var hasTrailing = /\s$/.test(raw);
+      var core = raw.replace(/\s+/g, ' ').trim();
+
+      if (!core) return ' ';
+
+      var out = core;
+      if (hasLeading) out = ' ' + out;
+      if (hasTrailing) out = out + ' ';
+      return out;
     }
 
     function joinNonEmpty(parts, sep) {
@@ -100,7 +125,7 @@
     function renderInline(node) {
       if (!node) return '';
       if (node.nodeType === 3) {
-        return collapseInlineWhitespace(node.nodeValue || '');
+        return renderTextNodeValue(node.nodeValue || '');
       }
       if (node.nodeType !== 1) {
         return '';
@@ -166,7 +191,7 @@
 
       var tag = String(node.tagName || '').toUpperCase();
       if (tag === 'BR') return '\n';
-      if (tag === 'HR') return '\n---\n\n';
+      if (tag === 'HR') return '\n\n---\n';
 
       if (/^H[1-6]$/.test(tag)) {
         var level = parseInt(tag.substring(1), 10);
@@ -198,7 +223,7 @@
 
       if (tag === 'P' || tag === 'DIV') {
         var para = collapseInlineWhitespace(renderInline(node));
-        return para ? (para + '\n\n') : '';
+        return para ? (para + '\n\n\n') : '';
       }
 
       if (tag === 'PRE' || tag === 'CODE') {
@@ -214,6 +239,12 @@
       var parts = [];
       for (var i = 0; i < node.childNodes.length; i++) {
         var child = node.childNodes[i];
+        if (child && child.nodeType === 3) {
+          // Whitespace-only text nodes at block boundaries are just HTML
+          // formatting/indentation; dropping them avoids stray leading spaces in
+          // the rendered plain text.
+          if (/^\s*$/.test(String(child.nodeValue || ''))) continue;
+        }
         var childTag = child && child.tagName ? String(child.tagName).toUpperCase() : '';
         var isBlock = childTag && (childTag === 'P' || childTag === 'DIV' || childTag === 'UL' || childTag === 'OL' || childTag === 'LI' || childTag === 'BLOCKQUOTE' || childTag === 'HR' || /^H[1-6]$/.test(childTag));
         parts.push(isBlock ? renderBlock(child) : renderInline(child));

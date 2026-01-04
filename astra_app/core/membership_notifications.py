@@ -8,6 +8,7 @@ import post_office.mail
 from django.conf import settings
 from django.utils import timezone
 
+from core.email_context import user_email_context
 from core.models import MembershipType
 
 
@@ -48,6 +49,7 @@ def send_membership_notification(
     force: bool = False,
     base_url: str | None = None,
     tz_name: str | None = None,
+    user_context: dict[str, str] | None = None,
 ) -> bool:
     """Queue a templated email via django-post-office.
 
@@ -72,12 +74,14 @@ def send_membership_notification(
         if already_sent:
             return False
 
+    base_ctx = user_context if user_context is not None else user_email_context(username=username)
+
     post_office.mail.send(
         recipients=[address],
         sender=settings.DEFAULT_FROM_EMAIL,
         template=template_name,
         context={
-            "username": username,
+            **base_ctx,
             "membership_type": membership_type.name,
             "membership_type_code": membership_type.code,
             "extend_url": membership_extend_url(membership_type_code=membership_type.code, base_url=base_url),

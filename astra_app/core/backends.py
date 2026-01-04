@@ -503,7 +503,10 @@ class FreeIPAUser:
     def get_username(self):
         return self.username
 
-    def get_full_name(self):
+    @property
+    def full_name(self) -> str:
+        # Noggin precedence for display name:
+        # displayname > gecos > cn (common name) > givenname+sn > username
         displayname = str(self.displayname or "").strip()
         if displayname:
             return displayname
@@ -516,8 +519,12 @@ class FreeIPAUser:
         if commonname:
             return commonname
 
-        full_name = f"{self.first_name or ''} {self.last_name or ''}".strip()
-        return full_name or self.username
+        derived = f"{self.first_name or ''} {self.last_name or ''}".strip()
+        return derived or self.username
+
+    def get_full_name(self) -> str:
+        # Compatibility for Django/user-like APIs. Use `.full_name` for new code.
+        return self.full_name
 
     def anonymize(self) -> None:
         """Redact private fields in-place if the user opted into privacy.

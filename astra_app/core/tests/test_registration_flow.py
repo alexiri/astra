@@ -52,6 +52,13 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(post_office_send_mock.call_count, 1)
         self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "registration-email-validation")
 
+        ctx = post_office_send_mock.call_args.kwargs.get("context") or {}
+        self.assertEqual(ctx.get("username"), "alice")
+        self.assertEqual(ctx.get("first_name"), "Alice")
+        self.assertEqual(ctx.get("last_name"), "User")
+        self.assertIn("full_name", ctx)
+        self.assertNotIn("displayname", ctx)
+
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_register_post_requires_over_16_checkbox(self):
         client = Client()
