@@ -123,6 +123,122 @@ class MailMergeTests(TestCase):
         self.assertContains(resp, "{{ company }}")
         self.assertContains(resp, "alice@example.com")
 
+    def test_compose_shows_html_to_text_button_and_variables_card(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        class _FakeGroup:
+            cn = "example-group"
+            description = ""
+
+            def member_usernames_recursive(self) -> set[str]:
+                return {"alice"}
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "displayname": ["Alice User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str):
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+        ):
+            resp = self.client.post(
+                reverse("mail-merge"),
+                data={
+                    "recipient_mode": "group",
+                    "group_cn": "example-group",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Available variables")
+        self.assertContains(resp, 'data-compose-action="copy-html-to-text"')
+
+    def test_save_as_template_appears_and_is_selected(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        class _FakeGroup:
+            cn = "example-group"
+            description = ""
+
+            def member_usernames_recursive(self) -> set[str]:
+                return {"alice"}
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "displayname": ["Alice User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str):
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        original = EmailTemplate.objects.create(
+            name="Original MailMerge Template",
+            subject="Original subject",
+            content="Original text",
+            html_content="<p>Original html</p>",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+        ):
+            resp = self.client.post(
+                reverse("mail-merge"),
+                data={
+                    "recipient_mode": "group",
+                    "group_cn": "example-group",
+                    "email_template_id": str(original.pk),
+                    "subject": "Hello {{ displayname }}",
+                    "text_content": "Hi {{ displayname }}",
+                    "html_content": "<p>Hi {{ displayname }}</p>",
+                    "action": "save_as",
+                    "save_as_name": "New MailMerge Template",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        tpl = EmailTemplate.objects.get(name="New MailMerge Template")
+        self.assertContains(resp, "New MailMerge Template")
+        self.assertContains(resp, f'<option value="{tpl.pk}" selected>')
+        self.assertNotContains(resp, f'<option value="{original.pk}" selected>')
+        self.assertContains(resp, f'id="mailmerge-autoload-template-id" value="{tpl.pk}"')
+
     def test_send_emails_renders_per_recipient(self) -> None:
         from post_office.models import EmailTemplate
 

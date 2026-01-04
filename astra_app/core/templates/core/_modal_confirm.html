@@ -21,7 +21,7 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
 - body_suffix: str
 -->
 
-<div class="modal fade" id="{{ modal_id }}" tabindex="-1" role="dialog" aria-hidden="true">
+<div class="modal fade"{% if modal_id %} id="{{ modal_id }}"{% endif %} tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog" role="document"{% if dialog_style %} style="{{ dialog_style }}"{% endif %}>
     <div class="modal-content">
       <div class="modal-header">
@@ -32,7 +32,7 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
       </div>
       <div class="modal-body">
         <div class="mb-3">
-          {% if body_emphasis %}
+          {% if body_prefix or body_suffix %}
             {{ body_prefix }} <strong>{{ body_emphasis }}</strong>{{ body_suffix }}
           {% else %}
             {{ body }}

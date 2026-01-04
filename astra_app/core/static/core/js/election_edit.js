@@ -5,65 +5,26 @@
     return document.getElementById(id);
   }
 
-  function getCsrfToken() {
-    var el = document.querySelector('input[name=csrfmiddlewaretoken]');
-    return el ? String(el.value || '') : '';
+  function getCompose() {
+    return window.TemplatedEmailCompose || null;
   }
 
-  function setField(id, value) {
-    var el = $(id);
-    if (!el) return;
-    el.value = value == null ? '' : String(value);
+  function getField(name) {
+    var compose = getCompose();
+    return compose ? compose.getField(name) : '';
   }
 
-  function getField(id) {
-    var el = $(id);
-    if (!el) return '';
-    return String(el.value || '');
+
+  function scheduleEmailPreviewRefresh(compose, delayMs) {
+    if (!window.TemplatedEmailComposePreview) return;
+    window.TemplatedEmailComposePreview.schedulePreviewRefresh(compose || getCompose(), delayMs);
   }
 
-  var previewTimer = null;
-
-  function schedulePreviewRefresh() {
-    if (previewTimer) window.clearTimeout(previewTimer);
-    previewTimer = window.setTimeout(refreshPreview, 200);
-  }
-
-  function setPreviewHtml(html) {
-    var box = $('mailmerge-preview-html');
-    if (!box) return;
-    box.innerHTML = html || '<span class="text-muted">No preview yet.</span>';
-  }
-
-  function setPreviewText(text) {
-    var box = $('mailmerge-preview-text');
-    if (!box) return;
-    box.textContent = text || 'No preview yet.';
-  }
-
-  function enable(el, on) {
-    if (!el) return;
-    el.disabled = !on;
-  }
-
-  function storeOriginalsFromFields() {
-    var form = $('election-edit-form');
-    if (!form) return;
-
-    form.dataset.originalSubject = getField('id_subject');
-    form.dataset.originalHtml = getField('id_html_content');
-    form.dataset.originalText = getField('id_text_content');
-
-    enable($('mailmerge-restore-btn'), true);
-  }
-
-  function restoreOriginals() {
-    var form = $('election-edit-form');
-    if (!form) return;
-    setField('id_subject', form.dataset.originalSubject || '');
-    setField('id_html_content', form.dataset.originalHtml || '');
-    setField('id_text_content', form.dataset.originalText || '');
-    schedulePreviewRefresh();
+  function markComposeBaselineFromFields() {
+    var compose = getCompose();
+    if (!compose) return;
+    compose.setRestoreEnabled(true);
+    compose.markBaseline(compose.getValues());
   }
 
   function electionIdFromPath() {
@@ -175,55 +136,6 @@
     });
   }
 
-  async function refreshPreview() {
-    var electionId = electionIdFromPath();
-    if (!electionId) return;
-
-    var data = new window.FormData();
-    data.append('subject', getField('id_subject'));
-    data.append('html_content', getField('id_html_content'));
-    data.append('text_content', getField('id_text_content'));
-
-    try {
-      var resp = await window.fetch('/elections/' + encodeURIComponent(String(electionId)) + '/email/render-preview/', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': getCsrfToken(), 'Accept': 'application/json' },
-        body: data
-      });
-      var payload = await resp.json();
-      if (!resp.ok) {
-        if (payload && payload.error) {
-          setPreviewText(payload.error);
-        }
-        return;
-      }
-      setPreviewHtml(payload.html);
-      setPreviewText(payload.text);
-    } catch (_e) {
-      // Ignore transient failures.
-    }
-  }
-
-  async function loadTemplate(templateId) {
-    if (!templateId) return;
-
-    try {
-      var url = '/email-tools/templates/' + encodeURIComponent(templateId) + '/json/';
-
-      var resp = await window.fetch(url, { headers: { 'Accept': 'application/json' } });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var payload = await resp.json();
-
-      setField('id_subject', payload.subject);
-      setField('id_html_content', payload.html_content);
-      setField('id_text_content', payload.text_content);
-      storeOriginalsFromFields();
-      schedulePreviewRefresh();
-    } catch (_e) {
-      try { window.alert('Failed to load template.'); } catch (__e) { /* noop */ }
-    }
-  }
-
   async function saveTemplate(templateId) {
     if (!templateId) {
       try { window.alert('Select a template to save, or use Save as.'); } catch (_e) { /* noop */ }
@@ -232,16 +144,16 @@
 
     var data = new window.FormData();
     data.append('email_template_id', String(templateId));
-    data.append('subject', getField('id_subject'));
-    data.append('html_content', getField('id_html_content'));
-    data.append('text_content', getField('id_text_content'));
+    data.append('subject', getField('subject'));
+    data.append('html_content', getField('html_content'));
+    data.append('text_content', getField('text_content'));
 
     try {
       var resp = await window.fetch(
         '/email-tools/templates/save/',
         {
           method: 'POST',
-          headers: { 'X-CSRFToken': getCsrfToken(), 'Accept': 'application/json' },
+          headers: { 'X-CSRFToken': (getCompose() ? getCompose().getCsrfToken() : ''), 'Accept': 'application/json' },
           body: data
         }
       );
@@ -249,7 +161,7 @@
       if (!resp.ok || !payload || payload.ok !== true) {
         throw new Error(payload && payload.error ? payload.error : 'save failed');
       }
-      storeOriginalsFromFields();
+      markComposeBaselineFromFields();
       try { window.alert('Template saved.'); } catch (_e) { /* noop */ }
     } catch (_e) {
       try { window.alert('Failed to save template.'); } catch (__e) { /* noop */ }
@@ -261,16 +173,16 @@
 
     var data = new window.FormData();
     data.append('name', String(name));
-    data.append('subject', getField('id_subject'));
-    data.append('html_content', getField('id_html_content'));
-    data.append('text_content', getField('id_text_content'));
+    data.append('subject', getField('subject'));
+    data.append('html_content', getField('html_content'));
+    data.append('text_content', getField('text_content'));
 
     try {
       var resp = await window.fetch(
         '/email-tools/templates/save-as/',
         {
           method: 'POST',
-          headers: { 'X-CSRFToken': getCsrfToken(), 'Accept': 'application/json' },
+          headers: { 'X-CSRFToken': (getCompose() ? getCompose().getCsrfToken() : ''), 'Accept': 'application/json' },
           body: data
         }
       );
@@ -516,164 +428,53 @@
       if (mode) mode.value = '';
     }
 
-    var templateSelect = $('id_email_template_id');
+    var compose = getCompose();
+    var templateSelect = compose && compose.getTemplateSelectEl ? compose.getTemplateSelectEl() : null;
     if (templateSelect) {
       templateSelect.addEventListener('change', function () {
         resetEmailSaveMode();
         var id = String(templateSelect.value || '').trim();
         if (!id) return;
-        loadTemplate(id);
+        // Loading is handled by the shared compose widget.
+        scheduleEmailPreviewRefresh(getCompose(), 50);
       });
     }
 
-    var restoreBtn = $('mailmerge-restore-btn');
-    if (restoreBtn) {
-      restoreBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        restoreOriginals();
-      });
-    }
+    document.addEventListener('templated-email-compose:save-confirmed', function (e) {
+      var compose2 = window.TemplatedEmailComposePreview ? window.TemplatedEmailComposePreview.getComposeFromEvent(e) : getCompose();
+      var id = compose2 && compose2.getTemplateId ? compose2.getTemplateId() : (templateSelect ? String(templateSelect.value || '').trim() : '');
+      saveTemplate(id);
+    });
 
-    var saveBtn = $('mailmerge-save-btn');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        var id = templateSelect ? String(templateSelect.value || '').trim() : '';
-        if (!id) {
-          saveTemplate(id);
-          return;
-        }
+    document.addEventListener('templated-email-compose:save-as-confirmed', async function (e) {
+      var detail = e && e.detail ? e.detail : {};
+      var name = String((detail && detail.name) || '').trim();
+      if (!name) return;
 
-        var jq = window.jQuery;
-        if (jq && jq.fn && typeof jq.fn.modal === 'function') {
-          jq('#templated-email-save-modal').modal('show');
-          return;
-        }
-
-        // Fallback if Bootstrap modal isn't available.
-        var ok = false;
-        try {
-          ok = window.confirm('Overwrite the selected email template with the current subject and contents?');
-        } catch (_e) {
-          ok = false;
-        }
-        if (ok) saveTemplate(id);
-      });
-    }
-
-    var saveAsBtn = $('mailmerge-save-as-btn');
-    if (saveAsBtn) {
-      saveAsBtn.addEventListener('click', async function (e) {
-        e.preventDefault();
-        var jq = window.jQuery;
-        if (jq && jq.fn && typeof jq.fn.modal === 'function') {
-          var nameEl = document.getElementById('templated-email-save-as-name');
-          if (nameEl) nameEl.value = '';
-          jq('#templated-email-save-as-modal').modal('show');
-          // Focus after the modal opens.
-          try {
-            jq('#templated-email-save-as-modal').one('shown.bs.modal', function () {
-              var el = document.getElementById('templated-email-save-as-name');
-              if (el && el.focus) el.focus();
-            });
-          } catch (_e) {
-            // Ignore.
-          }
-          return;
-        }
-
-        // Fallback if Bootstrap modal isn't available.
-        var name = '';
-        try {
-          name = String(window.prompt('New template name:') || '').trim();
-        } catch (_e) {
-          name = '';
-        }
-        if (!name) return;
-
-        var payload = await saveAsTemplate(name);
-        if (!payload) {
-          try { window.alert('Failed to create template.'); } catch (_e) { /* noop */ }
-          return;
-        }
-
-        if (templateSelect && payload.id != null) {
-          var opt = new window.Option(String(payload.name || name), String(payload.id), true, true);
-          templateSelect.appendChild(opt);
-          templateSelect.value = String(payload.id);
-        }
-
-        // If the user explicitly created a new template, they almost certainly
-        // intend to save it onto the election draft too.
-        var saveModeEl = $('election-edit-email-save-mode');
-        if (saveModeEl) saveModeEl.value = 'save';
-
-        storeOriginalsFromFields();
-        schedulePreviewRefresh();
-        try { window.alert('Template created.'); } catch (_e) { /* noop */ }
-      });
-    }
-
-    // Wire modal confirm forms (shared by election edit + mailmerge).
-    var saveModal = $('templated-email-save-modal');
-    if (saveModal) {
-      var formEl = saveModal.querySelector('form');
-      if (formEl) {
-        formEl.addEventListener('submit', function (e) {
-          e.preventDefault();
-          var id = templateSelect ? String(templateSelect.value || '').trim() : '';
-          var jq = window.jQuery;
-          if (jq && jq.fn && typeof jq.fn.modal === 'function') jq('#templated-email-save-modal').modal('hide');
-          saveTemplate(id);
-        });
+      var payload = await saveAsTemplate(name);
+      if (!payload) {
+        try { window.alert('Failed to create template.'); } catch (_e) { /* noop */ }
+        return;
       }
-    }
 
-    var saveAsModal = $('templated-email-save-as-modal');
-    if (saveAsModal) {
-      var formEl2 = saveAsModal.querySelector('form');
-      if (formEl2) {
-        formEl2.addEventListener('submit', async function (e) {
-          e.preventDefault();
-          var nameEl = $('templated-email-save-as-name');
-          var name = nameEl ? String(nameEl.value || '').trim() : '';
-          if (!name) return;
-
-          var payload = await saveAsTemplate(name);
-          if (!payload) {
-            try { window.alert('Failed to create template.'); } catch (_e) { /* noop */ }
-            return;
-          }
-
-          if (templateSelect && payload.id != null) {
-            var opt = new window.Option(String(payload.name || name), String(payload.id), true, true);
-            templateSelect.appendChild(opt);
-            templateSelect.value = String(payload.id);
-          }
-
-          var saveModeEl = $('election-edit-email-save-mode');
-          if (saveModeEl) saveModeEl.value = 'save';
-
-          storeOriginalsFromFields();
-          schedulePreviewRefresh();
-          var jq = window.jQuery;
-          if (jq && jq.fn && typeof jq.fn.modal === 'function') jq('#templated-email-save-as-modal').modal('hide');
-          try { window.alert('Template created.'); } catch (_e) { /* noop */ }
-        });
+      if (templateSelect && payload.id != null) {
+        var opt = new window.Option(String(payload.name || name), String(payload.id), true, true);
+        templateSelect.appendChild(opt);
+        templateSelect.value = String(payload.id);
       }
-    }
 
-    var htmlEl = $('id_html_content');
-    if (htmlEl) htmlEl.addEventListener('input', schedulePreviewRefresh);
+      // If the user explicitly created a new template, they almost certainly
+      // intend to save it onto the election draft too.
+      var saveModeEl = $('election-edit-email-save-mode');
+      if (saveModeEl) saveModeEl.value = 'save';
 
-    var textEl = $('id_text_content');
-    if (textEl) textEl.addEventListener('input', schedulePreviewRefresh);
-
-    var subjEl = $('id_subject');
-    if (subjEl) subjEl.addEventListener('input', schedulePreviewRefresh);
+      markComposeBaselineFromFields();
+      scheduleEmailPreviewRefresh(getCompose(), 50);
+      try { window.alert('Template created.'); } catch (_e) { /* noop */ }
+    });
 
     // Make restore meaningful even before the user loads a template.
-    storeOriginalsFromFields();
+    markComposeBaselineFromFields();
     initDateTimePickers();
 
     syncGroupCandidateOptions(document);

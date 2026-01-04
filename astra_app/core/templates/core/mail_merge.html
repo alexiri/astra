@@ -26,6 +26,7 @@
     <input type="hidden" name="save_as_name" id="mailmerge-save-as-name" value="" />
     <input type="hidden" name="recipient_mode" id="mailmerge-recipient-mode" value="" />
     <input type="hidden" id="mailmerge-has-saved-csv" value="{% if has_saved_csv_recipients %}1{% else %}0{% endif %}" />
+    <input type="hidden" id="mailmerge-autoload-template-id" value="{% if created_template_id %}{{ created_template_id }}{% endif %}" />
 
     <div class="row">
       <div class="col-lg-12">
@@ -116,35 +117,6 @@
                   {% endif %}
                 </div>
 
-                {% if preview %}
-                  <div class="card bg-dark">
-                    <div class="card-header">
-                      <h3 class="card-title">Available variables</h3>
-                    </div>
-                    <div class="card-body p-0">
-                      <table class="table table-dark table-striped mb-0">
-                        <thead>
-                          <tr>
-                            <th style="width: 45%">Variable</th>
-                            <th>Example (first recipient)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {% for var, example in preview.variables %}
-                            <tr>
-                              <td>
-                                <code>{% templatetag openvariable %} {{ var }} {% templatetag closevariable %}</code>
-                              </td>
-                              <td><span class="text-monospace">{{ example }}</span></td>
-                            </tr>
-                          {% endfor %}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                {% else %}
-                  <div class="text-muted">Select a group or upload a CSV to see available variables.</div>
-                {% endif %}
               </div>
             </div>
           </div>
@@ -154,7 +126,8 @@
 
     <div class="row">
       <div class="col-lg-12">
-        {% include "core/_templated_email_compose.html" with card_title="Compose email" templates=templates form=form rendered_preview=rendered_preview %}
+        {% url 'mail-merge-render-preview' as compose_preview_url %}
+        {% include "core/_templated_email_compose.html" with card_title="Compose email" templates=templates form=form rendered_preview=rendered_preview available_variables=preview.variables compose_description="Use recipient variables to personalize the subject and content." force_email_template_id=created_template_id compose_preview_url=compose_preview_url %}
       </div>
     </div>
 

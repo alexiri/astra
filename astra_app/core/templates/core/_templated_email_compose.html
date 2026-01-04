@@ -1,48 +1,120 @@
-{% load core_dict %}
+{% load core_dict static %}
 
-<div class="card card-outline card-success">
-  <div class="card-header">
-    <h3 class="card-title">{{ card_title|default:"Compose email" }}</h3>
-  </div>
-  <div class="card-body">
-    <div class="form-row">
-      <div class="form-group col-md-6">
-        <label for="id_email_template_id">Email template</label>
-        <select class="form-control" name="email_template_id" id="id_email_template_id">
-          <option value="">(None)</option>
-          {% with data_selected=form.data|dict_get:"email_template_id" %}
-            {% with initial_selected=form.initial|dict_get:"email_template_id" %}
-              {% with selected_id=data_selected|default:initial_selected %}
-                {% for t in templates %}
-                  <option value="{{ t.pk }}" {% if selected_id|stringformat:'s' == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
-                {% endfor %}
+<div
+  class="templated-email-compose"
+  data-templated-email-compose
+  {% if compose_preview_url %}data-compose-preview-url="{{ compose_preview_url }}"{% endif %}
+>
+  <div class="card card-outline card-success">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
+        <h3 class="card-title mb-0">{{ card_title|default:"Compose email" }}</h3>
+        <span class="badge badge-warning d-none" data-compose-unsaved-badge>Unsaved changes</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+        {% if compose_description %}
+          <div class="text-muted small mb-2">{{ compose_description }}</div>
+        {% endif %}
+
+        <div class="form-group mb-2">
+          <label>Email template</label>
+          <select class="form-control" name="email_template_id">
+            <option value="">(None)</option>
+            {% with data_selected=form.data|dict_get:"email_template_id" %}
+              {% with initial_selected=form.initial|dict_get:"email_template_id" %}
+                {% if force_email_template_id %}
+                  {% with selected_id=force_email_template_id %}
+                    {% for t in templates %}
+                      <option value="{{ t.pk }}" {% if selected_id|stringformat:'s' == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
+                    {% endfor %}
+                  {% endwith %}
+                {% else %}
+                  {% with selected_id=data_selected|default:initial_selected %}
+                    {% for t in templates %}
+                      <option value="{{ t.pk }}" {% if selected_id|stringformat:'s' == t.pk|stringformat:'s' %}selected{% endif %}>{{ t.name }}</option>
+                    {% endfor %}
+                  {% endwith %}
+                {% endif %}
               {% endwith %}
             {% endwith %}
-          {% endwith %}
-        </select>
-        <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
+          </select>
+          <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
 
-        {% if show_save_buttons != False %}
-          <div class="mt-2">
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="mailmerge-restore-btn" disabled>Restore</button>
-            <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-btn">Save</button>
-            <button type="button" class="btn btn-outline-primary btn-sm" id="mailmerge-save-as-btn">Save as…</button>
-          </div>
-        {% endif %}
+          {% if show_save_buttons != False %}
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" disabled>Restore</button>
+              <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save">Save</button>
+              <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as">Save as…</button>
+            </div>
+          {% endif %}
+        </div>
       </div>
 
-      <div class="form-group col-md-6">
-        <label for="id_subject">Subject</label>
-        {{ form.subject }}
+      <div class="col-md-6">
+        <div class="card card-outline card-info mb-0">
+          <div class="card-header py-2">
+            <h3 class="card-title">Available variables</h3>
+          </div>
+          <div class="card-body p-0" style="max-height: 240px; overflow: auto;">
+            {% if available_variables %}
+              <table class="table table-sm table-striped mb-0">
+                <thead>
+                  <tr>
+                    <th style="width: 45%">Variable</th>
+                    <th>Example</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for var, example in available_variables %}
+                    <tr>
+                      <td>
+                        <code>{% templatetag openvariable %} {{ var }} {% templatetag closevariable %}</code>
+                      </td>
+                      <td><span class="text-monospace">{{ example }}</span></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="p-3 text-muted small">No variables available yet.</div>
+            {% endif %}
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="row">
-      <div class="col-md-6">
+      <div class="col-md-12">
+        <div class="form-group">
+          <label for="id_subject">Subject</label>
+          {{ form.subject }}
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md">
         <label for="id_html_content">HTML content</label>
         {{ form.html_content }}
       </div>
-      <div class="col-md-6">
+
+      <div class="col-md-auto d-flex align-items-center justify-content-center px-1">
+        <button
+          type="button"
+          class="btn btn-outline-secondary btn-sm"
+          data-compose-action="copy-html-to-text"
+          title="Copy HTML → Text (strip formatting)"
+          aria-label="Copy HTML to Text"
+          style="min-width: 3rem;"
+        >
+          &gt;
+        </button>
+      </div>
+
+      <div class="col-md">
         <label for="id_text_content">Text content</label>
         {{ form.text_content }}
       </div>
@@ -53,7 +125,7 @@
     <div class="row">
       <div class="col-md-6">
         <h5>Rendered preview (HTML, first recipient)</h5>
-        <div class="border rounded p-2 bg-white" style="min-height: 140px;" id="mailmerge-preview-html">
+        <div class="border rounded p-2 bg-white" style="min-height: 140px;" data-compose-preview="html">
           {% if rendered_preview.html %}
             {{ rendered_preview.html|safe }}
           {% else %}
@@ -63,14 +135,52 @@
       </div>
       <div class="col-md-6">
         <h5>Rendered preview (text, first recipient)</h5>
-        <pre class="border rounded p-2 bg-light" style="min-height: 140px; white-space: pre-wrap;" id="mailmerge-preview-text">{% if rendered_preview.text %}{{ rendered_preview.text }}{% else %}No preview yet.{% endif %}</pre>
+        <pre class="border rounded p-2 bg-light" style="min-height: 140px; white-space: pre-wrap;" data-compose-preview="text">{% if rendered_preview.text %}{{ rendered_preview.text }}{% else %}No preview yet.{% endif %}</pre>
       </div>
     </div>
+    </div>
   </div>
-</div>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/theme/mdn-like.min.css">
+
+<style>
+  /* Ensure CodeMirror editors feel like AdminLTE form-controls. */
+  .CodeMirror {
+    height: 420px;
+    border: 1px solid rgba(0, 0, 0, 0.125);
+    border-radius: 0.25rem;
+    font-size: 0.9rem;
+  }
+
+  .CodeMirror-focused {
+    border-color: #80bdff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+  }
+
+  .cm-mustache {
+    color: #d63384;
+    font-weight: 600;
+  }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/xml/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/css/css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/htmlmixed/htmlmixed.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/addon/mode/overlay.min.js"></script>
+
+<script src="{% static 'core/js/templated_email.js' %}"></script>
 
 {% if show_save_buttons != False %}
-  {% include 'core/_modal_confirm.html' with modal_id='templated-email-save-modal' title='Save email template' body='Overwrite the selected email template with the current subject and contents?' action_url='#' submit_label='Save' submit_class='btn-primary' %}
+  <div data-compose-modal="save">
+    {% include 'core/_modal_confirm.html' with modal_id='' title='Save email template' body='Overwrite the selected email template with the current subject and contents?' action_url='#' submit_label='Save' submit_class='btn-primary' %}
+  </div>
 
-  {% include 'core/_modal_confirm.html' with modal_id='templated-email-save-as-modal' title='Save email template as…' body='Create a new template from the current subject and contents?' action_url='#' submit_label='Create' submit_class='btn-primary' dialog_style='text-align: left;' form_fields_template='core/_templated_email_save_as_fields.html' %}
+  <div data-compose-modal="save-as">
+    {% include 'core/_modal_confirm.html' with modal_id='' title='Save email template as…' body='Create a new template from the current subject and contents?' action_url='#' submit_label='Create' submit_class='btn-primary' dialog_style='text-align: left;' form_fields_template='core/_templated_email_save_as_fields.html' %}
+  </div>
 {% endif %}
+
+</div>

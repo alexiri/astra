@@ -122,6 +122,11 @@ urlpatterns = [
         name="email-template-json",
     ),
     path(
+        "email-tools/templates/render-preview/",
+        views_templated_email.email_template_render_preview,
+        name="email-template-render-preview",
+    ),
+    path(
         "email-tools/templates/save/",
         views_templated_email.email_template_save,
         name="email-template-save",
@@ -130,6 +135,27 @@ urlpatterns = [
         "email-tools/templates/save-as/",
         views_templated_email.email_template_save_as,
         name="email-template-save-as",
+    ),
+
+    path(
+        "email-tools/templates/",
+        views_templated_email.email_templates,
+        name="email-templates",
+    ),
+    path(
+        "email-tools/templates/new/",
+        views_templated_email.email_template_create,
+        name="email-template-create",
+    ),
+    path(
+        "email-tools/templates/<int:template_id>/",
+        views_templated_email.email_template_edit,
+        name="email-template-edit",
+    ),
+    path(
+        "email-tools/templates/<int:template_id>/delete/",
+        views_templated_email.email_template_delete,
+        name="email-template-delete",
     ),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),

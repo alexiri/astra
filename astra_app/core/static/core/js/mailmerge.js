@@ -10,90 +10,8 @@
     if (el) el.value = value;
   }
 
-  function enable(el, on) {
-    if (!el) return;
-    el.disabled = !on;
-  }
-
-  function setField(id, value) {
-    var el = $(id);
-    if (!el) return;
-    el.value = value == null ? '' : String(value);
-  }
-
-  function getField(id) {
-    var el = $(id);
-    if (!el) return '';
-    return String(el.value || '');
-  }
-
-  function storeOriginals(payload) {
-    var form = $('mailmerge-form');
-    if (!form) return;
-
-    form.dataset.originalSubject = payload.subject || '';
-    form.dataset.originalHtml = payload.html_content || '';
-    form.dataset.originalText = payload.text_content || '';
-
-    enable($('mailmerge-restore-btn'), true);
-  }
-
-  function getCsrfToken() {
-    var el = document.querySelector('input[name=csrfmiddlewaretoken]');
-    return el ? String(el.value || '') : '';
-  }
-
-  var previewTimer = null;
-
-  function setPreviewHtml(html) {
-    var box = $('mailmerge-preview-html');
-    if (!box) return;
-    box.innerHTML = html || '<span class="text-muted">No preview yet.</span>';
-  }
-
-  function setPreviewText(text) {
-    var box = $('mailmerge-preview-text');
-    if (!box) return;
-    box.textContent = text || 'No preview yet.';
-  }
-
-  async function refreshPreview() {
-    var form = $('mailmerge-form');
-    if (!form) return;
-
-    var data = new window.FormData();
-    data.append('subject', getField('id_subject'));
-    data.append('html_content', getField('id_html_content'));
-    data.append('text_content', getField('id_text_content'));
-
-    try {
-      var resp = await window.fetch('/email-tools/mail-merge/render-preview/', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': getCsrfToken(), 'Accept': 'application/json' },
-        body: data
-      });
-
-      var payload = await resp.json();
-      if (!resp.ok) {
-        // Keep existing previews; show a minimal hint.
-        if (payload && payload.error) {
-          setPreviewText(payload.error);
-        }
-        return;
-      }
-
-      setPreviewHtml(payload.html);
-      setPreviewText(payload.text);
-    } catch (_e) {
-      // Ignore transient preview failures.
-    }
-  }
-
-  function schedulePreviewRefresh() {
-    if (previewTimer) {
-      window.clearTimeout(previewTimer);
-    }
-    previewTimer = window.setTimeout(refreshPreview, 200);
+  function getCompose() {
+    return window.TemplatedEmailCompose || null;
   }
 
   function syncRecipientModeFromAccordion() {
@@ -181,158 +99,66 @@
     return false;
   }
 
-  function restoreOriginals() {
-    var form = $('mailmerge-form');
-    if (!form) return;
-
-    setField('id_subject', form.dataset.originalSubject || '');
-    setField('id_html_content', form.dataset.originalHtml || '');
-    setField('id_text_content', form.dataset.originalText || '');
-
-    schedulePreviewRefresh();
-  }
-
-  async function loadTemplate(templateId) {
-    if (!templateId) return;
-
-    try {
-      var url = '/email-tools/templates/' + encodeURIComponent(templateId) + '/json/';
-      var resp = await window.fetch(url, { headers: { 'Accept': 'application/json' } });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var payload = await resp.json();
-
-      setField('id_subject', payload.subject);
-      setField('id_html_content', payload.html_content);
-      setField('id_text_content', payload.text_content);
-      storeOriginals(payload);
-      schedulePreviewRefresh();
-    } catch (e) {
-      // Fall back to server-rendered messages.
-      try { window.alert('Failed to load template.'); } catch (_e) { /* noop */ }
-    }
-  }
-
   function onReady() {
-    var templateSelect = $('id_email_template_id');
-    if (templateSelect) {
-      templateSelect.addEventListener('change', function () {
-        var id = String(templateSelect.value || '').trim();
-        if (!id) return;
-        loadTemplate(id);
-      });
-    }
+    document.addEventListener('templated-email-compose:save-confirmed', function () {
+      setAction('save');
+      var form = $('mailmerge-form');
+      if (form) form.submit();
+    });
 
-    var restoreBtn = $('mailmerge-restore-btn');
-    if (restoreBtn) {
-      restoreBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        restoreOriginals();
-      });
-    }
+    document.addEventListener('templated-email-compose:save-as-confirmed', function (e) {
+      var detail = e && e.detail ? e.detail : {};
+      var name = String((detail && detail.name) || '').trim();
+      if (!name) return;
+      $('mailmerge-save-as-name').value = name;
+      setAction('save_as');
+      var form = $('mailmerge-form');
+      if (form) form.submit();
+    });
 
-    var saveBtn = $('mailmerge-save-btn');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        var jq = window.jQuery;
-        if (jq && jq.fn && typeof jq.fn.modal === 'function') {
-          jq('#templated-email-save-modal').modal('show');
-          return;
-        }
+    var composeBindingsReady = false;
 
-        // Fallback if Bootstrap modal isn't available.
-        var ok = false;
-        try {
-          ok = window.confirm('Overwrite the selected email template with the current subject and contents?');
-        } catch (_e) {
-          ok = false;
-        }
-        if (!ok) return;
-        setAction('save');
-        var form = $('mailmerge-form');
-        if (form) form.submit();
-      });
-    }
+    function bindComposeOnceReady() {
+      if (composeBindingsReady) return;
 
-    var saveAsBtn = $('mailmerge-save-as-btn');
-    if (saveAsBtn) {
-      saveAsBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        var jq = window.jQuery;
-        if (jq && jq.fn && typeof jq.fn.modal === 'function') {
-          var nameEl = $('templated-email-save-as-name');
-          if (nameEl) nameEl.value = '';
-          jq('#templated-email-save-as-modal').modal('show');
-          try {
-            jq('#templated-email-save-as-modal').one('shown.bs.modal', function () {
-              var el = document.getElementById('templated-email-save-as-name');
-              if (el && el.focus) el.focus();
-            });
-          } catch (_e) {
-            // Ignore.
+      var compose = getCompose();
+      if (!compose) {
+        window.setTimeout(bindComposeOnceReady, 25);
+        return;
+      }
+
+      composeBindingsReady = true;
+
+      var templateSelect = compose.getTemplateSelectEl ? compose.getTemplateSelectEl() : null;
+
+      // After a successful "Save as", the server re-renders with the new template
+      // selected. The form fields already contain the correct content, so we only
+      // need to set Restore/baseline so the user can start editing immediately.
+      var autoloadEl = $('mailmerge-autoload-template-id');
+      if (autoloadEl) {
+        var autoloadId = String(autoloadEl.value || '').trim();
+        if (autoloadId) {
+          if (compose.setTemplateId) {
+            compose.setTemplateId(autoloadId);
+          } else if (templateSelect) {
+            templateSelect.value = autoloadId;
           }
-          return;
-        }
 
-        // Fallback if Bootstrap modal isn't available.
-        var name = '';
-        try {
-          name = String(window.prompt('New template name:') || '').trim();
-        } catch (_e) {
-          name = '';
+          // Do NOT refetch the template JSON here: it would be async and could
+          // overwrite edits if the user starts typing quickly.
+          compose.setRestoreEnabled(true);
+          compose.markBaseline(compose.getValues());
+          if (window.TemplatedEmailComposePreview) {
+            window.TemplatedEmailComposePreview.schedulePreviewRefresh(compose, 0);
+          }
         }
-        if (!name) return;
-        $('mailmerge-save-as-name').value = name;
-        setAction('save_as');
-        var form = $('mailmerge-form');
-        if (form) form.submit();
-      });
-    }
-
-    // Wire modal confirm forms.
-    var saveModal = $('templated-email-save-modal');
-    if (saveModal) {
-      var formEl = saveModal.querySelector('form');
-      if (formEl) {
-        formEl.addEventListener('submit', function (e) {
-          e.preventDefault();
-          var jq = window.jQuery;
-          if (jq && jq.fn && typeof jq.fn.modal === 'function') jq('#templated-email-save-modal').modal('hide');
-          setAction('save');
-          var form = $('mailmerge-form');
-          if (form) form.submit();
-        });
       }
     }
 
-    var saveAsModal = $('templated-email-save-as-modal');
-    if (saveAsModal) {
-      var formEl2 = saveAsModal.querySelector('form');
-      if (formEl2) {
-        formEl2.addEventListener('submit', function (e) {
-          e.preventDefault();
-          var nameEl = $('templated-email-save-as-name');
-          var name = nameEl ? String(nameEl.value || '').trim() : '';
-          if (!name) return;
-          $('mailmerge-save-as-name').value = name;
-          var jq = window.jQuery;
-          if (jq && jq.fn && typeof jq.fn.modal === 'function') jq('#templated-email-save-as-modal').modal('hide');
-          setAction('save_as');
-          var form = $('mailmerge-form');
-          if (form) form.submit();
-        });
-      }
-    }
+    bindComposeOnceReady();
 
-    var htmlEl = $('id_html_content');
-    if (htmlEl) {
-      htmlEl.addEventListener('input', schedulePreviewRefresh);
-    }
-
-    var textEl = $('id_text_content');
-    if (textEl) {
-      textEl.addEventListener('input', schedulePreviewRefresh);
-    }
+    // Note: the compose widget dispatches templated-email-compose:content-updated,
+    // and we refresh preview off that signal.
 
     // Keep recipient_mode in sync with the accordion selection.
     var groupPanel = $('mailmerge-collapse-group');

@@ -833,9 +833,11 @@ def election_edit(request, election_id: int):
             group_formset.empty_form.fields["candidate_usernames"].choices = choices
 
     rendered_preview: dict[str, str] = {"html": "", "text": "", "subject": ""}
+    email_template_variables: list[tuple[str, str]] = []
     if election is not None:
+        preview_context: dict[str, object] | None = None
         try:
-            preview_context: dict[str, object] = {
+            preview_context = {
                 "username": "preview",
                 "email": "",
                 "election_id": election.id,
@@ -853,6 +855,10 @@ def election_edit(request, election_id: int):
                     credential_public_id="PREVIEW",
                 ),
             }
+
+            email_template_variables = [(k, str(v)) for k, v in preview_context.items()]
+            email_template_variables.sort(key=lambda item: item[0])
+
             rendered_preview.update(
                 render_templated_email_preview(
                     subject=str(email_form.data.get("subject") or email_form.initial.get("subject") or ""),
@@ -888,6 +894,7 @@ def election_edit(request, election_id: int):
             "nomination_eligible_voters_count": len(nomination_eligible_usernames),
             "templates": templates,
             "rendered_preview": rendered_preview,
+            "email_template_variables": email_template_variables,
             "default_template_name": settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
         },
     )

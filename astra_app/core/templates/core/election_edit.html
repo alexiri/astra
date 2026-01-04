@@ -317,7 +317,8 @@
 
     <div class="row">
       <div class="col-lg-12">
-        {% include "core/_templated_email_compose.html" with card_title="Voting credential email" templates=templates form=email_form rendered_preview=rendered_preview %}
+        {% url 'election-email-render-preview' election_id=election.id as compose_preview_url %}
+        {% include "core/_templated_email_compose.html" with card_title="Voting credential email" templates=templates form=email_form rendered_preview=rendered_preview available_variables=email_template_variables compose_description="Use election variables to personalize the subject and content." compose_preview_url=compose_preview_url %}
       </div>
     </div>
 

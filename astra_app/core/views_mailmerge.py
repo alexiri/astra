@@ -286,9 +286,9 @@ class MailMergeForm(forms.Form):
 
 @permission_required(ASTRA_ADD_MAILMERGE, login_url=reverse_lazy("users"))
 def mail_merge(request: HttpRequest) -> HttpResponse:
-    templates = list(EmailTemplate.objects.all().order_by("name"))
-
     group_choices = _group_select_choices()
+
+    created_template_id: int | None = None
 
     preview: RecipientPreview | None = None
     recipients: list[dict[str, str]] = []
@@ -371,6 +371,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                         text_content=text_content,
                     )
                     messages.success(request, f"Created template: {selected_template.name}.")
+                    created_template_id = selected_template.pk
 
             if action == "send":
                 if preview is None or not recipients:
@@ -414,11 +415,20 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
                     "text_content": text_content,
                 }
             )
+
+            # The template dropdown uses form.data/form.initial (not a bound field), so
+            # keep form.initial in sync with our computed state.
+            form.initial.update(initial)
         else:
             messages.error(request, "Fix the form errors and try again.")
             initial.update(request.POST.dict())
+            form.initial.update(initial)
     else:
         form = MailMergeForm(initial=initial, group_choices=group_choices)
+
+    # Compute templates at the end so any newly-created template is visible
+    # immediately after Save as.
+    templates = list(EmailTemplate.objects.all().order_by("name"))
 
     first_context = preview.first_context if preview else {}
 
@@ -446,6 +456,7 @@ def mail_merge(request: HttpRequest) -> HttpResponse:
             "rendered_preview": rendered_preview,
             "csv_session_key": _CSV_SESSION_KEY,
             "has_saved_csv_recipients": bool(request.session.get(_CSV_SESSION_KEY)),
+            "created_template_id": created_template_id,
         },
     )
 

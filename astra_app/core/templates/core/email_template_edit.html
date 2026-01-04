@@ -1,0 +1,67 @@
+{% extends "core/base.html" %}
+
+{% block title %}{% if is_create %}New template{% else %}Edit template{% endif %}{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">{% if is_create %}New template{% else %}Edit template{% endif %}</h1>
+{% endblock %}
+
+{% block content %}
+  <form method="post">
+    {% csrf_token %}
+
+    <div class="row">
+      <div class="col-lg-12">
+        <div class="card card-outline card-secondary">
+          <div class="card-header">
+            <h3 class="card-title">Template details</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="{{ form.name.id_for_label }}">Name</label>
+              {{ form.name }}
+              {% if form.name.errors %}<div class="text-danger small">{{ form.name.errors }}</div>{% endif %}
+            </div>
+
+            <div class="form-group mb-0">
+              <label for="{{ form.description.id_for_label }}">Description</label>
+              {{ form.description }}
+              {% if form.description.errors %}<div class="text-danger small">{{ form.description.errors }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-12">
+        {% url 'email-template-render-preview' as compose_preview_url %}
+        {% include "core/_templated_email_compose.html" with card_title="Compose" templates=compose_templates form=form rendered_preview=rendered_preview available_variables=available_variables compose_description="Edit the template subject and body." show_save_buttons=False force_email_template_id=force_email_template_id compose_preview_url=compose_preview_url %}
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-12">
+        <div class="card card-outline card-primary">
+          <div class="card-body d-flex align-items-center flex-wrap" style="gap: .75rem;">
+            <a class="btn btn-outline-secondary" href="{% url 'email-templates' %}">Back</a>
+
+            <div class="flex-grow-1 text-center">
+              {% if template %}
+                <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#email-template-delete-modal">
+                  Delete
+                </button>
+              {% endif %}
+            </div>
+
+            <button type="submit" class="btn btn-success ml-auto">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  {% if template %}
+    {% include 'core/_modal_confirm.html' with modal_id='email-template-delete-modal' title='Delete email template?' body_prefix='Delete template:' body_emphasis=template.name body_suffix='This cannot be undone.' action_url=template_delete_url submit_label='Delete' submit_class='btn-danger' %}
+  {% endif %}
+{% endblock %}
