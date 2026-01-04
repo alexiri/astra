@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from decimal import Decimal, localcontext, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal, localcontext
 
 
 @dataclass(frozen=True, slots=True)

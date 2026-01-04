@@ -78,7 +78,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         org = Organization.objects.create(
             name="ACME",
-            representatives=[username],
+            representative=username,
         )
         sponsorship = OrganizationSponsorship.objects.create(
             organization=org,

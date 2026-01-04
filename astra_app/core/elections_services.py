@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import secrets
 from dataclasses import dataclass
@@ -10,7 +9,6 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import post_office.mail
-from post_office.models import Email
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
@@ -21,6 +19,7 @@ from django.template import Context, Template
 from django.template.exceptions import TemplateSyntaxError
 from django.urls import reverse
 from django.utils import timezone
+from post_office.models import Email
 
 from core.backends import FreeIPAGroup
 from core.models import (
@@ -413,7 +412,7 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
         )
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
         .only(
-            "organization__representatives",
+            "organization__representative",
             "membership_type__votes",
         )
     )
@@ -423,15 +422,10 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
         if votes <= 0:
             continue
 
-        reps = sponsorship.organization.representatives
-        if not isinstance(reps, list):
+        username = str(sponsorship.organization.representative or "").strip()
+        if not username:
             continue
-
-        for username_raw in reps:
-            username = str(username_raw or "").strip()
-            if not username:
-                continue
-            weights_by_username[username] = weights_by_username.get(username, 0) + votes
+        weights_by_username[username] = weights_by_username.get(username, 0) + votes
 
     eligible: list[EligibleVoter] = [
         EligibleVoter(username=username, weight=weight)
@@ -536,7 +530,7 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
         )
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
         .only(
-            "organization__representatives",
+            "organization__representative",
             "membership_type__votes",
         )
     )
@@ -545,14 +539,8 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
         if votes <= 0:
             continue
 
-        reps = sponsorship.organization.representatives
-        if not isinstance(reps, list):
-            continue
-
-        for username_raw in reps:
-            if str(username_raw or "").strip() == username:
-                sponsorship_weight += votes
-                break
+        if sponsorship.organization.representative == username:
+            sponsorship_weight += votes
 
     return int(membership_weight) + sponsorship_weight
 

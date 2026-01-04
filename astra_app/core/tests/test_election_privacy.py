@@ -1,16 +1,18 @@
+import datetime
+
 from django.test import TestCase
 from django.utils import timezone
-from core.models import Election, VotingCredential, Ballot
-from core.elections_services import (
-    issue_voting_credential,
-    submit_ballot,
-    close_election,
-    send_voting_credential_email,
-    send_vote_receipt_email,
-    BallotReceipt,
-)
 from post_office.models import Email, EmailTemplate
-import datetime
+
+from core.elections_services import (
+    close_election,
+    issue_voting_credential,
+    send_vote_receipt_email,
+    send_voting_credential_email,
+    submit_ballot,
+)
+from core.models import Election
+
 
 class ElectionPrivacyTest(TestCase):
     def setUp(self):

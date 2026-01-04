@@ -315,7 +315,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Turnout so far")
+        self.assertNotContains(resp, "Participation so far")
 
         # Manager
         self._login_as_freeipa_user("admin")
@@ -330,9 +330,9 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Turnout so far")
-        self.assertContains(resp, "Number of voters")
-        self.assertContains(resp, "Votes cast (weight)")
+        self.assertContains(resp, "Participation so far")
+        self.assertContains(resp, "Number of unique voters")
+        self.assertContains(resp, "Votes cast")
         self.assertContains(resp, "Quorum")
 
         # ChartJS turnout timeline.

@@ -28,6 +28,9 @@ def election_genesis_chain_hash(election_id: int) -> str:
     splicing attacks. Without this, ballots from one election could potentially
     be spliced into another election's chain since all elections would start
     with the same genesis hash ("0" * 64).
+
+    NOTE: if you change this function, you will invalidate all existing election
+    chains!
     
     Args:
         election_id: The unique ID of the election
@@ -35,8 +38,7 @@ def election_genesis_chain_hash(election_id: int) -> str:
     Returns:
         A 64-character hex string representing the genesis chain hash
     """
-    # Use SHA-256 of "election:{id}" to create a deterministic genesis hash
-    data = f"election:{election_id}. alex estuvo aquí, dejándose el alma.".encode("utf-8")
+    data = f"election:{election_id}. alex estuvo aquí, dejándose el alma.".encode()
     return hashlib.sha256(data).hexdigest()
 
 

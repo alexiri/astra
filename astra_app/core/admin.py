@@ -1636,10 +1636,10 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
     class OrganizationAdminForm(forms.ModelForm):
-        representatives = forms.MultipleChoiceField(
+        representative = forms.ChoiceField(
             required=False,
-            widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 12}),
-            help_text="Select the FreeIPA users who can view this organization on the user site.",
+            widget=forms.Select(attrs={"class": "form-control", "size": 12}),
+            help_text="Select the FreeIPA user who is responsible for this organization.",
         )
 
         class Meta:
@@ -1698,24 +1698,14 @@ class OrganizationAdmin(admin.ModelAdmin):
             users = FreeIPAUser.all()
             usernames = sorted({u.username for u in users if u.username})
 
-            current: list[str] = []
-            initial = self.initial.get("representatives")
-            if isinstance(initial, list):
-                current = [str(u).strip() for u in initial if str(u).strip()]
-            if not current and self.instance and isinstance(self.instance.representatives, list):
-                current = [str(u).strip() for u in self.instance.representatives if str(u).strip()]
+            current = str(self.initial.get("representative") or "").strip()
+            if not current and self.instance:
+                current = str(self.instance.representative or "").strip()
 
-            missing = [u for u in current if u not in usernames]
-            if missing:
-                usernames.extend(missing)
+            if current and current not in usernames:
+                usernames.append(current)
 
-            self.fields["representatives"].choices = [(u, u) for u in sorted(set(usernames), key=str.lower)]
-
-        def clean_representatives(self) -> list[str]:
-            raw = self.cleaned_data.get("representatives") or []
-            cleaned = [str(u).strip() for u in raw if str(u).strip()]
-            # Keep stable ordering and remove duplicates.
-            return sorted(set(cleaned), key=str.lower)
+            self.fields["representative"].choices = [("", "—"), *[(u, u) for u in sorted(set(usernames), key=str.lower)]]
 
     form = OrganizationAdminForm
 
@@ -1773,7 +1763,7 @@ class OrganizationAdmin(admin.ModelAdmin):
         (
             "Access",
             {
-                "fields": ("id", "representatives"),
+                "fields": ("id", "representative"),
             },
         ),
     )

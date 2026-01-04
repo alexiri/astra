@@ -32,8 +32,7 @@ def _can_access_organization(request: HttpRequest, organization: Organization) -
     if request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
         return True
 
-    reps = organization.representatives if isinstance(organization.representatives, list) else []
-    return username in reps
+    return username == organization.representative
 
 
 def _require_organization_access(request: HttpRequest, organization: Organization) -> None:
@@ -44,11 +43,7 @@ def _require_organization_access(request: HttpRequest, organization: Organizatio
 
 def _require_representative(request: HttpRequest, organization: Organization) -> None:
     username = str(request.user.get_username() or "").strip()
-    if not username:
-        raise Http404
-
-    reps = organization.representatives if isinstance(organization.representatives, list) else []
-    if username not in reps:
+    if not username or username != organization.representative:
         raise Http404
 
 
@@ -63,8 +58,7 @@ def _can_edit_organization(request: HttpRequest, organization: Organization) -> 
     if not username:
         return False
 
-    reps = organization.representatives if isinstance(organization.representatives, list) else []
-    return username in reps
+    return username == organization.representative
 
 
 def _require_organization_edit_access(request: HttpRequest, organization: Organization) -> None:
@@ -73,15 +67,15 @@ def _require_organization_edit_access(request: HttpRequest, organization: Organi
 
 
 class OrganizationEditForm(forms.ModelForm):
-    representatives = forms.MultipleChoiceField(
+    representative = forms.ChoiceField(
         required=False,
-        widget=forms.SelectMultiple(
+        widget=forms.Select(
             attrs={
                 "class": "form-control alx-select2",
                 "data-placeholder": "Search users…",
             }
         ),
-        help_text="Select the FreeIPA users who will be representatives for this organization.",
+        help_text="Select the FreeIPA user who will be responsible for this organization.",
     )
 
     class Meta:
@@ -165,40 +159,34 @@ class OrganizationEditForm(forms.ModelForm):
         self.fields["technical_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
 
         if not self.can_select_representatives:
-            # Representatives are defaulted to the creator; only membership admins can change.
-            del self.fields["representatives"]
+            # Representative is defaulted to the creator; only membership admins can change.
+            del self.fields["representative"]
         else:
-            # Select2 uses AJAX, so only include currently-selected values as choices.
-            current_raw: list[str] = []
+            # Select2 uses AJAX, so only include currently-selected value as a choice.
+            current = ""
             if self.is_bound:
-                current_raw = list(self.data.getlist("representatives"))
+                current = str(self.data.get("representative") or "").strip()
             else:
-                initial = self.initial.get("representatives")
-                if isinstance(initial, list):
-                    current_raw = [str(v) for v in initial]
-            current = [str(v).strip() for v in current_raw if str(v).strip()]
-            self.fields["representatives"].choices = [(u, u) for u in sorted(set(current), key=str.lower)]
+                initial = self.initial.get("representative")
+                current = str(initial or "").strip()
+            self.fields["representative"].choices = [(current, current)] if current else []
 
-    def clean_representatives(self) -> list[str]:
-        if "representatives" not in self.fields:
-            return []
+    def clean_representative(self) -> str:
+        if "representative" not in self.fields:
+            return ""
 
-        raw = self.cleaned_data.get("representatives") or []
-        cleaned = [str(u).strip() for u in raw if str(u).strip()]
-        cleaned = sorted(set(cleaned), key=str.lower)
+        username = str(self.cleaned_data.get("representative") or "").strip()
+        
+        if not username:
+            return ""
 
-        missing: list[str] = []
-        for username in cleaned:
-            if FreeIPAUser.get(username) is None:
-                missing.append(username)
-
-        if missing:
+        if FreeIPAUser.get(username) is None:
             raise forms.ValidationError(
-                f"Unknown user(s): {', '.join(missing)}",
-                code="unknown_representatives",
+                f"Unknown user: {username}",
+                code="unknown_representative",
             )
 
-        return cleaned
+        return username
 
 
 class OrganizationCommitteeNotesForm(forms.ModelForm):
@@ -234,7 +222,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
     else:
         orgs = (
             Organization.objects.select_related("membership_level")
-            .filter(representatives__contains=[username])
+            .filter(representative=username)
             .order_by("name", "id")
         )
         empty_label = "You don't represent any organizations yet."
@@ -266,28 +254,28 @@ def organization_create(request: HttpRequest) -> HttpResponse:
             request.FILES,
             can_select_representatives=can_select_representatives,
         )
-        if can_select_representatives and "representatives" in form.fields:
-            form.fields["representatives"].widget.attrs["data-ajax-url"] = reverse(
+        if can_select_representatives and "representative" in form.fields:
+            form.fields["representative"].widget.attrs["data-ajax-url"] = reverse(
                 "organization-representatives-search"
             )
         if form.is_valid():
             organization = form.save(commit=False)
 
-            reps: list[str]
             if can_select_representatives:
-                selected = form.cleaned_data.get("representatives") or []
-                reps = sorted(set([username, *selected]), key=str.lower)
+                selected = form.cleaned_data.get("representative") or ""
+                organization.representative = selected or username
             else:
-                reps = [username]
+                organization.representative = username
 
-            organization.representatives = reps
             organization.save()
             messages.success(request, "Organization created.")
             return redirect("organizations")
     else:
-        form = OrganizationEditForm(can_select_representatives=can_select_representatives)
-        if can_select_representatives and "representatives" in form.fields:
-            form.fields["representatives"].widget.attrs["data-ajax-url"] = reverse(
+        form = OrganizationEditForm(
+            can_select_representatives=can_select_representatives,
+        )
+        if can_select_representatives and "representative" in form.fields:
+            form.fields["representative"].widget.attrs["data-ajax-url"] = reverse(
                 "organization-representatives-search"
             )
 
@@ -299,7 +287,7 @@ def organization_create(request: HttpRequest) -> HttpResponse:
             "cancel_url": reverse("organizations"),
             "is_create": True,
             "organization": None,
-            "show_representatives": "representatives" in form.fields,
+            "show_representatives": "representative" in form.fields,
         },
     )
 
@@ -324,7 +312,7 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
 
         text = u.username
         if full_name and full_name != u.username:
-            text = f"{u.username} — {full_name}"
+            text = f"{full_name} ({u.username})"
 
         results.append({"id": u.username, "text": text})
         if len(results) >= 20:
@@ -339,7 +327,14 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     _require_organization_access(request, organization)
 
     username = str(request.user.get_username() or "").strip()
-    is_representative = bool(username and isinstance(organization.representatives, list) and username in organization.representatives)
+    is_representative = bool(username and username == organization.representative)
+
+    representative_username = _normalize_str(organization.representative)
+    representative_full_name = ""
+    if representative_username:
+        representative_user = FreeIPAUser.get(representative_username)
+        if representative_user is not None:
+            representative_full_name = representative_user.get_full_name()
 
     sponsorship: OrganizationSponsorship | None = OrganizationSponsorship.objects.select_related("membership_type").filter(
         organization=organization
@@ -362,6 +357,8 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         "core/organization_detail.html",
         {
             "organization": organization,
+            "representative_username": representative_username,
+            "representative_full_name": representative_full_name,
             "pending_membership_level_request": pending_membership_level_request,
             "sponsorship": sponsorship,
             "sponsorship_is_expiring_soon": sponsorship_is_expiring_soon,
@@ -470,8 +467,8 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
     can_select_representatives = request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP)
 
     initial: dict[str, object] = {}
-    if can_select_representatives and isinstance(organization.representatives, list):
-        initial["representatives"] = organization.representatives
+    if can_select_representatives and organization.representative:
+        initial["representative"] = organization.representative
 
     form = OrganizationEditForm(
         request.POST or None,
@@ -480,18 +477,18 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         can_select_representatives=can_select_representatives,
         initial=initial,
     )
-    if can_select_representatives and "representatives" in form.fields:
-        form.fields["representatives"].widget.attrs["data-ajax-url"] = reverse("organization-representatives-search")
+    if can_select_representatives and "representative" in form.fields:
+        form.fields["representative"].widget.attrs["data-ajax-url"] = reverse("organization-representatives-search")
 
     if request.method == "POST" and form.is_valid():
-        requested_membership_level = form.cleaned_data.get("membership_level")
-
         updated_org = form.save(commit=False)
 
-        if can_select_representatives and "representatives" in form.fields:
-            reps = form.cleaned_data.get("representatives") or []
-            if not reps:
-                form.add_error("representatives", "At least one representative is required.")
+        requested_membership_level: MembershipType | None = updated_org.membership_level
+
+        if can_select_representatives and "representative" in form.fields:
+            representative = form.cleaned_data.get("representative") or ""
+            if not representative:
+                form.add_error("representative", "A responsible user is required.")
                 return render(
                     request,
                     "core/organization_form.html",
@@ -503,7 +500,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                         "show_representatives": True,
                     },
                 )
-            updated_org.representatives = reps
+            updated_org.representative = representative
 
         # Membership level changes are reviewed by the committee; do not apply directly.
         updated_org.membership_level_id = original_membership_level_id
@@ -556,6 +553,6 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             "form": form,
             "is_create": False,
             "cancel_url": "",
-            "show_representatives": "representatives" in form.fields,
+            "show_representatives": "representative" in form.fields,
         },
     )

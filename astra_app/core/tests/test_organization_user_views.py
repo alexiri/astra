@@ -52,7 +52,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
-            representatives=["bob"],
+            representative="bob",
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
@@ -97,7 +97,7 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            representatives=["bob"],
+            representative="bob",
         )
 
         # Viewer can see org pages but should not see the Edit button.
@@ -117,6 +117,40 @@ class OrganizationUserViewsTests(TestCase):
 
             resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 404)
+
+    def test_org_detail_shows_representative_card(self) -> None:
+        from core.models import Organization
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            representative="bob",
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "cn": ["Bob Example"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        def fake_get(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, "Representative")
+            self.assertContains(resp, "Bob Example")
+            self.assertContains(resp, reverse("user-profile", args=["bob"]))
 
     def test_representative_can_edit_org_data_notes_hidden(self) -> None:
         from core.models import MembershipType, Organization
@@ -157,7 +191,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
-            representatives=["bob"],
+            representative="bob",
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
@@ -237,7 +271,7 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            representatives=["bob"],
+            representative="bob",
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
@@ -337,7 +371,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="Committee note for AlmaLinux",
-            representatives=["bob"],
+            representative="bob",
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
@@ -458,7 +492,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             additional_information="Renewal note",
-            representatives=["bob"],
+            representative="bob",
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
@@ -525,7 +559,7 @@ class OrganizationUserViewsTests(TestCase):
             technical_contact_email="tech@almalinux.org",
             membership_level_id="gold",
             website="https://almalinux.org/",
-            representatives=["bob"],
+            representative="bob",
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=30)
@@ -640,7 +674,7 @@ class OrganizationUserViewsTests(TestCase):
         org = Organization.objects.create(
             name="AlmaLinux",
             membership_level_id="gold",
-            representatives=["bob"],
+            representative="bob",
         )
 
         start_at = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -697,7 +731,7 @@ class OrganizationUserViewsTests(TestCase):
         org = Organization.objects.create(
             name="AlmaLinux",
             membership_level_id="gold",
-            representatives=["bob"],
+            representative="bob",
         )
 
         start_at = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -746,7 +780,7 @@ class OrganizationUserViewsTests(TestCase):
         org = Organization.objects.create(
             name="AlmaLinux",
             membership_level_id="gold",
-            representatives=["bob"],
+            representative="bob",
         )
 
         expired_at = timezone.now() - datetime.timedelta(days=1)
@@ -796,7 +830,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
-            representatives=["bob"],
+            representative="bob",
         )
 
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
@@ -833,7 +867,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
-            representatives=["bob"],
+            representative="bob",
         )
 
     def test_membership_committee_can_view_and_edit_committee_notes(self) -> None:
@@ -862,7 +896,7 @@ class OrganizationUserViewsTests(TestCase):
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             notes="secret internal",
-            representatives=["bob"],
+            representative="bob",
         )
 
         # Grant membership view+change to reviewer.
@@ -929,7 +963,7 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            representatives=["bob"],
+            representative="bob",
         )
 
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -949,7 +983,7 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, 'name="representatives"')
+            self.assertContains(resp, 'name="representative"')
             self.assertContains(resp, "select2.full")
             self.assertContains(resp, "select2.css")
 
@@ -970,14 +1004,14 @@ class OrganizationUserViewsTests(TestCase):
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
                     "additional_information": "",
-                    "representatives": ["bob", "carol"],
+                    "representative": "carol",
                 },
                 follow=False,
             )
         self.assertEqual(resp.status_code, 302)
 
         org.refresh_from_db()
-        self.assertEqual(org.representatives, ["bob", "carol"])
+        self.assertEqual(org.representative, "carol")
 
     def test_deleting_organization_does_not_delete_membership_requests_or_audit_logs(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType, Organization
@@ -1001,7 +1035,7 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            representatives=["bob"],
+            representative="bob",
         )
 
         req = MembershipRequest.objects.create(
@@ -1057,7 +1091,7 @@ class OrganizationUserViewsTests(TestCase):
         from core.models import Organization
 
         created = Organization.objects.get(name="AlmaLinux")
-        self.assertEqual(created.representatives, ["bob"])
+        self.assertEqual(created.representative, "bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organizations"))

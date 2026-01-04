@@ -43,15 +43,15 @@ class OrganizationCreateRepresentativesTests(TestCase):
             resp = self.client.get(reverse("organization-create"))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Only create an organization")
-            self.assertNotContains(resp, 'name="representatives"')
+            self.assertNotContains(resp, 'name="representative"')
 
             payload = self._valid_create_payload(name="AliceCo")
-            payload["representatives"] = ["bob"]
+            payload["representative"] = "bob"
             resp = self.client.post(reverse("organization-create"), data=payload)
             self.assertEqual(resp.status_code, 302)
 
         created = Organization.objects.get(name="AliceCo")
-        self.assertEqual(created.representatives, ["alice"])
+        self.assertEqual(created.representative, "alice")
 
     def test_create_allows_representatives_selection_for_membership_admins(self) -> None:
         FreeIPAPermissionGrant.objects.create(
@@ -69,19 +69,19 @@ class OrganizationCreateRepresentativesTests(TestCase):
             resp = self.client.get(reverse("organization-create"))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Only create an organization")
-            self.assertContains(resp, 'name="representatives"')
+            self.assertContains(resp, 'name="representative"')
             # User-facing pages should load Select2 assets so the reps picker works and
             # matches the admin UI styling.
             self.assertContains(resp, "select2.full")
             self.assertContains(resp, "select2.css")
 
             payload = self._valid_create_payload(name="ReviewCo")
-            payload["representatives"] = ["bob", "carol"]
+            payload["representative"] = "bob"
             resp = self.client.post(reverse("organization-create"), data=payload)
             self.assertEqual(resp.status_code, 302)
 
         created = Organization.objects.get(name="ReviewCo")
-        self.assertEqual(created.representatives, ["bob", "carol", "reviewer"])
+        self.assertEqual(created.representative, "bob")
 
     def test_representatives_search_requires_membership_add_or_change_permission(self) -> None:
         url = reverse("organization-representatives-search")

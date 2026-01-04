@@ -31,7 +31,7 @@ class OrganizationGridTemplateTagTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo",
             website="https://example.com/",
-            representatives=["alice"],
+            representative="alice",
         )
 
         request = RequestFactory().get("/organizations/")
@@ -58,7 +58,7 @@ class OrganizationGridTemplateTagTests(TestCase):
                     technical_contact_email="tech@example.com",
                     website_logo="https://example.com/logo",
                     website="https://example.com/",
-                    representatives=["alice"],
+                    representative="alice",
                 )
             )
 

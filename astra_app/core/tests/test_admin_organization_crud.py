@@ -55,7 +55,7 @@ class AdminOrganizationCRUDTests(TestCase):
                     "website": "https://almalinux.org/",
                     "additional_information": "",
                     "notes": "Internal notes",
-                    "representatives": ["bob"],
+                    "representative": "bob",
                     "_save": "Save",
                 },
                 follow=False,
@@ -64,7 +64,7 @@ class AdminOrganizationCRUDTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         org = Organization.objects.get(name="AlmaLinux")
         self.assertEqual(org.name, "AlmaLinux")
-        self.assertEqual(org.representatives, ["bob"])
+        self.assertEqual(org.representative, "bob")
 
         ContentType.objects.clear_cache()
         ContentType.objects.get_for_model(Organization)

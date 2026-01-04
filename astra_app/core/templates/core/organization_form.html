@@ -10,7 +10,31 @@
 {% block extra_head %}
   {% if show_representatives %}
     <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
-    <link rel="stylesheet" href="{% static 'admin/css/autocomplete.css' %}">
+    <!-- <link rel="stylesheet" href="{% static 'admin/css/autocomplete.css' %}"> -->
+    <style>
+      /* Select2 default theme needs small tweaks to match AdminLTE/Bootstrap form-control sizing. */
+      .select2-container {
+        width: 100% !important;
+      }
+
+      .select2-container--default .select2-selection--single {
+        height: calc(2.25rem + 2px);
+        padding: 0.375rem 0.75rem;
+        border: 1px solid #ced4da;
+        border-radius: 0.25rem;
+      }
+
+      .select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: 1.5;
+        padding-left: 0;
+      }
+
+      .select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: calc(2.25rem + 2px);
+        top: 0;
+        right: 0.5rem;
+      }
+    </style>
   {% endif %}
 {% endblock %}
 
@@ -176,14 +200,14 @@
     {% if show_representatives %}
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">Representatives</h3>
+          <h3 class="card-title">Representative</h3>
         </div>
         <div class="card-body">
           <div class="form-group mb-0">
-            <label for="{{ form.representatives.id_for_label }}">{{ form.representatives.label }}</label>
-            {{ form.representatives }}
-            {% if form.representatives.help_text %}<small class="form-text text-muted">{{ form.representatives.help_text }}</small>{% endif %}
-            {% if form.representatives.errors %}<div class="text-danger">{{ form.representatives.errors }}</div>{% endif %}
+            <label for="{{ form.representative.id_for_label }}">{{ form.representative.label }}</label>
+            {{ form.representative }}
+            {% if form.representative.help_text %}<small class="form-text text-muted">{{ form.representative.help_text }}</small>{% endif %}
+            {% if form.representative.errors %}<div class="text-danger">{{ form.representative.errors }}</div>{% endif %}
           </div>
         </div>
       </div>
@@ -200,12 +224,12 @@
           the terms set forth in the <a href="https://almalinux.org/p/privacy-policy/">AlmaLinux OS Foundation Privacy Policy</a>.
         </div>
         <div class="m-3">
-          <button type="submit" class="btn btn-primary">{% if is_create %}Create{% else %}Save{% endif %}</button>
           {% if is_create %}
-            <a class="btn btn-secondary" href="{{ cancel_url }}">Cancel</a>
+          <a class="btn btn-secondary" href="{{ cancel_url }}">Cancel</a>
           {% else %}
-            <a class="btn btn-secondary" href="{% url 'organization-detail' organization.pk %}">Cancel</a>
+          <a class="btn btn-secondary" href="{% url 'organization-detail' organization.pk %}">Cancel</a>
           {% endif %}
+          <button type="submit" class="btn btn-success">{% if is_create %}Create{% else %}Save{% endif %}</button>
         </div>
       </div>
     </div>
@@ -220,7 +244,7 @@
         const $ = window.jQuery;
         if (!$ || !$.fn || !$.fn.select2) return;
 
-        $('select.alx-select2[multiple]').each(function () {
+        $('select.alx-select2').each(function () {
           const $select = $(this);
           if ($select.data('alx-select2-initialized')) return;
           $select.data('alx-select2-initialized', true);

@@ -180,7 +180,7 @@ class Organization(models.Model):
 
     additional_information = models.TextField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
-    representatives = models.JSONField(blank=True, default=list)
+    representative = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ("name", "id")
@@ -198,6 +198,8 @@ class Organization(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
+        self.representative = str(self.representative or "").strip()
+
         if self.pk is None and self.logo:
             # The storage path is based on the autoincrement PK; ensure we have
             # one before writing the file.
