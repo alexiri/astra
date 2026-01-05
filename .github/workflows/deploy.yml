@@ -149,7 +149,8 @@ jobs:
           SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
 
           NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"DISABLED"}}')
-          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","manage.py","migrate","--noinput"]}] }')
+          # The container image copies the repo into /app/astra_app, so manage.py is at astra_app/manage.py.
+          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","astra_app/manage.py","migrate","--noinput"]}] }')
 
           TASK_ARN=$(aws ecs run-task \
             --cluster "$CLUSTER" \
@@ -166,7 +167,18 @@ jobs:
           EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
           if [ "$EXIT_CODE" != "0" ]; then
             echo "Migrate task failed with exit code: $EXIT_CODE" >&2
-            aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --output json | jq '.tasks[0].containers'
+
+            aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --output json | \
+              jq '.tasks[0] | {stoppedReason, stopCode, containers: (.containers | map({name, exitCode, reason, lastStatus}))}'
+
+            TASK_ID="${TASK_ARN##*/}"
+            TASKDEF_JSON=$(aws ecs describe-task-definition --task-definition "$TASK_DEF" --output json)
+            LOG_GROUP=$(printf '%s' "$TASKDEF_JSON" | jq -r '.taskDefinition.containerDefinitions[] | select(.name=="astra") | .logConfiguration.options["awslogs-group"]')
+            LOG_PREFIX=$(printf '%s' "$TASKDEF_JSON" | jq -r '.taskDefinition.containerDefinitions[] | select(.name=="astra") | .logConfiguration.options["awslogs-stream-prefix"]')
+            LOG_STREAM="${LOG_PREFIX}/astra/${TASK_ID}"
+
+            echo "--- CloudWatch logs: ${LOG_GROUP} / ${LOG_STREAM} ---" >&2
+            aws logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" --start-from-head --limit 200 || true
             exit 1
           fi
 
