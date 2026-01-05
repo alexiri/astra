@@ -224,6 +224,42 @@ jobs:
             exit 1
           fi
 
+      - name: Probe web task secret injection (one-off ECS task)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
+          TASK_DEF="${{ steps.taskdef.outputs.task_definition_arn }}"
+
+          SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
+          SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
+          NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"DISABLED"}}')
+
+          # Disable auto-migrations in the entrypoint for this probe task so we only
+          # validate runtime secret injection.
+          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",environment:[{name:"DJANGO_AUTO_MIGRATE",value:"0"}],command:["python","-c","import os; v=os.environ.get(\"SECRET_KEY\"); print(\"SECRET_KEY_present\", bool(v), \"len\", 0 if v is None else len(v))"]}] }')
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --launch-type FARGATE \
+            --task-definition "$TASK_DEF" \
+            --network-configuration "$NETWORK" \
+            --overrides "$OVERRIDES" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Started probe task: ${TASK_ARN}"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Probe task failed with exit code: $EXIT_CODE" >&2
+            aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --output json | \
+              jq '.tasks[0] | {stoppedReason, stopCode, containers: (.containers | map({name, exitCode, reason, lastStatus}))}'
+            exit 1
+          fi
+
           # SSM stores subnet IDs as a comma-separated string list.
           SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
           SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
