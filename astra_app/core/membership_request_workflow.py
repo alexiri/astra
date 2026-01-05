@@ -332,71 +332,56 @@ def approve_membership_request(
             membership_type.code,
         )
 
-        if not membership_type.group_cn:
-            logger.debug(
-                "approve_membership_request: missing group_cn (org) request_id=%s membership_type=%s",
-                membership_request.pk,
-                membership_type.code,
-            )
-            raise ValidationError("This membership type is not linked to a group")
-
-        if not org.representative:
-            logger.debug(
-                "approve_membership_request: missing representative (org) request_id=%s org_id=%s",
-                membership_request.pk,
-                org.pk,
-            )
-            raise ValidationError("Organization representative is required")
-
         # This must be captured before any membership/sponsorship updates.
         previous_expires_at = previous_expires_at_for_org_extension(organization_id=org.pk)
 
-        try:
-            representative = FreeIPAUser.get(org.representative)
-        except Exception:
-            logger.exception(
-                "approve_membership_request: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
-                membership_request.pk,
-                org.pk,
-                org.representative,
-            )
-            raise
-        if representative is None:
-            logger.debug(
-                "approve_membership_request: representative not found (org) request_id=%s org_id=%s representative=%r",
-                membership_request.pk,
-                org.pk,
-                org.representative,
-            )
-            raise ValidationError("Unable to load the organization's representative from FreeIPA")
+        if membership_type.group_cn and org.representative:
+            try:
+                representative = FreeIPAUser.get(org.representative)
+            except Exception:
+                logger.exception(
+                    "approve_membership_request: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
+                    membership_request.pk,
+                    org.pk,
+                    org.representative,
+                )
+                raise
 
-        logger.debug(
-            "approve_membership_request: add_to_group start (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-            membership_request.pk,
-            org.pk,
-            representative.username,
-            membership_type.group_cn,
-        )
+            if representative is None:
+                logger.debug(
+                    "approve_membership_request: representative not found (org) request_id=%s org_id=%s representative=%r",
+                    membership_request.pk,
+                    org.pk,
+                    org.representative,
+                )
+            else:
+                logger.debug(
+                    "approve_membership_request: add_to_group start (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
+                    membership_request.pk,
+                    org.pk,
+                    representative.username,
+                    membership_type.group_cn,
+                )
 
-        try:
-            representative.add_to_group(group_name=membership_type.group_cn)
-        except Exception:
-            logger.exception(
-                "approve_membership_request: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-                membership_request.pk,
-                org.pk,
-                representative.username,
-                membership_type.group_cn,
-            )
-            raise
+                try:
+                    representative.add_to_group(group_name=membership_type.group_cn)
+                except Exception:
+                    logger.exception(
+                        "approve_membership_request: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
+                        membership_request.pk,
+                        org.pk,
+                        representative.username,
+                        membership_type.group_cn,
+                    )
+                    raise
 
-        logger.debug(
-            "approve_membership_request: add_to_group success (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-            membership_request.pk,
-            org.pk,
-            representative.username,
-            membership_type.group_cn,
-        )
+                logger.debug(
+                    "approve_membership_request: add_to_group success (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
+                    membership_request.pk,
+                    org.pk,
+                    representative.username,
+                    membership_type.group_cn,
+                )
 
         org.membership_level = membership_type
         try:
