@@ -41,18 +41,27 @@ if DEBUG:
         # Best-effort; if urllib3 isn't available/changes, don't break startup.
         pass
 
+_DEFAULT_SECRET_KEY_PLACEHOLDER = "django-insecure-dev-only-change-me"
 SECRET_KEY = env(
     "SECRET_KEY",
-    default="django-insecure-dev-only-change-me",
+    default=_DEFAULT_SECRET_KEY_PLACEHOLDER,
 )
-if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS and SECRET_KEY.startswith("django-insecure-dev-only"):
-    if "SECRET_KEY" in os.environ:
+
+print(f"len(SECRET_KEY)={len(SECRET_KEY)}, is placeholder={SECRET_KEY == _DEFAULT_SECRET_KEY_PLACEHOLDER}")
+if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS:
+    if "SECRET_KEY" not in os.environ:
         raise ImproperlyConfigured(
-            "SECRET_KEY must be set in production (got an insecure placeholder value)."
+            "SECRET_KEY must be set in production (SECRET_KEY env var is missing)."
         )
-    raise ImproperlyConfigured(
-        "SECRET_KEY must be set in production (SECRET_KEY env var is missing)."
-    )
+    # Avoid the default placeholder and overly-short values.
+    if SECRET_KEY == _DEFAULT_SECRET_KEY_PLACEHOLDER:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set in production (value is the insecure placeholder)."
+        )
+    if len(SECRET_KEY) <= 32:
+        raise ImproperlyConfigured(
+            "SECRET_KEY value is too weak."
+        )
 
 _dev_allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
 ALLOWED_HOSTS = env.list(
