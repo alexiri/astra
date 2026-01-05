@@ -158,7 +158,8 @@ JAZZMIN_SETTINGS = {
 
 # Email
 # In DEBUG, docker-compose provides EMAIL_URL pointing to Mailhog.
-EMAIL_CONFIG = env.email_url('EMAIL_URL', default=None)
+_email_url_raw = os.environ.get("EMAIL_URL", "").strip()
+EMAIL_CONFIG = env.email_url("EMAIL_URL") if _email_url_raw else None
 if EMAIL_CONFIG:
     globals().update(EMAIL_CONFIG)
 
@@ -330,7 +331,7 @@ STORAGES = {
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 
-AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
 AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
 AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="") or None
 
@@ -344,7 +345,19 @@ _public_base_url_raw = str(PUBLIC_BASE_URL or "").strip()
 if "://" not in _public_base_url_raw:
     _public_base_url_raw = f"https://{_public_base_url_raw}"
 
-_aws_s3_domain = urlsplit(env("AWS_S3_DOMAIN"))
+_aws_s3_domain_raw = env("AWS_S3_DOMAIN", default="")
+if not _ALLOW_MISSING_RUNTIME_SECRETS:
+    if not AWS_STORAGE_BUCKET_NAME:
+        raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set.")
+    if not _aws_s3_domain_raw:
+        raise ImproperlyConfigured("AWS_S3_DOMAIN must be set.")
+else:
+    if not AWS_STORAGE_BUCKET_NAME:
+        AWS_STORAGE_BUCKET_NAME = "migrations-placeholder"
+    if not _aws_s3_domain_raw:
+        _aws_s3_domain_raw = "http://localhost"
+
+_aws_s3_domain = urlsplit(_aws_s3_domain_raw)
 AWS_S3_URL_PROTOCOL = f"{_aws_s3_domain.scheme}:"
 _aws_s3_base_domain = (_aws_s3_domain.netloc + _aws_s3_domain.path.rstrip("/")).strip("/")
 AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}" 

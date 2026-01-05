@@ -7,24 +7,14 @@ import unittest
 
 class TestSettingsManagementCommandRelaxesRuntimeRequirements(unittest.TestCase):
     def test_migrate_does_not_require_runtime_secrets(self) -> None:
-        env = os.environ.copy()
-        env.update(
-            {
-                "DEBUG": "0",
-                # Intentionally omit SECRET_KEY, ALLOWED_HOSTS, and FREEIPA_SERVICE_PASSWORD.
-                "AWS_STORAGE_BUCKET_NAME": "astra-media",
-                "AWS_S3_DOMAIN": "http://localhost:9000",
-                "DATABASE_HOST": "db.example.internal",
-                "DATABASE_PORT": "5432",
-                "DATABASE_NAME": "astra",
-                "DATABASE_USER": "astra",
-                "DATABASE_PASSWORD": "supersecret",
-            }
-        )
-        env.pop("DATABASE_URL", None)
-        env.pop("SECRET_KEY", None)
-        env.pop("ALLOWED_HOSTS", None)
-        env.pop("FREEIPA_SERVICE_PASSWORD", None)
+        env = {
+            "DEBUG": "0",
+            "DATABASE_HOST": "db.example.internal",
+            "DATABASE_PORT": "5432",
+            "DATABASE_NAME": "astra",
+            "DATABASE_USER": "astra",
+            "DATABASE_PASSWORD": "supersecret",
+        }
 
         code = textwrap.dedent(
             """
