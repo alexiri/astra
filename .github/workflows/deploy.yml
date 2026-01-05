@@ -111,7 +111,12 @@ jobs:
             --cluster "$CLUSTER" \
             --services "$SERVICE" \
             --query 'services[0].taskDefinition' \
-            --output text)
+            --output text | awk 'NR==1{print $1}')
+
+          if [ -z "$CURRENT_TASK_DEF_ARN" ] || [ "$CURRENT_TASK_DEF_ARN" = "None" ] || [ "$CURRENT_TASK_DEF_ARN" = "null" ]; then
+            echo "Could not resolve current ECS task definition ARN for service: ${SERVICE}" >&2
+            exit 1
+          fi
 
           # Important: the service may still point at an older task definition even
           # after Terraform created a newer revision (the service ignores task_definition
@@ -120,15 +125,20 @@ jobs:
           FAMILY=$(aws ecs describe-task-definition \
             --task-definition "$CURRENT_TASK_DEF_ARN" \
             --query 'taskDefinition.family' \
-            --output text)
+            --output text | awk 'NR==1{print $1}')
+
+          if [ -z "$FAMILY" ] || [ "$FAMILY" = "None" ] || [ "$FAMILY" = "null" ]; then
+            echo "Could not resolve task definition family from: ${CURRENT_TASK_DEF_ARN}" >&2
+            exit 1
+          fi
 
           BASE_TASK_DEF_ARN=$(aws ecs list-task-definitions \
             --family-prefix "$FAMILY" \
             --status ACTIVE \
             --sort DESC \
-            --max-items 1 \
+            --max-results 1 \
             --query 'taskDefinitionArns[0]' \
-            --output text)
+            --output text | awk 'NR==1{print $1}')
 
           if [ -z "$BASE_TASK_DEF_ARN" ] || [ "$BASE_TASK_DEF_ARN" = "None" ] || [ "$BASE_TASK_DEF_ARN" = "null" ]; then
             BASE_TASK_DEF_ARN="$CURRENT_TASK_DEF_ARN"
