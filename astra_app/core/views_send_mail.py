@@ -320,7 +320,7 @@ def _user_select_choices() -> list[tuple[str, str]]:
             continue
         full_name = str(u.full_name or "").strip()
         if full_name and full_name.lower() != username.lower():
-            label = f"{username} — {full_name}"
+            label = f"{full_name} ({username})"
         else:
             label = username
         choices.append((username, label))
