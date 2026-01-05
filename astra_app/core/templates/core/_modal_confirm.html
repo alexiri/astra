@@ -49,6 +49,14 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
 
           <div class="d-flex justify-content-between">
             <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">{{ cancel_label|default:"Cancel" }}</button>
+            {% if show_custom_email_button %}
+              <button
+                type="submit"
+                class="btn {{ custom_submit_class|default:'btn-primary' }}"
+                name="{{ custom_submit_name|default:'custom_email' }}"
+                value="{{ custom_submit_value|default:'1' }}"
+              >{{ custom_submit_label|default:"Custom" }}</button>
+            {% endif %}
             <button type="submit" class="btn {{ submit_button_class|default:submit_class|default:'btn-primary' }}">{{ submit_label }}</button>
           </div>
         </form>

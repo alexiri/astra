@@ -51,7 +51,7 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
         self.assertIn("rep1", eligible_by_username)
         self.assertEqual(eligible_by_username["rep1"], 5)
 
-    def test_org_sponsorship_only_applies_to_single_responsible(self) -> None:
+    def test_org_sponsorship_only_applies_to_single_representative(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Eligibility election",

@@ -75,7 +75,7 @@ class OrganizationEditForm(forms.ModelForm):
                 "data-placeholder": "Search users…",
             }
         ),
-        help_text="Select the FreeIPA user who will be responsible for this organization.",
+        help_text="Select the FreeIPA user who will be the organization's representative.",
     )
 
     class Meta:
@@ -488,7 +488,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         if can_select_representatives and "representative" in form.fields:
             representative = form.cleaned_data.get("representative") or ""
             if not representative:
-                form.add_error("representative", "A responsible user is required.")
+                form.add_error("representative", "A representative is required.")
                 return render(
                     request,
                     "core/organization_form.html",

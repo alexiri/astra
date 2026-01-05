@@ -1639,7 +1639,7 @@ class OrganizationAdmin(admin.ModelAdmin):
         representative = forms.ChoiceField(
             required=False,
             widget=forms.Select(attrs={"class": "form-control", "size": 12}),
-            help_text="Select the FreeIPA user who is responsible for this organization.",
+            help_text="Select the FreeIPA user who is the organization's representative.",
         )
 
         class Meta:

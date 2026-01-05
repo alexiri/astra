@@ -16,13 +16,17 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
-from core.email_context import organization_sponsor_email_context, user_email_context_from_user
+from core.email_context import organization_sponsor_email_context
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username
-from core.membership_request_workflow import approve_membership_request, record_membership_request_created
+from core.membership_request_workflow import (
+    approve_membership_request,
+    ignore_membership_request,
+    record_membership_request_created,
+    reject_membership_request,
+)
 from core.models import (
     MembershipLog,
     MembershipRequest,
@@ -41,8 +45,75 @@ from core.views_utils import _normalize_str
 logger = logging.getLogger(__name__)
 
 
-def _membership_request_email_templates(*, name_prefix: str) -> list[EmailTemplate]:
-    return list(EmailTemplate.objects.filter(name__startswith=name_prefix).order_by("name"))
+def _membership_request_target_label(membership_request: MembershipRequest) -> str:
+    if membership_request.requested_username:
+        return membership_request.requested_username
+
+    org = membership_request.requested_organization
+    return org.name if org is not None else (membership_request.requested_organization_name or "organization")
+
+
+def _send_mail_url(*, to_type: str, to: str, template_name: str, extra_context: dict[str, str]) -> str:
+    query_params = {
+        "type": to_type,
+        "to": to,
+        "template": template_name,
+        **extra_context,
+    }
+    send_mail_url = reverse("send-mail")
+    return f"{send_mail_url}?{urlencode(query_params)}"
+
+
+def _custom_email_recipient_for_request(membership_request: MembershipRequest) -> tuple[str, str] | None:
+    """Return (Send Mail type, to) for a membership-request custom email.
+
+    For org requests, prefer the representative when it resolves
+    to a FreeIPA user with an email address; otherwise fall back to
+    Organization.primary_contact_email().
+    """
+
+    if membership_request.requested_username:
+        return ("users", membership_request.requested_username)
+
+    org = membership_request.requested_organization
+    if org is None:
+        return None
+
+    representative_username = org.representative
+    if representative_username:
+        representative = FreeIPAUser.get(representative_username)
+        if representative is not None and representative.email:
+            return ("users", representative_username)
+
+    org_email = org.primary_contact_email()
+    if org_email:
+        return ("manual", org_email)
+
+    return None
+
+
+def _custom_email_redirect(
+    *,
+    request: HttpRequest,
+    membership_request: MembershipRequest,
+    template_name: str,
+    extra_context: dict[str, str],
+    redirect_to: str,
+) -> HttpResponse:
+    recipient = _custom_email_recipient_for_request(membership_request)
+    if recipient is None:
+        messages.error(request, "No recipient is available for a custom email.")
+        return redirect(redirect_to)
+
+    to_type, to = recipient
+    return redirect(
+        _send_mail_url(
+            to_type=to_type,
+            to=to,
+            template_name=template_name,
+            extra_context=extra_context,
+        )
+    )
 
 
 def _pagination_context(*, paginator: Paginator, page_obj, page_url_prefix: str) -> dict[str, object]:
@@ -284,9 +355,6 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
-    approved_email_templates = _membership_request_email_templates(name_prefix="membership-request-approved")
-    rejected_email_templates = _membership_request_email_templates(name_prefix="membership-request-rejected")
-
     requests = (
         MembershipRequest.objects.select_related("membership_type", "requested_organization")
         .filter(status=MembershipRequest.Status.pending)
@@ -295,12 +363,6 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 
     request_rows: list[dict[str, object]] = []
     for r in requests:
-        default_approve_template = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-        if r.membership_type.acceptance_template_id is not None:
-            default_approve_template = r.membership_type.acceptance_template.name
-
-        default_reject_template = settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME
-
         if r.requested_username == "":
             org = r.requested_organization
             request_rows.append(
@@ -309,9 +371,6 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                     "organization": org,
                     "organization_code": r.requested_organization_code,
                     "organization_name": r.requested_organization_name,
-                    "target_email": org.primary_contact_email() if org is not None else "",
-                    "default_approve_template": default_approve_template,
-                    "default_reject_template": default_reject_template,
                 }
             )
         else:
@@ -324,9 +383,6 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                     "full_name": full_name,
                     "status_note": status_note,
                     "user_deleted": fu is None,
-                    "target_email": (fu.email or "") if fu is not None else "",
-                    "default_approve_template": default_approve_template,
-                    "default_reject_template": default_reject_template,
                 }
             )
 
@@ -336,8 +392,6 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
         {
             "requests": requests,
             "request_rows": request_rows,
-            "approved_email_templates": approved_email_templates,
-            "rejected_email_templates": rejected_email_templates,
         },
     )
 
@@ -346,29 +400,15 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
 
-    approved_email_templates = _membership_request_email_templates(name_prefix="membership-request-approved")
-    rejected_email_templates = _membership_request_email_templates(name_prefix="membership-request-rejected")
-
     target_user = None
     target_full_name = ""
     target_user_deleted = False
-    target_email = ""
     if req.requested_username:
         target_user = FreeIPAUser.get(req.requested_username)
         if target_user is None:
             target_user_deleted = True
         else:
             target_full_name = target_user.full_name
-            target_email = target_user.email or ""
-    else:
-        org = req.requested_organization
-        if org is not None:
-            target_email = org.primary_contact_email()
-
-    default_approve_template = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-    if req.membership_type.acceptance_template_id is not None:
-        default_approve_template = req.membership_type.acceptance_template.name
-    default_reject_template = settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME
 
     return render(
         request,
@@ -378,11 +418,6 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "target_user": target_user,
             "target_full_name": target_full_name,
             "target_user_deleted": target_user_deleted,
-            "target_email": target_email,
-            "approved_email_templates": approved_email_templates,
-            "rejected_email_templates": rejected_email_templates,
-            "default_approve_template": default_approve_template,
-            "default_reject_template": default_reject_template,
         },
     )
 
@@ -478,83 +513,6 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     failures = 0
 
     for req in reqs:
-        membership_type = req.membership_type
-
-        if req.requested_username == "":
-            org = req.requested_organization
-
-            if action == "approve":
-                try:
-                    approve_membership_request(
-                        membership_request=req,
-                        actor_username=actor_username,
-                        send_approved_email=False,
-                    )
-                except Exception:
-                    logger.exception("Bulk approve failed for membership request pk=%s", req.pk)
-                    failures += 1
-                    continue
-
-                approved += 1
-                continue
-
-            if action == "reject":
-                if org is not None:
-                    MembershipLog.create_for_org_rejection(
-                        actor_username=actor_username,
-                        target_organization=org,
-                        membership_type=membership_type,
-                        rejection_reason="",
-                        membership_request=req,
-                    )
-                else:
-                    MembershipLog.objects.create(
-                        actor_username=actor_username,
-                        target_username="",
-                        target_organization=None,
-                        target_organization_code=req.requested_organization_code,
-                        target_organization_name=req.requested_organization_name,
-                        membership_type=membership_type,
-                        membership_request=req,
-                        requested_group_cn=membership_type.group_cn,
-                        action=MembershipLog.Action.rejected,
-                        rejection_reason="",
-                        expires_at=None,
-                    )
-                req.status = MembershipRequest.Status.rejected
-                req.decided_at = timezone.now()
-                req.decided_by_username = actor_username
-                req.save(update_fields=["status", "decided_at", "decided_by_username"])
-                rejected += 1
-                continue
-
-            if org is not None:
-                MembershipLog.create_for_org_ignore(
-                    actor_username=actor_username,
-                    target_organization=org,
-                    membership_type=membership_type,
-                    membership_request=req,
-                )
-            else:
-                MembershipLog.objects.create(
-                    actor_username=actor_username,
-                    target_username="",
-                    target_organization=None,
-                    target_organization_code=req.requested_organization_code,
-                    target_organization_name=req.requested_organization_name,
-                    membership_type=membership_type,
-                    membership_request=req,
-                    requested_group_cn=membership_type.group_cn,
-                    action=MembershipLog.Action.ignored,
-                    expires_at=None,
-                )
-            req.status = MembershipRequest.Status.ignored
-            req.decided_at = timezone.now()
-            req.decided_by_username = actor_username
-            req.save(update_fields=["status", "decided_at", "decided_by_username"])
-            ignored += 1
-            continue
-
         if action == "approve":
             try:
                 approve_membership_request(
@@ -563,52 +521,40 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                     send_approved_email=True,
                 )
             except Exception:
-                logger.exception("Bulk approve failed to add user to membership group")
+                logger.exception("Bulk approve failed for membership request pk=%s", req.pk)
                 failures += 1
                 continue
 
             approved += 1
 
         elif action == "reject":
-            target = FreeIPAUser.get(req.requested_username)
-            reason = ""
-            MembershipLog.create_for_rejection(
-                actor_username=actor_username,
-                target_username=req.requested_username,
-                membership_type=membership_type,
-                rejection_reason=reason,
-                membership_request=req,
-            )
-            req.status = MembershipRequest.Status.rejected
-            req.decided_at = timezone.now()
-            req.decided_by_username = actor_username
-            req.save(update_fields=["status", "decided_at", "decided_by_username"])
+            try:
+                _, email_error = reject_membership_request(
+                    membership_request=req,
+                    actor_username=actor_username,
+                    rejection_reason="",
+                    send_rejected_email=True,
+                )
+                if email_error is not None:
+                    failures += 1
+            except Exception:
+                logger.exception("Bulk reject failed for membership request pk=%s", req.pk)
+                failures += 1
+                continue
+
             rejected += 1
 
-            if target is not None and target.email:
-                post_office.mail.send(
-                    recipients=[target.email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-                    context={
-                        **user_email_context_from_user(user=target),
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                        "rejection_reason": reason,
-                    },
-                )
-
         else:
-            MembershipLog.create_for_ignore(
-                actor_username=actor_username,
-                target_username=req.requested_username,
-                membership_type=membership_type,
-                membership_request=req,
-            )
-            req.status = MembershipRequest.Status.ignored
-            req.decided_at = timezone.now()
-            req.decided_by_username = actor_username
-            req.save(update_fields=["status", "decided_at", "decided_by_username"])
+            try:
+                ignore_membership_request(
+                    membership_request=req,
+                    actor_username=actor_username,
+                )
+            except Exception:
+                logger.exception("Bulk ignore failed for membership request pk=%s", req.pk)
+                failures += 1
+                continue
+
             ignored += 1
 
     if approved:
@@ -629,6 +575,9 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404("Not found")
 
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+    membership_type = req.membership_type
+
+    custom_email = bool(str(request.POST.get("custom_email") or "").strip())
 
     next_url = str(request.POST.get("next") or "").strip()
     if next_url and url_has_allowed_host_and_scheme(
@@ -647,37 +596,56 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         ):
             redirect_to = reverse("membership-requests")
 
-    skip_email = bool(str(request.POST.get("skip_email") or "").strip())
-    selected_template = str(request.POST.get("email_template") or "").strip()
-    approved_email_template_name: str | None = None
-    if not skip_email and selected_template:
-        if not selected_template.startswith("membership-request-approved"):
-            messages.error(request, "Invalid email template selection.")
-            return redirect(redirect_to)
-        if not EmailTemplate.objects.filter(name=selected_template).exists():
-            messages.error(request, "Selected email template not found.")
-            return redirect(redirect_to)
-        approved_email_template_name = selected_template
-
     try:
         approve_membership_request(
             membership_request=req,
             actor_username=request.user.get_username(),
-            send_approved_email=not skip_email,
-            approved_email_template_name=approved_email_template_name,
+            send_approved_email=not custom_email,
+            approved_email_template_name=None,
         )
     except Exception:
         logger.exception("Failed to approve membership request pk=%s", req.pk)
         messages.error(request, "Failed to approve the request.")
         return redirect(redirect_to)
 
+    target_label = _membership_request_target_label(req)
+
+    template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+    if membership_type.acceptance_template_id is not None:
+        template_name = membership_type.acceptance_template.name
+
+    messages.success(request, f"Approved request for {target_label}.")
+
     if req.requested_username == "":
         org = req.requested_organization
-        org_name = org.name if org is not None else (req.requested_organization_name or "organization")
-        messages.success(request, f"Approved sponsorship level request for {org_name}.")
+
+        if custom_email:
+            return _custom_email_redirect(
+                request=request,
+                membership_request=req,
+                template_name=template_name,
+                extra_context={
+                    "organization_name": org.name if org is not None else (req.requested_organization_name or ""),
+                    **(organization_sponsor_email_context(organization=org) if org is not None else {}),
+                    "membership_type": membership_type.name,
+                    "membership_type_code": membership_type.code,
+                },
+                redirect_to=redirect_to,
+            )
         return redirect(redirect_to)
 
-    messages.success(request, f"Approved membership request for {req.requested_username}.")
+    if custom_email:
+        return _custom_email_redirect(
+            request=request,
+            membership_request=req,
+            template_name=template_name,
+            extra_context={
+                "membership_type": membership_type.name,
+                "membership_type_code": membership_type.code,
+                "group_cn": membership_type.group_cn,
+            },
+            redirect_to=redirect_to,
+        )
     return redirect(redirect_to)
 
 
@@ -689,6 +657,8 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
     membership_type = req.membership_type
 
+    custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+
     next_url = str(request.POST.get("next") or "").strip()
     if next_url and url_has_allowed_host_and_scheme(
         url=next_url,
@@ -706,123 +676,57 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
         ):
             redirect_to = reverse("membership-requests")
 
-    if req.requested_username == "":
-        form = MembershipRejectForm(request.POST)
-        if not form.is_valid():
-            messages.error(request, "Invalid rejection reason.")
-            return redirect(redirect_to)
-
-        reason = str(form.cleaned_data.get("reason") or "").strip()
-        if reason:
-            req.responses = [{"Rejection reason": reason}]
-
-        skip_email = bool(str(request.POST.get("skip_email") or "").strip())
-        selected_template = str(request.POST.get("email_template") or "").strip()
-        reject_template = settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME
-        if (not skip_email) and selected_template:
-            if not selected_template.startswith("membership-request-rejected"):
-                messages.error(request, "Invalid email template selection.")
-                return redirect(redirect_to)
-            if not EmailTemplate.objects.filter(name=selected_template).exists():
-                messages.error(request, "Selected email template not found.")
-                return redirect(redirect_to)
-            reject_template = selected_template
-
-        org = req.requested_organization
-        if org is not None:
-            MembershipLog.create_for_org_rejection(
-                actor_username=request.user.get_username(),
-                target_organization=org,
-                membership_type=membership_type,
-                rejection_reason=reason,
-                membership_request=req,
-            )
-        else:
-            MembershipLog.objects.create(
-                actor_username=request.user.get_username(),
-                target_username="",
-                target_organization=None,
-                target_organization_code=req.requested_organization_code,
-                target_organization_name=req.requested_organization_name,
-                membership_type=membership_type,
-                membership_request=req,
-                requested_group_cn=membership_type.group_cn,
-                action=MembershipLog.Action.rejected,
-                rejection_reason=reason,
-                expires_at=None,
-            )
-
-        req.status = MembershipRequest.Status.rejected
-        req.decided_at = timezone.now()
-        req.decided_by_username = request.user.get_username()
-        req.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
-
-        org_email = org.primary_contact_email() if org is not None else ""
-        if (not skip_email) and org_email:
-            post_office.mail.send(
-                recipients=[org_email],
-                sender=settings.DEFAULT_FROM_EMAIL,
-                template=reject_template,
-                context={
-                    "organization_name": org.name if org is not None else (req.requested_organization_name or ""),
-                    **(organization_sponsor_email_context(organization=org) if org is not None else {}),
-                    "membership_type": membership_type.name,
-                    "membership_type_code": membership_type.code,
-                    "rejection_reason": reason,
-                },
-            )
-
-        org_name = org.name if org is not None else (req.requested_organization_name or "organization")
-        messages.success(request, f"Rejected sponsorship level request for {org_name}.")
-        return redirect(redirect_to)
-
     form = MembershipRejectForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Invalid rejection reason.")
         return redirect(redirect_to)
 
     reason = str(form.cleaned_data.get("reason") or "").strip()
-    target = FreeIPAUser.get(req.requested_username)
 
-    MembershipLog.create_for_rejection(
-        actor_username=request.user.get_username(),
-        target_username=req.requested_username,
-        membership_type=membership_type,
-        rejection_reason=reason,
+    _, email_error = reject_membership_request(
         membership_request=req,
+        actor_username=request.user.get_username(),
+        rejection_reason=reason,
+        send_rejected_email=not custom_email,
     )
 
-    req.status = MembershipRequest.Status.rejected
-    req.decided_at = timezone.now()
-    req.decided_by_username = request.user.get_username()
-    req.save(update_fields=["status", "decided_at", "decided_by_username"])
+    target_label = _membership_request_target_label(req)
+    messages.success(request, f"Rejected request for {target_label}.")
 
-    skip_email = bool(str(request.POST.get("skip_email") or "").strip())
-    selected_template = str(request.POST.get("email_template") or "").strip()
-    reject_template = settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME
-    if (not skip_email) and selected_template:
-        if not selected_template.startswith("membership-request-rejected"):
-            messages.error(request, "Invalid email template selection.")
-            return redirect(redirect_to)
-        if not EmailTemplate.objects.filter(name=selected_template).exists():
-            messages.error(request, "Selected email template not found.")
-            return redirect(redirect_to)
-        reject_template = selected_template
+    if email_error is not None:
+        messages.error(request, "Request was rejected, but the email could not be sent.")
 
-    if not skip_email and target is not None and target.email:
-        post_office.mail.send(
-            recipients=[target.email],
-            sender=settings.DEFAULT_FROM_EMAIL,
-            template=reject_template,
-            context={
-                **user_email_context_from_user(user=target),
+    if req.requested_username == "":
+        org = req.requested_organization
+
+        if custom_email:
+            return _custom_email_redirect(
+                request=request,
+                membership_request=req,
+                template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+                extra_context={
+                    "organization_name": org.name if org is not None else (req.requested_organization_name or ""),
+                    **(organization_sponsor_email_context(organization=org) if org is not None else {}),
+                    "membership_type": membership_type.name,
+                    "membership_type_code": membership_type.code,
+                    "rejection_reason": reason,
+                },
+                redirect_to=redirect_to,
+            )
+        return redirect(redirect_to)
+
+    if custom_email:
+        return _custom_email_redirect(
+            request=request,
+            membership_request=req,
+            template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+            extra_context={
                 "membership_type": membership_type.name,
                 "membership_type_code": membership_type.code,
                 "rejection_reason": reason,
             },
+            redirect_to=redirect_to,
         )
-
-    messages.success(request, f"Rejected membership request for {req.requested_username}.")
     return redirect(redirect_to)
 
 
@@ -850,52 +754,13 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
         ):
             redirect_to = reverse("membership-requests")
 
-    if req.requested_username == "":
-        org = req.requested_organization
-        org_name = org.name if org is not None else (req.requested_organization_name or "organization")
-
-        if org is not None:
-            MembershipLog.create_for_org_ignore(
-                actor_username=request.user.get_username(),
-                target_organization=org,
-                membership_type=req.membership_type,
-                membership_request=req,
-            )
-        else:
-            MembershipLog.objects.create(
-                actor_username=request.user.get_username(),
-                target_username="",
-                target_organization=None,
-                target_organization_code=req.requested_organization_code,
-                target_organization_name=req.requested_organization_name,
-                membership_type=req.membership_type,
-                membership_request=req,
-                requested_group_cn=req.membership_type.group_cn,
-                action=MembershipLog.Action.ignored,
-                expires_at=None,
-            )
-
-        req.status = MembershipRequest.Status.ignored
-        req.decided_at = timezone.now()
-        req.decided_by_username = request.user.get_username()
-        req.save(update_fields=["status", "decided_at", "decided_by_username"])
-
-        messages.success(request, f"Ignored sponsorship level request for {org_name}.")
-        return redirect(redirect_to)
-
-    MembershipLog.create_for_ignore(
-        actor_username=request.user.get_username(),
-        target_username=req.requested_username,
-        membership_type=req.membership_type,
+    ignore_membership_request(
         membership_request=req,
+        actor_username=request.user.get_username(),
     )
 
-    req.status = MembershipRequest.Status.ignored
-    req.decided_at = timezone.now()
-    req.decided_by_username = request.user.get_username()
-    req.save(update_fields=["status", "decided_at", "decided_by_username"])
-
-    messages.success(request, f"Ignored membership request for {req.requested_username}.")
+    target_label = _membership_request_target_label(req)
+    messages.success(request, f"Ignored request for {target_label}.")
     return redirect(redirect_to)
 
 

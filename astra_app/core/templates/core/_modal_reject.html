@@ -43,6 +43,9 @@ Optional:
 
           <div class="d-flex justify-content-between">
             <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+            {% if show_custom_email_button %}
+              <button type="submit" class="btn btn-outline-danger" name="custom_email" value="1">Reject with Custom Email</button>
+            {% endif %}
             <button type="submit" class="btn btn-danger">Reject</button>
           </div>
         </form>

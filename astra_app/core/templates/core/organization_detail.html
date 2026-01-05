@@ -188,7 +188,7 @@
             <dt class="col-sm-4">Email</dt>
             <dd class="col-sm-8">
               {% if organization.business_contact_email %}
-                <a href="mailto:{{ organization.business_contact_email }}">{{ organization.business_contact_email }}</a>
+                <a href="{% url 'send-mail' %}?type=manual&to={{ organization.business_contact_email|urlencode }}">{{ organization.business_contact_email }}</a>
               {% else %}
                 —
               {% endif %}
@@ -210,7 +210,7 @@
             <dt class="col-sm-4">Email</dt>
             <dd class="col-sm-8">
               {% if organization.pr_marketing_contact_email %}
-                <a href="mailto:{{ organization.pr_marketing_contact_email }}">{{ organization.pr_marketing_contact_email }}</a>
+                <a href="{% url 'send-mail' %}?type=manual&to={{ organization.pr_marketing_contact_email|urlencode }}">{{ organization.pr_marketing_contact_email }}</a>
               {% else %}
                 —
               {% endif %}
@@ -232,7 +232,7 @@
             <dt class="col-sm-4">Email</dt>
             <dd class="col-sm-8">
               {% if organization.technical_contact_email %}
-                <a href="mailto:{{ organization.technical_contact_email }}">{{ organization.technical_contact_email }}</a>
+                <a href="{% url 'send-mail' %}?type=manual&to={{ organization.technical_contact_email|urlencode }}">{{ organization.technical_contact_email }}</a>
               {% else %}
                 —
               {% endif %}

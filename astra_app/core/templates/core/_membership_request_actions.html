@@ -11,11 +11,11 @@ support safe redirects using Referer when `next` isn't provided.
 {% with membership_request=request %}
   {% with pk_str=membership_request.pk|stringformat:"s" membership_type_name=membership_request.membership_type.name %}
     {% if membership_request.requested_username %}
-      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_username target_email=target_email approved_email_templates=approved_email_templates rejected_email_templates=rejected_email_templates default_approve_template_name=default_approve_template default_reject_template_name=default_reject_template %}
+      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_username %}
     {% elif membership_request.requested_organization %}
-      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_organization.name target_email=target_email approved_email_templates=approved_email_templates rejected_email_templates=rejected_email_templates default_approve_template_name=default_approve_template default_reject_template_name=default_reject_template %}
+      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_organization.name %}
     {% else %}
-      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_organization_name target_email=target_email approved_email_templates=approved_email_templates rejected_email_templates=rejected_email_templates default_approve_template_name=default_approve_template default_reject_template_name=default_reject_template %}
+      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_organization_name %}
     {% endif %}
   {% endwith %}
 {% endwith %}
