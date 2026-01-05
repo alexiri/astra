@@ -68,12 +68,14 @@ jobs:
           SUBNETS_CSV=$(aws ssm get-parameter --name "${PREFIX}/network/private_subnet_ids" --query 'Parameter.Value' --output text)
           TASKS_SG=$(aws ssm get-parameter --name "${PREFIX}/ecs/tasks_security_group_id" --query 'Parameter.Value' --output text)
           ECR_REPOSITORY=$(aws ssm get-parameter --name "${PREFIX}/ecr/repository_name" --query 'Parameter.Value' --output text)
+          FREEIPA_SECRET_ARN=$(aws ssm get-parameter --name "${PREFIX}/secrets/freeipa_service_password_secret_arn" --query 'Parameter.Value' --output text)
 
           echo "cluster_name=${CLUSTER_NAME}" >> "$GITHUB_OUTPUT"
           echo "service_name=${SERVICE_NAME}" >> "$GITHUB_OUTPUT"
           echo "subnets_csv=${SUBNETS_CSV}" >> "$GITHUB_OUTPUT"
           echo "tasks_sg=${TASKS_SG}" >> "$GITHUB_OUTPUT"
           echo "ecr_repository=${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "freeipa_service_password_secret_arn=${FREEIPA_SECRET_ARN}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve AWS account and ECR registry
         id: aws
@@ -116,18 +118,34 @@ jobs:
             --query 'taskDefinition' \
             --output json > taskdef.base.json
 
-          # Remove read-only fields and replace the image for the "astra" container.
-          jq --arg IMAGE "$IMAGE" 'del(
-              .taskDefinitionArn,
-              .revision,
-              .status,
-              .requiresAttributes,
-              .compatibilities,
-              .registeredAt,
-              .registeredBy
-            )
-            | .containerDefinitions |= map(if .name == "astra" then .image = $IMAGE else . end)
-            ' taskdef.base.json > taskdef.rendered.json
+          # Build a clean register-task-definition payload (AWS rejects unknown/read-only keys).
+          # This is more robust than trying to "del(...)" every possible extra field.
+          jq --arg IMAGE "$IMAGE" '
+            {
+              family: .family,
+              taskRoleArn: .taskRoleArn,
+              executionRoleArn: .executionRoleArn,
+              networkMode: .networkMode,
+              containerDefinitions: (
+                .containerDefinitions
+                | map(if .name == "astra" then .image = $IMAGE else . end)
+              ),
+              volumes: .volumes,
+              placementConstraints: .placementConstraints,
+              requiresCompatibilities: .requiresCompatibilities,
+              cpu: .cpu,
+              memory: .memory,
+              tags: .tags,
+              pidMode: .pidMode,
+              ipcMode: .ipcMode,
+              proxyConfiguration: .proxyConfiguration,
+              inferenceAccelerators: .inferenceAccelerators,
+              ephemeralStorage: .ephemeralStorage,
+              runtimePlatform: .runtimePlatform,
+              enableFaultInjection: .enableFaultInjection
+            }
+            | with_entries(select(.value != null))
+          ' taskdef.base.json > taskdef.rendered.json
 
           NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.rendered.json \
@@ -143,6 +161,19 @@ jobs:
 
           CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
           TASK_DEF="${{ steps.taskdef.outputs.task_definition_arn }}"
+
+          # Fail fast if the FreeIPA password secret exists but has no current version.
+          # This checks metadata only (no GetSecretValue) to avoid exposing secrets.
+          FREEIPA_SECRET_ARN="${{ steps.ssm.outputs.freeipa_service_password_secret_arn }}"
+          CURRENT_VERSION_ID=$(aws secretsmanager list-secret-version-ids \
+            --secret-id "$FREEIPA_SECRET_ARN" \
+            --query "Versions[?contains(VersionStages, 'AWSCURRENT')].VersionId | [0]" \
+            --output text)
+
+          if [ -z "$CURRENT_VERSION_ID" ] || [ "$CURRENT_VERSION_ID" = "None" ] || [ "$CURRENT_VERSION_ID" = "null" ]; then
+            echo "FREEIPA_SERVICE_PASSWORD secret has no AWSCURRENT version. Populate it in Secrets Manager first: ${FREEIPA_SECRET_ARN}" >&2
+            exit 1
+          fi
 
           # SSM stores subnet IDs as a comma-separated string list.
           SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
