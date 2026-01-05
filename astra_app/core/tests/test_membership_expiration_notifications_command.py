@@ -26,20 +26,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             },
         )
 
-        today_utc = timezone.now().astimezone(datetime.UTC).date()
-        expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
-        expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
-        expires_at_utc = datetime.datetime.combine(expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-
-        MembershipLog.objects.create(
-            actor_username="reviewer",
-            target_username="alice",
-            membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
-            expires_at=expires_at_utc,
-        )
-
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         alice = FreeIPAUser(
             "alice",
             {
@@ -51,8 +38,25 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            call_command("membership_expiration_notifications")
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            MembershipLog.objects.create(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
 
         from post_office.models import Email
 
@@ -87,19 +91,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             },
         )
 
-        today_utc = timezone.now().astimezone(datetime.UTC).date()
-        expires_on_utc = today_utc - datetime.timedelta(days=1)
-        expires_at_utc = datetime.datetime.combine(expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-
-        MembershipLog.objects.create(
-            actor_username="reviewer",
-            target_username="alice",
-            membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
-            expires_at=expires_at_utc,
-        )
-
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         alice = FreeIPAUser(
             "alice",
             {
@@ -109,8 +101,24 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            call_command("membership_expiration_notifications")
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_on_utc = today_utc - datetime.timedelta(days=1)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            MembershipLog.objects.create(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
 
         from post_office.models import Email
 
@@ -138,20 +146,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             },
         )
 
-        today_utc = timezone.now().astimezone(datetime.UTC).date()
-        expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
-        expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
-        expires_at_utc = datetime.datetime.combine(expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-
-        MembershipLog.objects.create(
-            actor_username="reviewer",
-            target_username="alice",
-            membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
-            expires_at=expires_at_utc,
-        )
-
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         alice = FreeIPAUser(
             "alice",
             {
@@ -163,11 +158,28 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
         from post_office.models import Email
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            call_command("membership_expiration_notifications")
-            first_count = Email.objects.count()
-            call_command("membership_expiration_notifications")
-            second_count = Email.objects.count()
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            MembershipLog.objects.create(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+                first_count = Email.objects.count()
+                call_command("membership_expiration_notifications")
+                second_count = Email.objects.count()
 
         self.assertEqual(first_count, second_count)
 
@@ -184,20 +196,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             },
         )
 
-        today_utc = timezone.now().astimezone(datetime.UTC).date()
-        expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
-        expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
-        expires_at_utc = datetime.datetime.combine(expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-
-        MembershipLog.objects.create(
-            actor_username="reviewer",
-            target_username="alice",
-            membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
-            expires_at=expires_at_utc,
-        )
-
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         alice = FreeIPAUser(
             "alice",
             {
@@ -209,10 +208,27 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
         from post_office.models import Email
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            call_command("membership_expiration_notifications")
-            first_count = Email.objects.count()
-            call_command("membership_expiration_notifications", "--force")
-            second_count = Email.objects.count()
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            MembershipLog.objects.create(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+                first_count = Email.objects.count()
+                call_command("membership_expiration_notifications", "--force")
+                second_count = Email.objects.count()
 
         self.assertEqual(first_count + 1, second_count)

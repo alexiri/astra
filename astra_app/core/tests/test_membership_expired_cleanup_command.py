@@ -26,18 +26,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             },
         )
 
-        expired_at = timezone.now() - datetime.timedelta(days=1)
-        MembershipLog.objects.create(
-            actor_username="reviewer",
-            target_username="alice",
-            membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
-            expires_at=expired_at,
-        )
-
-        self.assertTrue(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
-
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         alice = FreeIPAUser(
             "alice",
             {
@@ -48,9 +37,24 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
-                call_command("membership_expired_cleanup")
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            expired_at = timezone.now() - datetime.timedelta(days=1)
+            MembershipLog.objects.create(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expired_at,
+            )
+
+            self.assertTrue(
+                Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
+            )
+
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
+                    call_command("membership_expired_cleanup")
 
         remove_mock.assert_called_once()
         self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())

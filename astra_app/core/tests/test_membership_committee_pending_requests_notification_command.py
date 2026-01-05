@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from unittest.mock import patch
 
 from django.conf import settings
@@ -34,8 +35,10 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         )
 
     def test_command_sends_single_email_to_committee_when_pending_exists(self) -> None:
-        self._create_membership_type()
-        MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+            MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
 
         committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice", "bob"]})
 
@@ -51,9 +54,10 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         def _get_user(username: str) -> FreeIPAUser | None:
             return {"alice": alice, "bob": bob}.get(username)
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-            with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-                call_command("membership_pending_requests")
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+                    call_command("membership_pending_requests")
 
         from post_office.models import Email
 
@@ -68,7 +72,9 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         self.assertIn("/membership/requests/", str(msg.context))
 
     def test_command_does_not_send_when_no_pending(self) -> None:
-        self._create_membership_type()
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
 
         committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice"]})
         alice = FreeIPAUser(
@@ -76,9 +82,10 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
         )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
-                call_command("membership_pending_requests")
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                    call_command("membership_pending_requests")
 
         from post_office.models import Email
 
@@ -89,8 +96,10 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         )
 
     def test_command_dedupes_same_day_without_force(self) -> None:
-        self._create_membership_type()
-        MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+            MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
 
         committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice"]})
         alice = FreeIPAUser(
@@ -100,18 +109,21 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         from post_office.models import Email
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
-                call_command("membership_pending_requests")
-                first = Email.objects.count()
-                call_command("membership_pending_requests")
-                second = Email.objects.count()
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                    call_command("membership_pending_requests")
+                    first = Email.objects.count()
+                    call_command("membership_pending_requests")
+                    second = Email.objects.count()
 
         self.assertEqual(first, second)
 
     def test_force_sends_even_if_already_sent_today(self) -> None:
-        self._create_membership_type()
-        MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+            MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
 
         committee_group = FreeIPAGroup("membership-committee", {"member_user": ["alice"]})
         alice = FreeIPAUser(
@@ -121,11 +133,12 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         from post_office.models import Email
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
-                call_command("membership_pending_requests")
-                first = Email.objects.count()
-                call_command("membership_pending_requests", "--force")
-                second = Email.objects.count()
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                    call_command("membership_pending_requests")
+                    first = Email.objects.count()
+                    call_command("membership_pending_requests", "--force")
+                    second = Email.objects.count()
 
         self.assertEqual(first + 1, second)
