@@ -1,5 +1,6 @@
 import datetime
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,6 +18,17 @@ environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 
 DEBUG = env.bool("DEBUG", default=False)
 
+# Django management commands (e.g. `migrate`) still import settings, but they don't
+# need certain web-runtime-only secrets. This makes one-off tasks safer and easier
+# to run without granting access to unrelated secrets.
+_DJANGO_SUBCOMMAND = sys.argv[1] if len(sys.argv) > 1 else ""
+_ALLOW_MISSING_RUNTIME_SECRETS = _DJANGO_SUBCOMMAND in {
+    "migrate",
+    "makemigrations",
+    "showmigrations",
+    "sqlmigrate",
+}
+
 # Development convenience: silence urllib3's InsecureRequestWarning spam when
 # intentionally running with verify_ssl disabled (e.g. local FreeIPA with self-signed cert).
 if DEBUG:
@@ -33,7 +45,7 @@ SECRET_KEY = env(
     "SECRET_KEY",
     default="django-insecure-dev-only-change-me",
 )
-if not DEBUG and SECRET_KEY.startswith("django-insecure-dev-only"):
+if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS and SECRET_KEY.startswith("django-insecure-dev-only"):
     raise ImproperlyConfigured("SECRET_KEY must be set in production.")
 
 _dev_allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
@@ -41,7 +53,7 @@ ALLOWED_HOSTS = env.list(
     "ALLOWED_HOSTS",
     default=_dev_allowed_hosts if DEBUG else [],
 )
-if not DEBUG and not ALLOWED_HOSTS:
+if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS must be set in production.")
 
 INSTALLED_APPS = [
@@ -379,7 +391,7 @@ FREEIPA_HOST = env("FREEIPA_HOST", default="ipa.demo1.freeipa.org")
 FREEIPA_VERIFY_SSL = env.bool("FREEIPA_VERIFY_SSL", default=True)
 FREEIPA_SERVICE_USER = env("FREEIPA_SERVICE_USER", default="admin")
 FREEIPA_SERVICE_PASSWORD = env("FREEIPA_SERVICE_PASSWORD", default="")
-if not FREEIPA_SERVICE_PASSWORD:
+if not _ALLOW_MISSING_RUNTIME_SECRETS and not FREEIPA_SERVICE_PASSWORD:
     raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
 FREEIPA_ADMIN_GROUP = env("FREEIPA_ADMIN_GROUP", default="admins")
 

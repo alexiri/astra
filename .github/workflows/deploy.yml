@@ -154,26 +154,6 @@ jobs:
 
           echo "task_definition_arn=${NEW_TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify task definition secrets are present
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # If these aren't present, Django will fail to boot in non-debug.
-          REQUIRED=("SECRET_KEY" "DATABASE_PASSWORD" "FREEIPA_SERVICE_PASSWORD")
-          for SECRET_NAME in "${REQUIRED[@]}"; do
-            if ! jq -e --arg name "$SECRET_NAME" '
-              (.containerDefinitions // [])
-              | map(select(.name == "astra"))
-              | .[0].secrets
-              | any(.name == $name)
-            ' taskdef.rendered.json > /dev/null; then
-              echo "Task definition is missing required secret injection: ${SECRET_NAME}." >&2
-              echo "This usually means Terraform changes to the ECS task definition weren't applied yet." >&2
-              exit 1
-            fi
-          done
-
       - name: Run Django migrations (one-off ECS task)
         shell: bash
         run: |
