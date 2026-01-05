@@ -154,6 +154,26 @@ jobs:
 
           echo "task_definition_arn=${NEW_TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify task definition secrets are present
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # If these aren't present, Django will fail to boot in non-debug.
+          REQUIRED=("SECRET_KEY" "DATABASE_PASSWORD" "FREEIPA_SERVICE_PASSWORD")
+          for SECRET_NAME in "${REQUIRED[@]}"; do
+            if ! jq -e --arg name "$SECRET_NAME" '
+              (.containerDefinitions // [])
+              | map(select(.name == "astra"))
+              | .[0].secrets
+              | any(.name == $name)
+            ' taskdef.rendered.json > /dev/null; then
+              echo "Task definition is missing required secret injection: ${SECRET_NAME}." >&2
+              echo "This usually means Terraform changes to the ECS task definition weren't applied yet." >&2
+              exit 1
+            fi
+          done
+
       - name: Run Django migrations (one-off ECS task)
         shell: bash
         run: |
@@ -180,8 +200,8 @@ jobs:
           SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
 
           NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"DISABLED"}}')
-          # The container image copies the repo into /app/astra_app, so manage.py is at astra_app/manage.py.
-          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","astra_app/manage.py","migrate","--noinput"]}] }')
+          # The container entrypoint cd's into the directory that contains manage.py.
+          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","manage.py","migrate","--noinput"]}] }')
 
           TASK_ARN=$(aws ecs run-task \
             --cluster "$CLUSTER" \

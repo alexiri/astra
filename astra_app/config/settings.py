@@ -107,11 +107,34 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
+
+_database_url = env("DATABASE_URL", default=None)
+if not _database_url:
+    # In containerized environments (ECS), it's common to inject the database password
+    # as a dedicated secret env var rather than embedding it in DATABASE_URL.
+    db_host = env("DATABASE_HOST", default=None)
+    if db_host:
+        from urllib.parse import quote
+
+        db_port = env("DATABASE_PORT", default="5432")
+        db_name = env("DATABASE_NAME", default="")
+        db_user = env("DATABASE_USER", default="")
+        db_password = env("DATABASE_PASSWORD", default="")
+        if not db_name or not db_user:
+            raise ImproperlyConfigured(
+                "DATABASE_NAME and DATABASE_USER must be set when using DATABASE_HOST/DATABASE_PASSWORD."
+            )
+
+        user_enc = quote(db_user, safe="")
+        pass_enc = quote(db_password, safe="")
+        name_enc = quote(db_name, safe="")
+        _database_url = f"postgres://{user_enc}:{pass_enc}@{db_host}:{db_port}/{name_enc}"
+
 DATABASES = {
     'default': {
         **env.db(
             'DATABASE_URL',
-            default='postgres://postgres:postgres@db:5432/almalinux_members',
+            default=_database_url or 'postgres://postgres:postgres@db:5432/almalinux_members',
         ),
     }
 }

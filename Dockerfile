@@ -27,4 +27,4 @@ COPY . .
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/astra-entrypoint"]
-CMD ["gunicorn", "astra_app.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
