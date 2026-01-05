@@ -46,7 +46,13 @@ SECRET_KEY = env(
     default="django-insecure-dev-only-change-me",
 )
 if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS and SECRET_KEY.startswith("django-insecure-dev-only"):
-    raise ImproperlyConfigured("SECRET_KEY must be set in production.")
+    if "SECRET_KEY" in os.environ:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set in production (got an insecure placeholder value)."
+        )
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be set in production (SECRET_KEY env var is missing)."
+    )
 
 _dev_allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
 ALLOWED_HOSTS = env.list(

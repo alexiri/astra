@@ -118,6 +118,8 @@ jobs:
             exit 1
           fi
 
+          echo "Current service task definition: ${CURRENT_TASK_DEF_ARN}"
+
           # Important: the service may still point at an older task definition even
           # after Terraform created a newer revision (the service ignores task_definition
           # changes to allow CI/CD-driven deploys). Base the deploy on the latest ACTIVE
@@ -132,6 +134,8 @@ jobs:
             exit 1
           fi
 
+          echo "Task definition family: ${FAMILY}"
+
           BASE_TASK_DEF_ARN=$(aws ecs list-task-definitions \
             --family-prefix "$FAMILY" \
             --status ACTIVE \
@@ -144,10 +148,15 @@ jobs:
             BASE_TASK_DEF_ARN="$CURRENT_TASK_DEF_ARN"
           fi
 
+          echo "Base task definition for deploy: ${BASE_TASK_DEF_ARN}"
+
           aws ecs describe-task-definition \
             --task-definition "$BASE_TASK_DEF_ARN" \
             --query 'taskDefinition' \
             --output json > taskdef.base.json
+
+          echo "Base task definition secret keys (astra container):"
+          jq -r '(.containerDefinitions // []) | map(select(.name == "astra")) | .[0].secrets // [] | .[].name' taskdef.base.json || true
 
           # Build a clean register-task-definition payload (AWS rejects unknown/read-only keys).
           # This is more robust than trying to "del(...)" every possible extra field.
@@ -177,6 +186,15 @@ jobs:
             }
             | with_entries(select(.value != null))
           ' taskdef.base.json > taskdef.rendered.json
+
+          echo "Rendered task definition secret keys (astra container):"
+          jq -r '(.containerDefinitions // []) | map(select(.name == "astra")) | .[0].secrets // [] | .[].name' taskdef.rendered.json || true
+
+          if ! jq -e '(.containerDefinitions // []) | map(select(.name == "astra")) | .[0].secrets // [] | any(.name == "SECRET_KEY")' taskdef.rendered.json > /dev/null; then
+            echo "Rendered task definition is missing SECRET_KEY secret injection; the web service will not boot." >&2
+            echo "This means CI/CD is still basing off a task definition that Terraform hasn't updated with secrets/env yet." >&2
+            exit 1
+          fi
 
           NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.rendered.json \
@@ -260,4 +278,14 @@ jobs:
             --force-new-deployment > /dev/null
 
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+          echo "Service task definition after deploy:"
+          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text
+
+          echo "Deployments summary:"
+          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].deployments[].{status:status,rolloutState:rolloutState,taskDefinition:taskDefinition,desiredCount:desiredCount,runningCount:runningCount,pendingCount:pendingCount}' \
+            --output table
+
           echo "Service is stable."
