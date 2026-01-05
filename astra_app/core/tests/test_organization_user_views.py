@@ -72,6 +72,49 @@ class OrganizationUserViewsTests(TestCase):
             # Navbar should include Organizations link for authenticated users.
             self.assertContains(resp, reverse("organizations"))
 
+    @override_settings(TIME_ZONE="Europe/Berlin")
+    def test_org_detail_sponsorship_expiry_displays_utc_consistently(self) -> None:
+        from core.models import MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="silver")
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            membership_level=membership_type,
+            representative="bob",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 5, 12, 0, 0, tzinfo=datetime.UTC)
+        expires_at = datetime.datetime(2027, 1, 21, 23, 59, 59, tzinfo=datetime.UTC)
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type=membership_type,
+            expires_at=expires_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            with patch("django.utils.timezone.now", autospec=True, return_value=frozen_now):
+                resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Expires Jan 21, 2027")
+        self.assertNotContains(resp, "(UTC)")
+        self.assertNotContains(resp, "Expires Jan 22, 2027")
+
     def test_membership_viewer_can_view_org_but_cannot_see_edit_button(self) -> None:
         from core.models import MembershipType, Organization
 

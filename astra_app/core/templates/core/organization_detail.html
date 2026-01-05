@@ -70,11 +70,15 @@
                       {% if sponsorship_is_expiring_soon %}
                         <div class="text-danger small">
                           <i class="fas fa-exclamation-triangle mr-1"></i>
-                          Expires {{ sponsorship.expires_at|date:"M j, Y" }}
+                          {% timezone 'UTC' %}
+                            Expires {{ sponsorship.expires_at|date:"M j, Y H:i" }} (UTC)
+                          {% endtimezone %}
                         </div>
                       {% else %}
                         <div class="text-muted small">
-                          Expires {{ sponsorship.expires_at|date:"M j, Y" }}
+                          {% timezone 'UTC' %}
+                            Expires {{ sponsorship.expires_at|date:"M j, Y" }}
+                          {% endtimezone %}
                         </div>
                       {% endif %}
                     {% endif %}
