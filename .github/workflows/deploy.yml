@@ -113,8 +113,29 @@ jobs:
             --query 'services[0].taskDefinition' \
             --output text)
 
-          aws ecs describe-task-definition \
+          # Important: the service may still point at an older task definition even
+          # after Terraform created a newer revision (the service ignores task_definition
+          # changes to allow CI/CD-driven deploys). Base the deploy on the latest ACTIVE
+          # revision in the family so we pick up Terraform-managed env/secrets changes.
+          FAMILY=$(aws ecs describe-task-definition \
             --task-definition "$CURRENT_TASK_DEF_ARN" \
+            --query 'taskDefinition.family' \
+            --output text)
+
+          BASE_TASK_DEF_ARN=$(aws ecs list-task-definitions \
+            --family-prefix "$FAMILY" \
+            --status ACTIVE \
+            --sort DESC \
+            --max-items 1 \
+            --query 'taskDefinitionArns[0]' \
+            --output text)
+
+          if [ -z "$BASE_TASK_DEF_ARN" ] || [ "$BASE_TASK_DEF_ARN" = "None" ] || [ "$BASE_TASK_DEF_ARN" = "null" ]; then
+            BASE_TASK_DEF_ARN="$CURRENT_TASK_DEF_ARN"
+          fi
+
+          aws ecs describe-task-definition \
+            --task-definition "$BASE_TASK_DEF_ARN" \
             --query 'taskDefinition' \
             --output json > taskdef.base.json
 
