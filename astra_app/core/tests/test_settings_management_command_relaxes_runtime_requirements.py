@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import subprocess
 import sys
 import textwrap
@@ -6,7 +7,63 @@ import unittest
 
 
 class TestSettingsManagementCommandRelaxesRuntimeRequirements(unittest.TestCase):
+    @staticmethod
+    def _django_project_dir() -> Path:
+        # Works in both layouts:
+        # - image: /app/astra_app/astra_app/core/tests/... -> project dir is /app/astra_app/astra_app
+        # - bind mount: /app/astra_app/core/tests/... -> project dir is /app/astra_app
+        return Path(__file__).resolve().parents[2]
+
+    def test_dotenv_does_not_override_runtime_secret_key(self) -> None:
+        project_dir = self._django_project_dir()
+        dotenv_path = project_dir / ".env"
+
+        dotenv_path.write_text("SECRET_KEY=django-insecure-dev-only-change-me\n", encoding="utf-8")
+        try:
+            env = {
+                "DEBUG": "0",
+                "DJANGO_READ_DOTENV": "1",
+                "SECRET_KEY": "test-secret-key-not-insecure-37-chars",
+                "ALLOWED_HOSTS": "example.com",
+                "FREEIPA_SERVICE_PASSWORD": "password",
+                "AWS_STORAGE_BUCKET_NAME": "astra-media",
+                "AWS_S3_DOMAIN": "http://localhost:9000",
+                "DATABASE_HOST": "db.example.internal",
+                "DATABASE_PORT": "5432",
+                "DATABASE_NAME": "astra",
+                "DATABASE_USER": "astra",
+                "DATABASE_PASSWORD": "supersecret",
+            }
+
+            code = textwrap.dedent(
+                f"""
+                import sys
+
+                sys.path.insert(0, {str(project_dir)!r})
+                import config.settings as settings
+                print(settings.SECRET_KEY)
+                """
+            ).strip()
+
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"settings import failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            )
+            self.assertEqual(result.stdout.strip().splitlines()[-1], "test-secret-key-not-insecure-37-chars")
+        finally:
+            dotenv_path.unlink(missing_ok=True)
+
     def test_migrate_does_not_require_runtime_secrets(self) -> None:
+        project_dir = self._django_project_dir()
         env = {
             "DEBUG": "0",
             "DATABASE_HOST": "db.example.internal",
@@ -17,17 +74,14 @@ class TestSettingsManagementCommandRelaxesRuntimeRequirements(unittest.TestCase)
         }
 
         code = textwrap.dedent(
-            """
-            import os
+            f"""
             import sys
 
-            sys.path.insert(0, os.path.join(os.getcwd(), "astra_app"))
+            sys.path.insert(0, {str(project_dir)!r})
 
             # Simulate `python manage.py migrate`.
             sys.argv = ["manage.py", "migrate", "--noinput"]
-
             import config.settings  # noqa: F401
-
             print("ok")
             """
         ).strip()
@@ -45,7 +99,8 @@ class TestSettingsManagementCommandRelaxesRuntimeRequirements(unittest.TestCase)
             0,
             msg=f"settings import failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertEqual(result.stdout.strip(), "ok")
+        # settings.py may emit debug output; assert the final line is the sentinel.
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "ok")
 
     def test_web_runtime_still_requires_secret_key(self) -> None:
         env = os.environ.copy()

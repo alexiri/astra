@@ -13,10 +13,14 @@ env = environ.Env(
     DEBUG=(bool, False),
 )
 
-# Optional local env file support (docker-compose already sets env vars).
-environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
-
 DEBUG = env.bool("DEBUG", default=False)
+
+# Optional local env file support.
+#
+# IMPORTANT: this must never override runtime secrets injected by the platform
+# (ECS secrets -> environment variables). Make it opt-in and non-overriding.
+if os.environ.get("DJANGO_READ_DOTENV") == "1":
+    environ.Env.read_env(os.path.join(BASE_DIR, ".env"), override=False)
 
 # Django management commands (e.g. `migrate`) still import settings, but they don't
 # need certain web-runtime-only secrets. This makes one-off tasks safer and easier
@@ -47,7 +51,7 @@ SECRET_KEY = env(
     default=_DEFAULT_SECRET_KEY_PLACEHOLDER,
 )
 
-print(f"len(SECRET_KEY)={len(SECRET_KEY)}, is placeholder={SECRET_KEY == _DEFAULT_SECRET_KEY_PLACEHOLDER}")
+print(f"[settings.py] len(SECRET_KEY)={len(SECRET_KEY)}, is placeholder={SECRET_KEY == _DEFAULT_SECRET_KEY_PLACEHOLDER}")
 if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS:
     if "SECRET_KEY" not in os.environ:
         raise ImproperlyConfigured(
