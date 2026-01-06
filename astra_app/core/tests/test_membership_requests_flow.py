@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.conf import settings
 from django.test import TestCase

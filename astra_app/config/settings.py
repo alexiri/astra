@@ -2,12 +2,106 @@ import datetime
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
 
-import environ
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _env_str(name: str, *, default: str | None = None) -> str | None:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ImproperlyConfigured(f"{name} must be a boolean env var, got {raw!r}.")
+
+
+def _env_int(name: str, *, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError as e:
+        raise ImproperlyConfigured(f"{name} must be an integer env var, got {raw!r}.") from e
+
+
+def _env_list(name: str, *, default: list[str]) -> list[str]:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value:
+        return []
+    # Match common 12-factor practice: comma-separated lists.
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _parse_database_url(database_url: str) -> dict[str, Any]:
+    parts = urlsplit(database_url)
+    if parts.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured(
+            f"Unsupported DATABASE_URL scheme {parts.scheme!r}; expected postgres/postgresql."
+        )
+    if not parts.hostname:
+        raise ImproperlyConfigured("DATABASE_URL must include a hostname.")
+
+    name = (parts.path or "").lstrip("/")
+    if not name:
+        raise ImproperlyConfigured("DATABASE_URL must include a database name.")
+
+    config: dict[str, Any] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": unquote(name),
+        "USER": unquote(parts.username or ""),
+        "PASSWORD": unquote(parts.password or ""),
+        "HOST": parts.hostname,
+        "PORT": str(parts.port) if parts.port is not None else "",
+    }
+
+    # Pass through simple query parameters (e.g. sslmode=require).
+    query = parse_qs(parts.query or "", keep_blank_values=True)
+    if query:
+        config["OPTIONS"] = {key: values[-1] for key, values in query.items()}
+
+    return config
+
+
+def _parse_email_url(email_url: str) -> dict[str, Any]:
+    parts = urlsplit(email_url)
+    if parts.scheme not in {"smtp", "smtps"}:
+        raise ImproperlyConfigured(
+            f"Unsupported EMAIL_URL scheme {parts.scheme!r}; expected smtp/smtps."
+        )
+    if not parts.hostname:
+        raise ImproperlyConfigured("EMAIL_URL must include a hostname.")
+
+    use_ssl = parts.scheme == "smtps"
+    port = parts.port
+    if port is None:
+        port = 465 if use_ssl else 25
+
+    return {
+        "EMAIL_HOST": parts.hostname,
+        "EMAIL_PORT": port,
+        "EMAIL_HOST_USER": unquote(parts.username or ""),
+        "EMAIL_HOST_PASSWORD": unquote(parts.password or ""),
+        "EMAIL_USE_SSL": use_ssl,
+        "EMAIL_USE_TLS": False,
+    }
 
 _secret_key_present = "SECRET_KEY" in os.environ
 print(
@@ -16,34 +110,8 @@ print(
     f"len={len(os.environ['SECRET_KEY']) if _secret_key_present else 'MISSING'}"
 )
 
-env = environ.Env(
-    DEBUG=(bool, False),
-)
 
-try:
-    _secret_key_in_env = "SECRET_KEY" in env
-    _secret_key_len_env = len(env("SECRET_KEY")) if _secret_key_in_env else "MISSING"
-    print(
-        "[settings.py] env SECRET_KEY "
-        f"present={_secret_key_in_env} "
-        f"len={_secret_key_len_env}"
-    )
-except Exception as e:
-    # Avoid printing exception messages because django-environ sometimes embeds
-    # the requested variable name, which could leak secrets if a caller passes
-    # a secret value instead of a variable name.
-    print(f"[settings.py] env SECRET_KEY probe error: {type(e).__name__}")
-
-
-DEBUG = env.bool("DEBUG", default=False)
-
-# Optional local env file support.
-#
-# IMPORTANT: this must never override runtime secrets injected by the platform
-# (ECS secrets -> environment variables). Make it opt-in and non-overriding.
-if os.environ.get("DJANGO_READ_DOTENV") == "1":
-    print(f"[settings.py] Reading .env file for local development")
-    environ.Env.read_env(os.path.join(BASE_DIR, ".env"), overwrite=False)
+DEBUG = _env_bool("DEBUG", default=False)
 
 # Django management commands (e.g. `migrate`) still import settings, but they don't
 # need certain web-runtime-only secrets. This makes one-off tasks safer and easier
@@ -69,10 +137,7 @@ if DEBUG:
         pass
 
 _DEFAULT_SECRET_KEY_PLACEHOLDER = "django-insecure-dev-only-change-me"
-SECRET_KEY = env(
-    "SECRET_KEY",
-    default=_DEFAULT_SECRET_KEY_PLACEHOLDER,
-)
+SECRET_KEY = _env_str("SECRET_KEY", default=_DEFAULT_SECRET_KEY_PLACEHOLDER) or _DEFAULT_SECRET_KEY_PLACEHOLDER
 
 print(f"[settings.py] len(SECRET_KEY)={len(SECRET_KEY)}, is placeholder={SECRET_KEY == _DEFAULT_SECRET_KEY_PLACEHOLDER}")
 if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS:
@@ -91,10 +156,7 @@ if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS:
         )
 
 _dev_allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
-ALLOWED_HOSTS = env.list(
-    "ALLOWED_HOSTS",
-    default=_dev_allowed_hosts if DEBUG else [],
-)
+ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", default=_dev_allowed_hosts if DEBUG else [])
 if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS must be set in production.")
 
@@ -162,18 +224,18 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-_database_url = env("DATABASE_URL", default=None)
+_database_url = _env_str("DATABASE_URL", default=None)
 if not _database_url:
     # In containerized environments (ECS), it's common to inject the database password
     # as a dedicated secret env var rather than embedding it in DATABASE_URL.
-    db_host = env("DATABASE_HOST", default=None)
+    db_host = _env_str("DATABASE_HOST", default=None)
     if db_host:
         from urllib.parse import quote
 
-        db_port = env("DATABASE_PORT", default="5432")
-        db_name = env("DATABASE_NAME", default="")
-        db_user = env("DATABASE_USER", default="")
-        db_password = env("DATABASE_PASSWORD", default="")
+        db_port = _env_str("DATABASE_PORT", default="5432") or "5432"
+        db_name = _env_str("DATABASE_NAME", default="") or ""
+        db_user = _env_str("DATABASE_USER", default="") or ""
+        db_password = _env_str("DATABASE_PASSWORD", default="") or ""
         if not db_name or not db_user:
             raise ImproperlyConfigured(
                 "DATABASE_NAME and DATABASE_USER must be set when using DATABASE_HOST/DATABASE_PASSWORD."
@@ -185,12 +247,9 @@ if not _database_url:
         _database_url = f"postgres://{user_enc}:{pass_enc}@{db_host}:{db_port}/{name_enc}"
 
 DATABASES = {
-    'default': {
-        **env.db(
-            'DATABASE_URL',
-            default=_database_url or 'postgres://postgres:postgres@db:5432/almalinux_members',
-        ),
-    }
+    "default": _parse_database_url(
+        (_database_url or "postgres://postgres:postgres@db:5432/almalinux_members").strip()
+    )
 }
 
 JAZZMIN_SETTINGS = {
@@ -201,70 +260,70 @@ JAZZMIN_SETTINGS = {
 # Email
 # In DEBUG, docker-compose provides EMAIL_URL pointing to Mailhog.
 _email_url_raw = os.environ.get("EMAIL_URL", "").strip()
-EMAIL_CONFIG = env.email_url("EMAIL_URL") if _email_url_raw else None
+EMAIL_CONFIG = _parse_email_url(_email_url_raw) if _email_url_raw else None
 if EMAIL_CONFIG:
     globals().update(EMAIL_CONFIG)
 
-DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
+DEFAULT_FROM_EMAIL = _env_str("DEFAULT_FROM_EMAIL", default="webmaster@localhost") or "webmaster@localhost"
 
 # Public base URL used for absolute links in email (cron jobs don't have a request
 # context). Example: https://accounts.almalinux.org
-PUBLIC_BASE_URL = env("PUBLIC_BASE_URL", default="http://localhost:8000")
+PUBLIC_BASE_URL = _env_str("PUBLIC_BASE_URL", default="http://localhost:8000") or "http://localhost:8000"
 
 # Elections
-ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = env.int(
+ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = _env_int(
     "ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS",
     default=0 if DEBUG else 90,
 )
 
 # Membership workflow
-MEMBERSHIP_EXPIRING_SOON_DAYS = env.int("MEMBERSHIP_EXPIRING_SOON_DAYS", default=60)
-MEMBERSHIP_VALIDITY_DAYS = env.int("MEMBERSHIP_VALIDITY_DAYS", default=365)
-MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = env(
+MEMBERSHIP_EXPIRING_SOON_DAYS = _env_int("MEMBERSHIP_EXPIRING_SOON_DAYS", default=60)
+MEMBERSHIP_VALIDITY_DAYS = _env_int("MEMBERSHIP_VALIDITY_DAYS", default=365)
+MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
     default="membership-expiring-soon",
-)
-MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = env(
+) or "membership-expiring-soon"
+MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="membership-expired",
-)
-MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME = env(
+) or "membership-expired"
+MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME",
     default="membership-request-submitted",
-)
-MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME = env(
+) or "membership-request-submitted"
+MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME",
     default="membership-request-approved-individual",
-)
-MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME = env(
+) or "membership-request-approved-individual"
+MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME",
     default="membership-request-rejected",
-)
+) or "membership-request-rejected"
 
-MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME = env(
+MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME",
     default="membership-committee-pending-requests",
-)
+) or "membership-committee-pending-requests"
 
-PASSWORD_RESET_TOKEN_TTL_SECONDS = env.int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
-PASSWORD_RESET_EMAIL_TEMPLATE_NAME = env(
+PASSWORD_RESET_TOKEN_TTL_SECONDS = _env_int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
+PASSWORD_RESET_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_EMAIL_TEMPLATE_NAME",
     default="password-reset",
-)
-PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME = env(
+) or "password-reset"
+PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME",
     default="password-reset-success",
-)
+) or "password-reset-success"
 
-ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME = env(
+ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME = _env_str(
     "ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME",
     default="election-voting-credential",
-)
+) or "election-voting-credential"
 
-ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME = env(
+ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME = _env_str(
     "ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME",
     default="election-vote-receipt",
-)
+) or "election-vote-receipt"
 
 # Queue all Django mail through django-post_office.
 EMAIL_BACKEND = 'post_office.EmailBackend'
@@ -289,28 +348,28 @@ POST_OFFICE = {
 # Used as the production delivery backend (see POST_OFFICE['BACKENDS']).
 # Also provides a stats dashboard and an SNS event webhook (bounces, complaints,
 # deliveries, opens, clicks).
-AWS_SES_REGION_NAME = env('AWS_SES_REGION_NAME', default='us-east-1')
+AWS_SES_REGION_NAME = _env_str("AWS_SES_REGION_NAME", default="us-east-1") or "us-east-1"
 
 # Signature verification is recommended for production SNS webhooks. For local
 # dev, allowing unsigned test payloads is convenient.
-AWS_SES_VERIFY_EVENT_SIGNATURES = env.bool('AWS_SES_VERIFY_EVENT_SIGNATURES', default=not DEBUG)
+AWS_SES_VERIFY_EVENT_SIGNATURES = _env_bool("AWS_SES_VERIFY_EVENT_SIGNATURES", default=not DEBUG)
 
 # Restrict certificate download domains for SNS signature verification.
 # Prefer the full SNS domain for your region.
-AWS_SNS_EVENT_CERT_TRUSTED_DOMAINS = env.list(
-    'AWS_SNS_EVENT_CERT_TRUSTED_DOMAINS',
-    default=[f'sns.{AWS_SES_REGION_NAME}.amazonaws.com'],
+AWS_SNS_EVENT_CERT_TRUSTED_DOMAINS = _env_list(
+    "AWS_SNS_EVENT_CERT_TRUSTED_DOMAINS",
+    default=[f"sns.{AWS_SES_REGION_NAME}.amazonaws.com"],
 )
 
 # Optional blacklisting behavior: when enabled, bounce/complaint signals will
 # add recipients to django_ses.BlacklistedEmail and the SES backend will avoid
 # sending to them.
-AWS_SES_USE_BLACKLIST = env.bool('AWS_SES_USE_BLACKLIST', default=not DEBUG)
-AWS_SES_ADD_BOUNCE_TO_BLACKLIST = env.bool('AWS_SES_ADD_BOUNCE_TO_BLACKLIST', default=not DEBUG)
-AWS_SES_ADD_COMPLAINT_TO_BLACKLIST = env.bool('AWS_SES_ADD_COMPLAINT_TO_BLACKLIST', default=not DEBUG)
+AWS_SES_USE_BLACKLIST = _env_bool("AWS_SES_USE_BLACKLIST", default=not DEBUG)
+AWS_SES_ADD_BOUNCE_TO_BLACKLIST = _env_bool("AWS_SES_ADD_BOUNCE_TO_BLACKLIST", default=not DEBUG)
+AWS_SES_ADD_COMPLAINT_TO_BLACKLIST = _env_bool("AWS_SES_ADD_COMPLAINT_TO_BLACKLIST", default=not DEBUG)
 
 # Optional: tag outgoing mail with a configuration set for event publishing.
-AWS_SES_CONFIGURATION_SET = env('AWS_SES_CONFIGURATION_SET', default='') or None
+AWS_SES_CONFIGURATION_SET = (_env_str("AWS_SES_CONFIGURATION_SET", default="") or "").strip() or None
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
@@ -341,21 +400,21 @@ USE_TZ = True
 # a TLS-terminating proxy/load balancer.
 if not DEBUG:
     # If you're behind a reverse proxy that sets X-Forwarded-Proto.
-    if env.bool("SECURE_PROXY_SSL", default=True):
+    if _env_bool("SECURE_PROXY_SSL", default=True):
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-    SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
-    SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=True)
-    CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=True)
+    SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", default=False)
+    SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", default=True)
+    CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", default=True)
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_REFERRER_POLICY = env("SECURE_REFERRER_POLICY", default="same-origin")
+    SECURE_REFERRER_POLICY = _env_str("SECURE_REFERRER_POLICY", default="same-origin") or "same-origin"
 
     # HSTS is opt-in by default because it can brick HTTP-only deployments.
-    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
-    SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)
+    SECURE_HSTS_SECONDS = _env_int("SECURE_HSTS_SECONDS", default=0)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
+    SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", default=False)
 
-    CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+    CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
@@ -373,9 +432,9 @@ STORAGES = {
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 
-AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
-AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
-AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="") or None
+AWS_STORAGE_BUCKET_NAME = _env_str("AWS_STORAGE_BUCKET_NAME", default="") or ""
+AWS_S3_REGION_NAME = _env_str("AWS_S3_REGION_NAME", default="us-east-1") or "us-east-1"
+AWS_S3_ENDPOINT_URL = (_env_str("AWS_S3_ENDPOINT_URL", default="") or "").strip() or None
 
 # Optional: separate the URL used in rendered pages from the internal API endpoint.
 # This is useful in docker-compose where Django must reach MinIO via the service
@@ -387,7 +446,7 @@ _public_base_url_raw = str(PUBLIC_BASE_URL or "").strip()
 if "://" not in _public_base_url_raw:
     _public_base_url_raw = f"https://{_public_base_url_raw}"
 
-_aws_s3_domain_raw = env("AWS_S3_DOMAIN", default="")
+_aws_s3_domain_raw = _env_str("AWS_S3_DOMAIN", default="") or ""
 if not _ALLOW_MISSING_RUNTIME_SECRETS:
     if not AWS_STORAGE_BUCKET_NAME:
         raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set.")
@@ -405,18 +464,21 @@ _aws_s3_base_domain = (_aws_s3_domain.netloc + _aws_s3_domain.path.rstrip("/")).
 AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}" 
 
 # MinIO compatibility and predictable URLs.
-AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="path")
-AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH", default=False)
+AWS_S3_ADDRESSING_STYLE = _env_str("AWS_S3_ADDRESSING_STYLE", default="path") or "path"
+AWS_QUERYSTRING_AUTH = _env_bool("AWS_QUERYSTRING_AUTH", default=False)
 AWS_DEFAULT_ACL = None
 
 # Profile chat link formatting (Noggin-style).
 CHAT_NETWORKS = {
-    "irc": {"default_server": env("CHAT_IRC_DEFAULT_SERVER", default="irc.libera.chat")},
-    "matrix": {"default_server": env("CHAT_MATRIX_DEFAULT_SERVER", default="matrix.org")},
+    "irc": {"default_server": _env_str("CHAT_IRC_DEFAULT_SERVER", default="irc.libera.chat") or "irc.libera.chat"},
+    "matrix": {"default_server": _env_str("CHAT_MATRIX_DEFAULT_SERVER", default="matrix.org") or "matrix.org"},
 }
 
 # Optional query string appended to matrix.to links (Element web instance).
-CHAT_MATRIX_TO_ARGS = env("CHAT_MATRIX_TO_ARGS", default="web-instance[element.io]=app.element.io")
+CHAT_MATRIX_TO_ARGS = _env_str(
+    "CHAT_MATRIX_TO_ARGS",
+    default="web-instance[element.io]=app.element.io",
+) or "web-instance[element.io]=app.element.io"
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
@@ -430,7 +492,7 @@ AVATAR_PROVIDERS = (
     'avatar.providers.LibRAvatarProvider',
     'avatar.providers.DefaultAvatarProvider',
 )
-AVATAR_GRAVATAR_DEFAULT = env('AVATAR_GRAVATAR_DEFAULT', default='identicon')
+AVATAR_GRAVATAR_DEFAULT = _env_str("AVATAR_GRAVATAR_DEFAULT", default="identicon") or "identicon"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
@@ -442,27 +504,30 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # FreeIPA Configuration
-FREEIPA_HOST = env("FREEIPA_HOST", default="ipa.demo1.freeipa.org")
-FREEIPA_VERIFY_SSL = env.bool("FREEIPA_VERIFY_SSL", default=True)
-FREEIPA_SERVICE_USER = env("FREEIPA_SERVICE_USER", default="admin")
-FREEIPA_SERVICE_PASSWORD = env("FREEIPA_SERVICE_PASSWORD", default="")
+FREEIPA_HOST = _env_str("FREEIPA_HOST", default="ipa.demo1.freeipa.org") or "ipa.demo1.freeipa.org"
+FREEIPA_VERIFY_SSL = _env_bool("FREEIPA_VERIFY_SSL", default=True)
+FREEIPA_SERVICE_USER = _env_str("FREEIPA_SERVICE_USER", default="admin") or "admin"
+FREEIPA_SERVICE_PASSWORD = _env_str("FREEIPA_SERVICE_PASSWORD", default="") or ""
 if not _ALLOW_MISSING_RUNTIME_SECRETS and not FREEIPA_SERVICE_PASSWORD:
     raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
-FREEIPA_ADMIN_GROUP = env("FREEIPA_ADMIN_GROUP", default="admins")
+FREEIPA_ADMIN_GROUP = _env_str("FREEIPA_ADMIN_GROUP", default="admins") or "admins"
 
 # Reuse the FreeIPA service-account client across requests (per worker thread).
 # This avoids repeated logins for admin/selfservice pages that trigger multiple
 # FreeIPA reads, and retries automatically if the session expires.
-FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS = env.bool(
+FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS = _env_bool(
     "FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS",
     default=True,
 )
 
 # Registration
 # Inspired by Noggin's stage-user registration flow.
-REGISTRATION_OPEN = env.bool("REGISTRATION_OPEN", default=True)
+REGISTRATION_OPEN = _env_bool("REGISTRATION_OPEN", default=True)
 # Email validation token TTL.
-EMAIL_VALIDATION_TOKEN_TTL_SECONDS = env.int('EMAIL_VALIDATION_TOKEN_TTL_SECONDS', default=60 * 60 * 24)
+EMAIL_VALIDATION_TOKEN_TTL_SECONDS = _env_int(
+    "EMAIL_VALIDATION_TOKEN_TTL_SECONDS",
+    default=60 * 60 * 24,
+)
 REGISTRATION_EMAIL_TEMPLATE_NAME = "registration-email-validation"
 EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME = "settings-email-validation"
 

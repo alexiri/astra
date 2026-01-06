@@ -14,7 +14,7 @@ class TestSettingsDatabaseEnvFallback(unittest.TestCase):
         env.update(
             {
                 "DEBUG": "0",
-                "SECRET_KEY": "test-secret-key-not-insecure",
+                "SECRET_KEY": "test-secret-key-not-insecure-37-chars",
                 "ALLOWED_HOSTS": "example.com",
                 "FREEIPA_SERVICE_PASSWORD": "password",
                 "AWS_STORAGE_BUCKET_NAME": "astra-media",
@@ -54,4 +54,5 @@ class TestSettingsDatabaseEnvFallback(unittest.TestCase):
             0,
             msg=f"settings import failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertEqual(result.stdout.strip(), "db.example.internal")
+        # settings.py may emit debug output; assert the final line is the value.
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "db.example.internal")
