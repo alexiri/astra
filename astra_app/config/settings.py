@@ -13,7 +13,15 @@ print(f"[settings.py] os.environ len {len(os.environ['SECRET_KEY']) if 'SECRET_K
 env = environ.Env(
     DEBUG=(bool, False),
 )
-print(f"[settings.py] env len {len(env("SECRET_KEY")) if 'SECRET_KEY' in env else 'MISSING'}")
+try:
+    if 'SECRET_KEY' in env:
+        k = env("SECRET_KEY")
+    else:
+        k = 'MISSING'
+    print(f"[settings.py] env len {len(k) if k != 'MISSING' else 'MISSING'}")
+except Exception as e:
+    print(f"[settings.py] env SECRET_KEY access error: {e}")
+
 
 DEBUG = env.bool("DEBUG", default=False)
 
