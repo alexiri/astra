@@ -68,14 +68,12 @@ jobs:
           SUBNETS_CSV=$(aws ssm get-parameter --name "${PREFIX}/network/private_subnet_ids" --query 'Parameter.Value' --output text)
           TASKS_SG=$(aws ssm get-parameter --name "${PREFIX}/ecs/tasks_security_group_id" --query 'Parameter.Value' --output text)
           ECR_REPOSITORY=$(aws ssm get-parameter --name "${PREFIX}/ecr/repository_name" --query 'Parameter.Value' --output text)
-          FREEIPA_SECRET_ARN=$(aws ssm get-parameter --name "${PREFIX}/secrets/freeipa_service_password_secret_arn" --query 'Parameter.Value' --output text)
 
           echo "cluster_name=${CLUSTER_NAME}" >> "$GITHUB_OUTPUT"
           echo "service_name=${SERVICE_NAME}" >> "$GITHUB_OUTPUT"
           echo "subnets_csv=${SUBNETS_CSV}" >> "$GITHUB_OUTPUT"
           echo "tasks_sg=${TASKS_SG}" >> "$GITHUB_OUTPUT"
           echo "ecr_repository=${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
-          echo "freeipa_service_password_secret_arn=${FREEIPA_SECRET_ARN}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve AWS account and ECR registry
         id: aws
@@ -118,8 +116,6 @@ jobs:
             exit 1
           fi
 
-          echo "Current service task definition: ${CURRENT_TASK_DEF_ARN}"
-
           # Important: the service may still point at an older task definition even
           # after Terraform created a newer revision (the service ignores task_definition
           # changes to allow CI/CD-driven deploys). Base the deploy on the latest ACTIVE
@@ -134,8 +130,6 @@ jobs:
             exit 1
           fi
 
-          echo "Task definition family: ${FAMILY}"
-
           BASE_TASK_DEF_ARN=$(aws ecs list-task-definitions \
             --family-prefix "$FAMILY" \
             --status ACTIVE \
@@ -148,15 +142,10 @@ jobs:
             BASE_TASK_DEF_ARN="$CURRENT_TASK_DEF_ARN"
           fi
 
-          echo "Base task definition for deploy: ${BASE_TASK_DEF_ARN}"
-
           aws ecs describe-task-definition \
             --task-definition "$BASE_TASK_DEF_ARN" \
             --query 'taskDefinition' \
             --output json > taskdef.base.json
-
-          echo "Base task definition secret keys (astra container):"
-          jq -r '(.containerDefinitions // []) | map(select(.name == "astra")) | .[0].secrets // [] | .[].name' taskdef.base.json || true
 
           # Build a clean register-task-definition payload (AWS rejects unknown/read-only keys).
           # This is more robust than trying to "del(...)" every possible extra field.
@@ -187,15 +176,6 @@ jobs:
             | with_entries(select(.value != null))
           ' taskdef.base.json > taskdef.rendered.json
 
-          echo "Rendered task definition secret keys (astra container):"
-          jq -r '(.containerDefinitions // []) | map(select(.name == "astra")) | .[0].secrets // [] | .[].name' taskdef.rendered.json || true
-
-          if ! jq -e '(.containerDefinitions // []) | map(select(.name == "astra")) | .[0].secrets // [] | any(.name == "SECRET_KEY")' taskdef.rendered.json > /dev/null; then
-            echo "Rendered task definition is missing SECRET_KEY secret injection; the web service will not boot." >&2
-            echo "This means CI/CD is still basing off a task definition that Terraform hasn't updated with secrets/env yet." >&2
-            exit 1
-          fi
-
           NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.rendered.json \
             --query 'taskDefinition.taskDefinitionArn' \
@@ -211,60 +191,11 @@ jobs:
           CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
           TASK_DEF="${{ steps.taskdef.outputs.task_definition_arn }}"
 
-          # Fail fast if the FreeIPA password secret exists but has no current version.
-          # This checks metadata only (no GetSecretValue) to avoid exposing secrets.
-          FREEIPA_SECRET_ARN="${{ steps.ssm.outputs.freeipa_service_password_secret_arn }}"
-          CURRENT_VERSION_ID=$(aws secretsmanager list-secret-version-ids \
-            --secret-id "$FREEIPA_SECRET_ARN" \
-            --query "Versions[?contains(VersionStages, 'AWSCURRENT')].VersionId | [0]" \
-            --output text)
-
-          if [ -z "$CURRENT_VERSION_ID" ] || [ "$CURRENT_VERSION_ID" = "None" ] || [ "$CURRENT_VERSION_ID" = "null" ]; then
-            echo "FREEIPA_SERVICE_PASSWORD secret has no AWSCURRENT version. Populate it in Secrets Manager first: ${FREEIPA_SECRET_ARN}" >&2
-            exit 1
-          fi
-
-      - name: Probe web task secret injection (one-off ECS task)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
-          TASK_DEF="${{ steps.taskdef.outputs.task_definition_arn }}"
-
-          SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
-          SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
-          NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"DISABLED"}}')
-
-          # Disable auto-migrations in the entrypoint for this probe task so we only
-          # validate runtime secret injection.
-          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",environment:[{name:"DJANGO_AUTO_MIGRATE",value:"0"}],command:["python","-c","import os; v=os.environ.get(\"SECRET_KEY\"); print(\"SECRET_KEY_present\", bool(v), \"len\", 0 if v is None else len(v))"]}] }')
-
-          TASK_ARN=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --launch-type FARGATE \
-            --task-definition "$TASK_DEF" \
-            --network-configuration "$NETWORK" \
-            --overrides "$OVERRIDES" \
-            --query 'tasks[0].taskArn' \
-            --output text)
-
-          echo "Started probe task: ${TASK_ARN}"
-          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
-
-          EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
-          if [ "$EXIT_CODE" != "0" ]; then
-            echo "Probe task failed with exit code: $EXIT_CODE" >&2
-            aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --output json | \
-              jq '.tasks[0] | {stoppedReason, stopCode, containers: (.containers | map({name, exitCode, reason, lastStatus}))}'
-            exit 1
-          fi
-
           # SSM stores subnet IDs as a comma-separated string list.
           SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
           SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
-
           NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"DISABLED"}}')
+
           # The container entrypoint cd's into the directory that contains manage.py.
           OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","manage.py","migrate","--noinput"]}] }')
 
@@ -277,7 +208,6 @@ jobs:
             --query 'tasks[0].taskArn' \
             --output text)
 
-          echo "Started migrate task: ${TASK_ARN}"
           aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
 
           EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
@@ -314,14 +244,4 @@ jobs:
             --force-new-deployment > /dev/null
 
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-
-          echo "Service task definition after deploy:"
-          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].taskDefinition' --output text
-
-          echo "Deployments summary:"
-          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].deployments[].{status:status,rolloutState:rolloutState,taskDefinition:taskDefinition,desiredCount:desiredCount,runningCount:runningCount,pendingCount:pendingCount}' \
-            --output table
-
           echo "Service is stable."

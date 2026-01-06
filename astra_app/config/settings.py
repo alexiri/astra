@@ -103,14 +103,6 @@ def _parse_email_url(email_url: str) -> dict[str, Any]:
         "EMAIL_USE_TLS": False,
     }
 
-_secret_key_present = "SECRET_KEY" in os.environ
-print(
-    "[settings.py] os.environ SECRET_KEY "
-    f"present={_secret_key_present} "
-    f"len={len(os.environ['SECRET_KEY']) if _secret_key_present else 'MISSING'}"
-)
-
-
 DEBUG = _env_bool("DEBUG", default=False)
 
 # Django management commands (e.g. `migrate`) still import settings, but they don't
@@ -138,8 +130,6 @@ if DEBUG:
 
 _DEFAULT_SECRET_KEY_PLACEHOLDER = "django-insecure-dev-only-change-me"
 SECRET_KEY = _env_str("SECRET_KEY", default=_DEFAULT_SECRET_KEY_PLACEHOLDER) or _DEFAULT_SECRET_KEY_PLACEHOLDER
-
-print(f"[settings.py] len(SECRET_KEY)={len(SECRET_KEY)}, is placeholder={SECRET_KEY == _DEFAULT_SECRET_KEY_PLACEHOLDER}")
 if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS:
     if "SECRET_KEY" not in os.environ:
         raise ImproperlyConfigured(
