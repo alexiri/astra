@@ -114,6 +114,7 @@ _ALLOW_MISSING_RUNTIME_SECRETS = _DJANGO_SUBCOMMAND in {
     "makemigrations",
     "showmigrations",
     "sqlmigrate",
+    "collectstatic",
 }
 
 # Development convenience: silence urllib3's InsecureRequestWarning spam when
@@ -177,6 +178,7 @@ if os.environ.get('DISABLE_AUTH_MIGRATIONS') == '1':
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -419,7 +421,13 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # S3-backed storage for uploaded media.
 STORAGES = {
     "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    "staticfiles": {
+        "BACKEND": (
+            "django.contrib.staticfiles.storage.StaticFilesStorage"
+            if DEBUG
+            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        )
+    },
 }
 
 AWS_STORAGE_BUCKET_NAME = _env_str("AWS_STORAGE_BUCKET_NAME", default="") or ""

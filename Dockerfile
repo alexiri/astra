@@ -21,8 +21,10 @@ RUN chmod +x /usr/local/bin/astra-entrypoint
 
 COPY . .
 
-# Collect static files (placeholder for production build)
-# RUN python manage.py collectstatic --noinput
+# Collect static files for production.
+# This intentionally runs at build time so the runtime container can serve
+# `/static/` via WhiteNoise without requiring any writable volume.
+RUN cd astra_app && python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
