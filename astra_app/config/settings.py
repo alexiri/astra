@@ -9,9 +9,11 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+print(f"[settings.py] os.environ={os.environ}")
 env = environ.Env(
     DEBUG=(bool, False),
 )
+print(f"[settings.py] env={env}")
 
 DEBUG = env.bool("DEBUG", default=False)
 
@@ -20,7 +22,7 @@ DEBUG = env.bool("DEBUG", default=False)
 # IMPORTANT: this must never override runtime secrets injected by the platform
 # (ECS secrets -> environment variables). Make it opt-in and non-overriding.
 if os.environ.get("DJANGO_READ_DOTENV") == "1":
-    environ.Env.read_env(os.path.join(BASE_DIR, ".env"), override=False)
+    environ.Env.read_env(os.path.join(BASE_DIR, ".env"), overwrite=False)
 
 # Django management commands (e.g. `migrate`) still import settings, but they don't
 # need certain web-runtime-only secrets. This makes one-off tasks safer and easier
