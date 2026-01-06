@@ -11,6 +11,12 @@ class HealthzTests(TestCase):
         self.assertEqual(response["Content-Type"].split(";")[0], "text/plain")
         self.assertEqual(response.content, b"ok")
 
+    def test_healthz_no_trailing_slash_ok(self):
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"].split(";")[0], "text/plain")
+        self.assertEqual(response.content, b"ok")
+
     def test_healthz_does_not_depend_on_db(self):
         with patch("core.views_health.connection.cursor", side_effect=DatabaseError("boom")):
             response = self.client.get("/healthz/")
@@ -19,6 +25,12 @@ class HealthzTests(TestCase):
 
     def test_readyz_ok(self):
         response = self.client.get("/readyz/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"].split(";")[0], "text/plain")
+        self.assertEqual(response.content, b"ok")
+
+    def test_readyz_no_trailing_slash_ok(self):
+        response = self.client.get("/readyz")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"].split(";")[0], "text/plain")
         self.assertEqual(response.content, b"ok")

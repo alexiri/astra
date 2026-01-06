@@ -14,7 +14,9 @@ from core.views_auth import (
 from core.views_health import healthz, readyz
 
 urlpatterns = [
+    path('healthz', healthz, name='healthz-noslash'),
     path('healthz/', healthz, name='healthz'),
+    path('readyz', readyz, name='readyz-noslash'),
     path('readyz/', readyz, name='readyz'),
     path('ses/event-webhook/', SESEventWebhookView.as_view(), name='event_webhook'),
     path('register/', include('core.urls_registration')),

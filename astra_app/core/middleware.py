@@ -180,7 +180,9 @@ class LoginRequiredMiddleware:
             "/register/",
             "/elections/ballot/verify/",
             "/healthz/",
+            "/healthz",
             "/readyz/",
+            "/readyz",
             "/ses/event-webhook/",
         )
 
