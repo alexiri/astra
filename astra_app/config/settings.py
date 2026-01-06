@@ -551,9 +551,9 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'filters': {
-        # 'skip_healthz': {
-        #     '()': 'core.logging_filters.SkipHealthzFilter',
-        # },
+        'skip_healthz': {
+            '()': 'core.logging_filters.SkipHealthzFilter',
+        },
     },
     'formatters': {
         'console': {
@@ -565,7 +565,7 @@ LOGGING = {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'console',
-            'filters': ['skip_healthz'],
+            # 'filters': ['skip_healthz'],
         },
     },
     'loggers': {
