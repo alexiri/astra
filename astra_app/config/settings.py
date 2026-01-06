@@ -9,18 +9,30 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-print(f"[settings.py] os.environ len {len(os.environ['SECRET_KEY']) if 'SECRET_KEY' in os.environ else 'MISSING'}")
+_secret_key_present = "SECRET_KEY" in os.environ
+print(
+    "[settings.py] os.environ SECRET_KEY "
+    f"present={_secret_key_present} "
+    f"len={len(os.environ['SECRET_KEY']) if _secret_key_present else 'MISSING'}"
+)
+
 env = environ.Env(
     DEBUG=(bool, False),
 )
+
 try:
-    if 'SECRET_KEY' in env:
-        k = env("SECRET_KEY")
-    else:
-        k = 'MISSING'
-    print(f"[settings.py] env len {len(k) if k != 'MISSING' else 'MISSING'}")
+    _secret_key_in_env = "SECRET_KEY" in env
+    _secret_key_len_env = len(env("SECRET_KEY")) if _secret_key_in_env else "MISSING"
+    print(
+        "[settings.py] env SECRET_KEY "
+        f"present={_secret_key_in_env} "
+        f"len={_secret_key_len_env}"
+    )
 except Exception as e:
-    print(f"[settings.py] env SECRET_KEY access error: {e}")
+    # Avoid printing exception messages because django-environ sometimes embeds
+    # the requested variable name, which could leak secrets if a caller passes
+    # a secret value instead of a variable name.
+    print(f"[settings.py] env SECRET_KEY probe error: {type(e).__name__}")
 
 
 DEBUG = env.bool("DEBUG", default=False)
