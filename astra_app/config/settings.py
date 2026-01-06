@@ -9,11 +9,11 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-print(f"[settings.py] os.environ={os.environ}")
+print(f"[settings.py] os.environ len {len(os.environ['SECRET_KEY']) if 'SECRET_KEY' in os.environ else 'MISSING'}")
 env = environ.Env(
     DEBUG=(bool, False),
 )
-print(f"[settings.py] env={env}")
+print(f"[settings.py] env len {len(env('SECRET_KEY')) if 'SECRET_KEY' in env else 'MISSING'}")
 
 DEBUG = env.bool("DEBUG", default=False)
 
@@ -22,6 +22,7 @@ DEBUG = env.bool("DEBUG", default=False)
 # IMPORTANT: this must never override runtime secrets injected by the platform
 # (ECS secrets -> environment variables). Make it opt-in and non-overriding.
 if os.environ.get("DJANGO_READ_DOTENV") == "1":
+    print(f"[settings.py] Reading .env file for local development")
     environ.Env.read_env(os.path.join(BASE_DIR, ".env"), overwrite=False)
 
 # Django management commands (e.g. `migrate`) still import settings, but they don't
