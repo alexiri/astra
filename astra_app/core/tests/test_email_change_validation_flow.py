@@ -68,7 +68,7 @@ class EmailChangeValidationFlowTests(TestCase):
         self.assertIn("last_name", ctx)
         self.assertIn("full_name", ctx)
         self.assertNotIn("displayname", ctx)
-        self.assertEqual(ctx.get("address"), "new@example.org")
+        self.assertEqual(ctx.get("email_to_validate"), "new@example.org")
         self.assertIn("validate_url", ctx)
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
