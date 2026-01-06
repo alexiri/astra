@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${SECRET_KEY:-}" ]]; then
+  echo "[entrypoint] WARNING: SECRET_KEY is not set or is empty!" >&2
+else
+  echo "[entrypoint] SECRET_KEY is set and has length: ${#SECRET_KEY}"
+fi
+
 # The Docker image layout is /app/astra_app/<repo>, so manage.py lives under
 # /app/astra_app/astra_app/manage.py.
 if [[ -f "/app/astra_app/astra_app/manage.py" ]]; then
