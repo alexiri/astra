@@ -29,4 +29,4 @@ RUN cd astra_app && python manage.py collectstatic --noinput
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/astra-entrypoint"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "--log-level", "info"]

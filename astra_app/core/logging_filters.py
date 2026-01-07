@@ -10,6 +10,11 @@ class SkipHealthzFilter(logging.Filter):
         self.prefixes = prefixes
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Keep error logs even for health checks. Without this, a failing
+        # readiness probe (e.g. DB down) becomes invisible in CloudWatch.
+        if record.levelno >= logging.ERROR:
+            return True
+
         path = _extract_request_path(record)
         if path is not None:
             return not any(path.startswith(prefix) for prefix in self.prefixes)
