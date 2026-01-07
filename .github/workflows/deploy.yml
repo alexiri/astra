@@ -65,7 +65,7 @@ jobs:
 
           CLUSTER_NAME=$(aws ssm get-parameter --name "${PREFIX}/ecs/cluster_name" --query 'Parameter.Value' --output text)
           SERVICE_NAME=$(aws ssm get-parameter --name "${PREFIX}/ecs/service_name" --query 'Parameter.Value' --output text)
-          SUBNETS_CSV=$(aws ssm get-parameter --name "${PREFIX}/network/private_subnet_ids" --query 'Parameter.Value' --output text)
+          SUBNETS_CSV=$(aws ssm get-parameter --name "${PREFIX}/network/ecs_subnet_ids" --query 'Parameter.Value' --output text)
           TASKS_SG=$(aws ssm get-parameter --name "${PREFIX}/ecs/tasks_security_group_id" --query 'Parameter.Value' --output text)
           ECR_REPOSITORY=$(aws ssm get-parameter --name "${PREFIX}/ecr/repository_name" --query 'Parameter.Value' --output text)
 
@@ -194,7 +194,7 @@ jobs:
           # SSM stores subnet IDs as a comma-separated string list.
           SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
           SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
-          NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"DISABLED"}}')
+          NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"ENABLED"}}')
 
           # The container entrypoint cd's into the directory that contains manage.py.
           OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","manage.py","migrate","--noinput"]}] }')
