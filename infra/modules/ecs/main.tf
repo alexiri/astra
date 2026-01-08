@@ -102,19 +102,45 @@ resource "aws_iam_role" "task" {
   tags = var.tags
 }
 
+resource "aws_iam_role_policy" "task_ses" {
+  name = "${var.name}-ecs-task-ses"
+  role = aws_iam_role.task.id
+
+  # SES does not support fine-grained resource ARNs for these operations in most
+  # accounts/regions, so this must be "*".
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SES"
+        Effect = "Allow"
+        Action = [
+          "ses:GetSendQuota",
+          "ses:GetSendStatistics",
+          "ses:GetAccountSendingEnabled",
+          "ses:ListVerifiedEmailAddresses",
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 locals {
   container_name = "astra"
-  
+
   # When image_tag is "bootstrap", try to preserve the current image from CI/CD
   current_image = try(
     jsondecode(data.aws_ecs_task_definition.current[0].container_definitions)[0].image,
     null
   )
   current_image_tag = local.current_image != null ? split(":", local.current_image)[1] : null
-  
+
   # Use current image tag if available, otherwise fall back to var.image_tag
   effective_image_tag = var.image_tag == "bootstrap" && local.current_image_tag != null ? local.current_image_tag : var.image_tag
-  
+
   image = "${var.image_repository_url}:${local.effective_image_tag}"
 
   # Django requires CSRF_TRUSTED_ORIGINS when you're behind a TLS-terminating proxy

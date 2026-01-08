@@ -3,6 +3,11 @@ output "cluster_name" {
   description = "ECS cluster name."
 }
 
+output "cluster_arn" {
+  value       = aws_ecs_cluster.this.arn
+  description = "ECS cluster ARN."
+}
+
 output "service_name" {
   value       = aws_ecs_service.this.name
   description = "ECS service name."
@@ -16,6 +21,11 @@ output "service_security_group_id" {
 output "task_family" {
   value       = aws_ecs_task_definition.this.family
   description = "Task definition family (used by CI/CD to register revisions)."
+}
+
+output "task_definition_arn" {
+  value       = aws_ecs_task_definition.this.arn
+  description = "Deployed task definition ARN."
 }
 
 output "log_group_name" {

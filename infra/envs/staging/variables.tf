@@ -133,6 +133,18 @@ variable "email_url" {
   default     = null
 }
 
+variable "enable_send_queued_mail_schedule" {
+  type        = bool
+  description = "If true, run `python manage.py send_queued_mail` periodically via EventBridge + ECS RunTask."
+  default     = true
+}
+
+variable "send_queued_mail_schedule_expression" {
+  type        = string
+  description = "EventBridge schedule expression for send_queued_mail (e.g. rate(1 minute))."
+  default     = "rate(1 minute)"
+}
+
 variable "aws_storage_bucket_name" {
   type        = string
   description = "S3 bucket name for django-storages (AWS_STORAGE_BUCKET_NAME)."

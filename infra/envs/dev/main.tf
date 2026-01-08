@@ -389,8 +389,12 @@ module "ecs" {
   aws_s3_addressing_style = var.aws_s3_addressing_style
   aws_querystring_auth    = var.aws_querystring_auth
 
-  aws_ses_region_name       = var.aws_ses_region_name
-  aws_ses_configuration_set = var.aws_ses_configuration_set
+  aws_ses_region_name = coalesce(var.aws_ses_region_name, var.aws_region)
+  aws_ses_configuration_set = (
+    var.aws_ses_configuration_set != null && trimspace(var.aws_ses_configuration_set) != ""
+    ? var.aws_ses_configuration_set
+    : (var.enable_ses ? module.ses[0].configuration_set_name : null)
+  )
 
   freeipa_host         = var.freeipa_host
   freeipa_verify_ssl   = var.freeipa_verify_ssl
@@ -398,6 +402,27 @@ module "ecs" {
   freeipa_admin_group  = var.freeipa_admin_group
 
   tags = local.tags
+}
+
+module "send_queued_mail_schedule" {
+  source = "../../modules/scheduled_ecs_task"
+
+  name                = "${local.name}-send-queued-mail"
+  enabled             = var.enable_send_queued_mail_schedule
+  schedule_expression = var.send_queued_mail_schedule_expression
+  description         = "Run Django send_queued_mail periodically"
+  tags                = local.tags
+
+  cluster_arn         = module.ecs.cluster_arn
+  task_definition_arn = module.ecs.task_definition_arn
+  subnet_ids          = module.network.public_subnet_ids
+  security_group_ids  = [aws_security_group.ecs_service.id]
+  assign_public_ip    = true
+
+  container_name = "astra"
+  command        = ["python", "manage.py", "send_queued_mail"]
+
+  pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
 }
 
 module "parameters" {
@@ -422,7 +447,12 @@ module "ses" {
   domain          = var.ses_domain
   route53_zone_id = var.route53_zone_id
   aws_account_id  = data.aws_caller_identity.current.account_id
-  tags            = local.tags
+  event_webhook_url = (
+    var.public_base_url != null && trimspace(var.public_base_url) != ""
+    ? "${trim(var.public_base_url, "/")}/ses/event-webhook/"
+    : null
+  )
+  tags = local.tags
 }
 
 module "github_actions_iam" {

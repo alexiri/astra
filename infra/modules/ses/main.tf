@@ -79,3 +79,23 @@ resource "aws_ses_event_destination" "sns" {
     topic_arn = aws_sns_topic.ses_events.arn
   }
 }
+
+locals {
+  webhook_url_set = var.event_webhook_url != null && trimspace(var.event_webhook_url) != ""
+  webhook_protocol = (
+    local.webhook_url_set && can(regex("^https://", var.event_webhook_url))
+    ? "https"
+    : "http"
+  )
+}
+
+resource "aws_sns_topic_subscription" "ses_events_webhook" {
+  count = local.webhook_url_set ? 1 : 0
+
+  topic_arn = aws_sns_topic.ses_events.arn
+  protocol  = local.webhook_protocol
+  endpoint  = var.event_webhook_url
+
+  # django-ses expects SNS's normal JSON envelope, not raw message delivery.
+  raw_message_delivery = false
+}

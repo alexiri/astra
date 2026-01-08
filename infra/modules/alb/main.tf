@@ -77,7 +77,7 @@ resource "aws_lb_target_group" "app" {
     timeout             = 5
     matcher             = "200-399"
     protocol            = "HTTP"
-    
+
     # Health checks use separate port 9000 (standalone server) to avoid Django ALLOWED_HOSTS.
   }
 
