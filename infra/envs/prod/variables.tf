@@ -145,6 +145,30 @@ variable "send_queued_mail_schedule_expression" {
   default     = "rate(1 minute)"
 }
 
+variable "enable_membership_operations_schedule" {
+  type        = bool
+  description = "If true, run `python manage.py membership_operations` periodically via EventBridge + ECS RunTask."
+  default     = true
+}
+
+variable "membership_operations_schedule_expression" {
+  type        = string
+  description = "EventBridge schedule expression for membership_operations (e.g. rate(1 day))."
+  default     = "rate(1 day)"
+}
+
+variable "enable_cleanup_mail_schedule" {
+  type        = bool
+  description = "If true, run `python manage.py cleanup_mail --days 90 --delete-attachments` periodically via EventBridge + ECS RunTask."
+  default     = true
+}
+
+variable "cleanup_mail_schedule_expression" {
+  type        = string
+  description = "EventBridge schedule expression for cleanup_mail (e.g. rate(1 day))."
+  default     = "rate(1 day)"
+}
+
 variable "aws_storage_bucket_name" {
   type        = string
   description = "S3 bucket name for django-storages (AWS_STORAGE_BUCKET_NAME)."

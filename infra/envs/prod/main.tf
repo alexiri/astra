@@ -297,6 +297,48 @@ module "send_queued_mail_schedule" {
   pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
 }
 
+module "membership_operations_schedule" {
+  source = "../../modules/scheduled_ecs_task"
+
+  name                = "${local.name}-membership-operations"
+  enabled             = var.enable_membership_operations_schedule
+  schedule_expression = var.membership_operations_schedule_expression
+  description         = "Run Django membership_operations periodically"
+  tags                = local.tags
+
+  cluster_arn         = module.ecs.cluster_arn
+  task_definition_arn = module.ecs.task_definition_arn
+  subnet_ids          = module.network.public_subnet_ids
+  security_group_ids  = [aws_security_group.ecs_service.id]
+  assign_public_ip    = true
+
+  container_name = "astra"
+  command        = ["python", "manage.py", "membership_operations"]
+
+  pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
+}
+
+module "cleanup_mail_schedule" {
+  source = "../../modules/scheduled_ecs_task"
+
+  name                = "${local.name}-cleanup-mail"
+  enabled             = var.enable_cleanup_mail_schedule
+  schedule_expression = var.cleanup_mail_schedule_expression
+  description         = "Run Django cleanup_mail periodically"
+  tags                = local.tags
+
+  cluster_arn         = module.ecs.cluster_arn
+  task_definition_arn = module.ecs.task_definition_arn
+  subnet_ids          = module.network.public_subnet_ids
+  security_group_ids  = [aws_security_group.ecs_service.id]
+  assign_public_ip    = true
+
+  container_name = "astra"
+  command        = ["python", "manage.py", "cleanup_mail", "--days", "90", "--delete-attachments"]
+
+  pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
+}
+
 module "parameters" {
   source = "../../modules/parameters"
 
