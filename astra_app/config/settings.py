@@ -567,7 +567,7 @@ LOGGING = {
         # Our app
         'core': {
             'handlers': ['console'],
-            'level': 'DEBUG', # if DEBUG else 'INFO',
+            'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate': False,
         },
         # FreeIPA client libs can be noisy; keep them at INFO by default.
@@ -591,7 +591,7 @@ LOGGING = {
         # Django security events
         'django.security': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'INFO',
             'propagate': False,
         },
     },
