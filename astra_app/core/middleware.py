@@ -158,7 +158,7 @@ class LoginRequiredMiddleware:
     Exemptions:
     - Auth flows (login/logout/password reset)
     - Registration flow
-    - Health checks and the SES webhook
+    - SES webhook
     - Django admin and static/media
     - Election public exports (ballots/audit JSON)
 
@@ -179,17 +179,13 @@ class LoginRequiredMiddleware:
             "/password-expired/",
             "/register/",
             "/elections/ballot/verify/",
-            "/healthz/",
-            "/healthz",
-            "/readyz/",
-            "/readyz",
             "/ses/event-webhook/",
         )
 
     def __call__(self, request):
         path = request.path
 
-        # Allow health/webhook/static/admin and auth-related URLs.
+        # Allow webhook/static/admin and auth-related URLs.
         if any(path.startswith(p) for p in self._allowed_prefixes):
             return self.get_response(request)
 

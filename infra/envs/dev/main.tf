@@ -255,11 +255,7 @@ module "ecs" {
   django_settings_module = var.django_settings_module
   django_debug           = var.django_debug
 
-  allowed_hosts = length(var.allowed_hosts) > 0 ? var.allowed_hosts : (
-    var.enable_direct_task_ingress
-    ? ["*"]
-    : (var.django_debug ? [] : compact([module.alb.alb_dns_name, var.https_domain_name]))
-  )
+  allowed_hosts = length(var.allowed_hosts) > 0 ? var.allowed_hosts : [module.alb.alb_dns_name]
   public_base_url = (
     var.public_base_url != null && trimspace(var.public_base_url) != ""
     ? var.public_base_url

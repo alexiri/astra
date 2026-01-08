@@ -26,7 +26,7 @@ COPY . .
 # `/static/` via WhiteNoise without requiring any writable volume.
 RUN cd astra_app && python manage.py collectstatic --noinput
 
-EXPOSE 8000
+EXPOSE 8000 9000
 
 ENTRYPOINT ["/usr/local/bin/astra-entrypoint"]
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "--log-level", "info"]

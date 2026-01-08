@@ -550,11 +550,7 @@ CACHES = {
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'filters': {
-        'skip_healthz': {
-            '()': 'core.logging_filters.SkipHealthzFilter',
-        },
-    },
+    'filters': {},
     'formatters': {
         'console': {
             'format': '[{asctime}] {levelname} {name}: {message}',
@@ -565,7 +561,6 @@ LOGGING = {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'console',
-            # 'filters': ['skip_healthz'],
         },
     },
     'loggers': {

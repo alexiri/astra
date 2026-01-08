@@ -71,11 +71,14 @@ resource "aws_lb_target_group" "app" {
     enabled             = true
     interval            = 30
     path                = "/readyz"
-    port                = "traffic-port"
+    port                = "9000"
     healthy_threshold   = 2
     unhealthy_threshold = 3
     timeout             = 5
     matcher             = "200-399"
+    protocol            = "HTTP"
+    
+    # Health checks use separate port 9000 (standalone server) to avoid Django ALLOWED_HOSTS.
   }
 
   tags = merge(var.tags, {

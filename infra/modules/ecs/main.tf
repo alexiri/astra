@@ -151,10 +151,9 @@ locals {
     } if v != null
   ]
 
-  # ALB health check uses /readyz. We also use a container-level health check against /healthz.
-  # Curl isn't present in the base image, so use the Python stdlib for the check.
+  # Health checks use standalone server on port 9000 to avoid Django ALLOWED_HOSTS issues.
   container_healthcheck = {
-    command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${var.container_port}/healthz').read()\" || exit 1"]
+    command     = ["CMD-SHELL", "python -c \"import urllib.request, json; r = urllib.request.urlopen('http://localhost:9000/readyz'); data = json.loads(r.read()); exit(0 if data.get('status') == 'ready' else 1)\" || exit 1"]
     interval    = 30
     timeout     = 5
     retries     = 3
@@ -170,6 +169,10 @@ locals {
       portMappings = [
         {
           containerPort = var.container_port
+          protocol      = "tcp"
+        },
+        {
+          containerPort = 9000
           protocol      = "tcp"
         }
       ]

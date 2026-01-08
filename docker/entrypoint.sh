@@ -23,4 +23,8 @@ if [[ "${DJANGO_AUTO_MIGRATE:-0}" == "1" ]]; then
   done
 fi
 
+# Start health check server on port 9000 in background
+echo "[entrypoint] Starting health check server on port 9000..."
+python healthcheck_server.py &
+
 exec "$@"
