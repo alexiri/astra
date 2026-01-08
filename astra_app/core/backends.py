@@ -284,13 +284,22 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
     the FreeIPA session cookie expires or a connection is reset.
     """
 
-    client = get_client()
     try:
+        client = get_client()
         return fn(client)
+    except exceptions.PasswordExpired as e:
+        # Service account password expiration is not recoverable by retrying.
+        # Make it loud in logs and let the request fail as a 500.
+        logger.exception(f"FreeIPA service account password expired: {e}")
+        clear_freeipa_service_client_cache()
+        raise
     except exceptions.Unauthorized:
         clear_freeipa_service_client_cache()
         client = get_client()
         return fn(client)
+    except Exception as e:
+        logger.exception(f"FreeIPA service account operation failed: {e}")
+        raise
 
 
 def _user_cache_key(username: str) -> str:
@@ -586,9 +595,9 @@ class FreeIPAUser:
             users = cache.get_or_set(_users_list_cache_key(), _fetch_users) or []
             # Cache may legitimately contain an empty list; treat that as a hit.
             return [cls(u['uid'][0], u) for u in users]
-        except Exception:
+        except Exception as e:
             # On failure, avoid poisoning the cache with an empty list.
-            logger.exception("Failed to list users")
+            logger.exception(f"Failed to list users: {e}")
             return []
 
     @classmethod
@@ -651,8 +660,9 @@ class FreeIPAUser:
             if user_data is not None:
                 cache.set(cache_key, user_data)
                 return cls(username, user_data)
-        except Exception:
-            logger.exception("Failed to get user username=%s", username)
+        except Exception as e:
+            logger.exception(f"Failed to get user username={username}: {e}")
+            raise
         return None
 
     @classmethod
@@ -683,8 +693,8 @@ class FreeIPAUser:
                 return None
 
             return cls(username, first)
-        except Exception:
-            logger.exception("Failed to find user by email email=%s", email)
+        except Exception as e:
+            logger.exception(f"Failed to find user by email email={email}: {e}")
             return None
 
     @classmethod
@@ -1133,9 +1143,9 @@ class FreeIPAGroup:
             groups = cache.get_or_set(_groups_list_cache_key(), _fetch_groups) or []
             # Cache may legitimately contain an empty list; treat that as a hit.
             return [cls(g['cn'][0], g) for g in groups]
-        except Exception:
+        except Exception as e:
             # On failure, avoid poisoning the cache with an empty list.
-            logger.exception("Failed to list groups")
+            logger.exception(f"Failed to list groups: {e}")
             return []
 
     @classmethod
@@ -1158,8 +1168,8 @@ class FreeIPAGroup:
                 group_data = result['result'][0]
                 cache.set(cache_key, group_data)
                 return cls(cn, group_data)
-        except Exception:
-            logger.exception("Failed to get group cn=%s", cn)
+        except Exception as e:
+            logger.exception(f"Failed to get group cn={cn}: {e}")
         return None
 
     @classmethod
@@ -1562,8 +1572,8 @@ class FreeIPAFASAgreement:
                 )
                 agreements = (result or {}).get("result", []) if isinstance(result, dict) else []
                 cache.set(cache_key, agreements)
-            except Exception:
-                logger.exception("Failed to list FAS agreements")
+            except Exception as e:
+                logger.exception(f"Failed to list FAS agreements: {e}")
                 return []
 
         items: list[FreeIPAFASAgreement] = []
@@ -1599,8 +1609,8 @@ class FreeIPAFASAgreement:
                 data = result["result"]
                 cache.set(cache_key, data)
                 return cls(cn, data)
-        except Exception:
-            logger.exception("Failed to get FAS agreement cn=%s", cn)
+        except Exception as e:
+            logger.exception(f"Failed to get FAS agreement cn={cn}: {e}")
         return None
 
     @classmethod
