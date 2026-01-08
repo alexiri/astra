@@ -581,10 +581,10 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
-        # Django request errors still visible
+        # Django request errors - log everything including 4xx errors
         'django.request': {
             'handlers': ['console'],
-            'level': 'WARNING',
+            'level': 'DEBUG',
             'propagate': False,
         },
         # Access logs from `runserver`.
@@ -593,5 +593,16 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
+        # Django security events
+        'django.security': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+    # Root logger catches everything else
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
     },
 }
