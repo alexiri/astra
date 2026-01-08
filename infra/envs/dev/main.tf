@@ -139,7 +139,103 @@ locals {
     )
   )
 }
+# FreeIPA server for dev environment
+module "freeipa" {
+  source = "../../modules/freeipa"
 
+  name_prefix = local.name
+  vpc_id      = module.network.vpc_id
+  # Place IPA in first public subnet for external access
+  subnet_id = module.network.public_subnet_ids[0]
+
+  key_name     = var.ssh_key_name
+  ipa_hostname = var.freeipa_hostname
+  ipa_domain   = var.freeipa_domain
+  ipa_realm    = var.freeipa_realm
+
+  ipa_admin_password = var.freeipa_admin_password
+  ipa_dm_password    = var.freeipa_dm_password
+
+  # Allow ECS tasks to access LDAP/Kerberos
+  app_security_group_cidrs = [var.vpc_cidr]
+
+  # Dev-only: allow web UI access from anywhere
+  allowed_ingress_cidrs = var.freeipa_allowed_cidrs
+  ssh_allowed_cidrs     = var.freeipa_allowed_cidrs
+
+  allocate_eip             = true
+  create_ansible_inventory = true
+  ansible_ssh_key_path     = var.ssh_private_key_path
+
+  tags = local.tags
+}
+
+# ECS tasks resolve `FREEIPA_HOST` via the VPC resolver. Since `astra-dev.test` is not
+# publicly delegated DNS, create a private hosted zone in Route53 so the hostname
+# resolves inside the VPC.
+resource "aws_route53_zone" "freeipa_private" {
+  name = var.freeipa_domain
+
+  vpc {
+    vpc_id = module.network.vpc_id
+  }
+
+  tags = local.tags
+}
+
+resource "aws_route53_record" "freeipa_a" {
+  zone_id = aws_route53_zone.freeipa_private.zone_id
+  name    = var.freeipa_hostname
+  type    = "A"
+  ttl     = 60
+  records = [module.freeipa.private_ip]
+}
+
+# Automatically run Ansible playbook after IPA instance is ready
+resource "null_resource" "configure_freeipa" {
+  # Re-run if IPA instance changes
+  triggers = {
+    instance_id   = module.freeipa.instance_id
+    playbook_hash = filemd5("${path.module}/../../../ansible/freeipa_setup.yml")
+  }
+
+  # Wait for instance to be reachable
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Removing old host key if present..."
+      ssh-keygen -R ${module.freeipa.public_ip} 2>/dev/null || true
+      
+      echo "Waiting for IPA instance to be SSH-ready..."
+      max_attempts=30
+      attempt=0
+      while [ $attempt -lt $max_attempts ]; do
+        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ${var.ssh_private_key_path} fedora@${module.freeipa.public_ip} echo "SSH ready"; then
+          break
+        fi
+        attempt=$((attempt + 1))
+        echo "Attempt $attempt/$max_attempts failed, retrying..."
+        sleep 10
+      done
+      if [ $attempt -eq $max_attempts ]; then
+        echo "ERROR: Instance did not become reachable"
+        exit 1
+      fi
+    EOT
+  }
+
+  # Run Ansible playbook
+  provisioner "local-exec" {
+    command = <<-EOT
+      cd ${path.module}/../../../ansible
+      export ANSIBLE_HOST_KEY_CHECKING=False
+      ansible-playbook -i ${abspath(path.module)}/ipa_inventory.ini freeipa_setup.yml
+    EOT
+  }
+
+  depends_on = [
+    module.freeipa
+  ]
+}
 module "network" {
   source = "../../modules/network"
 
@@ -171,6 +267,14 @@ resource "aws_security_group" "ecs_service" {
     description     = "App from ALB"
     from_port       = var.container_port
     to_port         = var.container_port
+    protocol        = "tcp"
+    security_groups = [module.alb.alb_security_group_id]
+  }
+
+  ingress {
+    description     = "Health check from ALB"
+    from_port       = 9000
+    to_port         = 9000
     protocol        = "tcp"
     security_groups = [module.alb.alb_security_group_id]
   }

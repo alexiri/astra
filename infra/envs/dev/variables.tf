@@ -192,22 +192,88 @@ variable "aws_ses_configuration_set" {
   default     = null
 }
 
+# FreeIPA Dev Server Configuration
+variable "ssh_key_name" {
+  type        = string
+  description = "EC2 SSH key pair name for IPA server access."
+  default     = null
+}
+
+variable "ssh_private_key_path" {
+  type        = string
+  description = "Path to SSH private key for Ansible automation."
+  default     = "~/.ssh/id_rsa"
+}
+
+variable "freeipa_hostname" {
+  type        = string
+  description = "Fully qualified hostname for FreeIPA server (e.g., ipa.dev.example.test)."
+  default     = "ipa.astra-dev.test"
+}
+
+variable "freeipa_domain" {
+  type        = string
+  description = "FreeIPA domain (lowercase, e.g., astra-dev.test)."
+  default     = "astra-dev.test"
+}
+
+variable "freeipa_realm" {
+  type        = string
+  description = "Kerberos realm for FreeIPA (uppercase, e.g., ASTRA-DEV.TEST)."
+  default     = "ASTRA-DEV.TEST"
+}
+
+variable "freeipa_admin_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA admin user password (dev-only, hardcoded is ok)."
+  default     = "DevPassword123!"
+}
+
+variable "freeipa_dm_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA Directory Manager password (dev-only, hardcoded is ok)."
+  default     = "DevPassword123!"
+}
+
+variable "freeipa_service_username" {
+  type        = string
+  description = "Service account username for application to bind to LDAP."
+  default     = "svc_astra"
+}
+
+variable "freeipa_service_password" {
+  type        = string
+  sensitive   = true
+  description = "Service account password for application LDAP bind (will be stored in Secrets Manager)."
+  default     = "ServicePassword456!"
+}
+
+variable "freeipa_allowed_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed to access FreeIPA web UI and SSH (dev-only, defaults to all)."
+  default     = ["0.0.0.0/0"]
+}
+
+# Application FreeIPA connection settings
+# (now points to our dev IPA server, not external demo)
 variable "freeipa_host" {
   type        = string
-  description = "FREEIPA_HOST."
-  default     = "ipa.demo1.freeipa.org"
+  description = "FREEIPA_HOST for application connection."
+  default     = "ipa.astra-dev.test"
 }
 
 variable "freeipa_verify_ssl" {
   type        = bool
   description = "FREEIPA_VERIFY_SSL."
-  default     = true
+  default     = false
 }
 
 variable "freeipa_service_user" {
   type        = string
-  description = "FREEIPA_SERVICE_USER."
-  default     = "admin"
+  description = "FREEIPA_SERVICE_USER for application binding."
+  default     = "svc_astra"
 }
 
 variable "freeipa_admin_group" {

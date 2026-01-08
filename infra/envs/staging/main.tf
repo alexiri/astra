@@ -120,6 +120,14 @@ resource "aws_security_group" "ecs_service" {
     security_groups = [module.alb.alb_security_group_id]
   }
 
+  ingress {
+    description     = "Health check from ALB"
+    from_port       = 9000
+    to_port         = 9000
+    protocol        = "tcp"
+    security_groups = [module.alb.alb_security_group_id]
+  }
+
   dynamic "ingress" {
     for_each = var.enable_direct_task_ingress ? [1] : []
     content {
@@ -141,6 +149,31 @@ resource "aws_security_group" "ecs_service" {
   tags = merge(local.tags, {
     Name = "${local.name}-svc-sg"
   })
+}
+
+# Optional: VPC-internal DNS for FreeIPA.
+# Only enable this when your FreeIPA hostname is NOT publicly resolvable and you
+# want ECS tasks to resolve it via the VPC resolver.
+resource "aws_route53_zone" "freeipa_private" {
+  count = var.freeipa_private_dns_enabled ? 1 : 0
+
+  name = var.freeipa_private_zone_name
+
+  vpc {
+    vpc_id = module.network.vpc_id
+  }
+
+  tags = local.tags
+}
+
+resource "aws_route53_record" "freeipa_a" {
+  count = var.freeipa_private_dns_enabled ? 1 : 0
+
+  zone_id = aws_route53_zone.freeipa_private[0].zone_id
+  name    = var.freeipa_private_record_name
+  type    = "A"
+  ttl     = 60
+  records = [var.freeipa_private_record_ip]
 }
 
 module "ecr" {

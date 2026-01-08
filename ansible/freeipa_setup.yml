@@ -1,0 +1,240 @@
+---
+# Minimal FreeIPA + FAS Extensions Setup
+# Based on fedora-infra/tiny-stage implementation
+# Optimized for single AWS EC2 instance, dev-only
+
+- name: Install and Configure FreeIPA with FAS Extensions
+  hosts: ipa_servers
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # FAS extension repo (from fedora-infra/freeipa-fas)
+    freeipa_fas_repo: "https://github.com/fedora-infra/freeipa-fas.git"
+    freeipa_fas_version: "develop"
+
+  tasks:
+    - name: Wait for system to be ready
+      wait_for_connection:
+        timeout: 300
+
+    - name: Gather facts
+      setup:
+
+    - name: Get instance private IP
+      set_fact:
+        instance_private_ip: "{{ ansible_facts['default_ipv4']['address'] }}"
+
+    - name: Disable cloud-init hostname management
+      lineinfile:
+        path: /etc/cloud/cloud.cfg
+        line: "preserve_hostname: true"
+        state: present
+        create: yes
+
+    - name: Configure /etc/hosts with proper resolution
+      copy:
+        dest: /etc/hosts
+        content: |
+          127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+          ::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+          {{ instance_private_ip }}   {{ ipa_hostname }} {{ ipa_hostname.split('.')[0] }}
+        mode: '0644'
+
+    - name: Set hostname with hostnamectl
+      command: hostnamectl set-hostname {{ ipa_hostname }}
+      
+    - name: Verify hostname is set correctly
+      command: hostname -f
+      register: hostname_check
+      failed_when: hostname_check.stdout != ipa_hostname
+      changed_when: false
+
+    - name: Debug hostname configuration
+      debug:
+        msg: 
+          - "Private IP: {{ instance_private_ip }}"
+          - "IPA Hostname: {{ ipa_hostname }}"
+          - "Current FQDN: {{ hostname_check.stdout }}"
+
+    - name: Update all packages
+      dnf:
+        name: "*"
+        state: latest
+        update_cache: yes
+
+    - name: Install FreeIPA server packages
+      dnf:
+        name:
+          - freeipa-server
+          - freeipa-server-dns
+          - python3-ipalib
+          - python3-ipaserver
+          - git
+          - python3-pip
+          - python3-devel
+          - gcc
+        state: present
+
+    - name: Install python-freeipa for data population
+      pip:
+        name:
+          - python-freeipa
+          - faker
+        state: present
+
+    - name: Check if IPA is already installed
+      stat:
+        path: /etc/ipa/default.conf
+      register: ipa_installed
+
+    - name: Run ipa-server-install
+      command: >
+        ipa-server-install
+        --realm={{ ipa_realm }}
+        --domain={{ ipa_domain }}
+        --hostname={{ ipa_hostname }}
+        --ds-password={{ ipa_dm_password }}
+        --admin-password={{ ipa_admin_password }}
+        --setup-dns
+        --forwarder=8.8.8.8
+        --forwarder=8.8.4.4
+        --no-ntp
+        --no-host-dns
+        --unattended
+      when: not ipa_installed.stat.exists
+      register: ipa_install_result
+      failed_when: ipa_install_result.rc != 0
+
+    - name: Enable and start IPA services
+      systemd:
+        name: ipa
+        enabled: yes
+        state: started
+
+    - name: Remove old freeipa-fas repository if exists
+      file:
+        path: /tmp/freeipa-fas
+        state: absent
+
+    - name: Clone freeipa-fas repository
+      git:
+        repo: "{{ freeipa_fas_repo }}"
+        dest: /tmp/freeipa-fas
+        version: "{{ freeipa_fas_version }}"
+        force: yes
+
+    - name: Install freeipa-fas extensions
+      command: bash install.sh
+      args:
+        chdir: /tmp/freeipa-fas
+      register: fas_install
+      changed_when: fas_install.rc == 0
+
+    - name: Run ipa-server-upgrade after FAS extension install
+      command: ipa-server-upgrade
+      when: fas_install.changed
+
+    - name: Restart IPA to load FAS plugins
+      systemd:
+        name: ipa
+        state: restarted
+      when: fas_install.changed
+
+    - name: Wait for IPA to be fully operational
+      wait_for:
+        port: 443
+        host: "{{ ipa_hostname }}"
+        delay: 10
+        timeout: 120
+
+    - name: Get Kerberos ticket for admin
+      shell: echo '{{ ipa_admin_password }}' | kinit admin
+      no_log: true
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Refresh IPA schema cache
+      command: ipa -eforce_schema_check=True ping
+      changed_when: false
+
+    - name: Verify FAS commands are available
+      command: ipa fasagreement-find
+      register: fas_verify
+      failed_when: "'User Agreement' not in fas_verify.stdout"
+      changed_when: false
+
+    - name: Create FAS data population script
+      template:
+        src: create_fas_test_data.py.j2
+        dest: /root/create_fas_test_data.py
+        mode: '0700'
+
+    - name: Run FAS data population script
+      command: python3 /root/create_fas_test_data.py
+      register: data_population
+      changed_when: "'adding user' in data_population.stdout"
+
+    - name: Create service account for application
+      command: >
+        ipa user-add {{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+        --first=Service
+        --last=Account
+        --cn="Application Service Account"
+        --password
+      args:
+        stdin: "{{ lookup('env', 'FREEIPA_SERVICE_PASSWORD') | default('ServicePassword456!', true) }}\n{{ lookup('env', 'FREEIPA_SERVICE_PASSWORD') | default('ServicePassword456!', true) }}\n"
+      register: svc_create
+      failed_when: svc_create.rc != 0 and 'already exists' not in svc_create.stderr
+      changed_when: svc_create.rc == 0
+
+    - name: Ensure service account password is not expired
+      command: >
+        ipa user-mod {{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+        --setattr=krbpasswordexpiration=20380119031407Z
+      register: svc_password_expiration
+      failed_when: >
+        svc_password_expiration.rc != 0
+        and 'no modifications to be performed' not in (svc_password_expiration.stdout | lower)
+        and 'no modifications to be performed' not in (svc_password_expiration.stderr | lower)
+      changed_when: svc_password_expiration.rc == 0
+
+    - name: Grant service account admin privileges (dev)
+      command: >
+        ipa group-add-member admins
+        --users={{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+      register: svc_admins_add
+      failed_when: svc_admins_add.rc != 0 and 'already a member' not in (svc_admins_add.stdout | lower) and 'already a member' not in (svc_admins_add.stderr | lower)
+      changed_when: svc_admins_add.rc == 0 and 'already a member' not in (svc_admins_add.stdout | lower) and 'already a member' not in (svc_admins_add.stderr | lower)
+
+    - name: Add service account to User Administrators role
+      command: >
+        ipa role-add-member "User Administrator"
+        --users={{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+      register: role_add
+      failed_when: role_add.rc != 0 and 'already a member' not in role_add.stdout
+      changed_when: role_add.rc == 0 and 'already a member' not in role_add.stdout
+
+    - name: Copy IPA CA certificate to shared location
+      fetch:
+        src: /etc/ipa/ca.crt
+        dest: "{{ playbook_dir }}/ipa_ca.crt"
+        flat: yes
+
+    - name: Display FAS test data creation results
+      debug:
+        var: data_population.stdout_lines
+
+    - name: Display IPA setup information
+      debug:
+        msg:
+          - "FreeIPA installation complete!"
+          - "Web UI: https://{{ ipa_hostname }}/"
+          - "Admin user: admin"
+          - "Admin password: {{ ipa_admin_password }}"
+          - "Realm: {{ ipa_realm }}"
+          - "Domain: {{ ipa_domain }}"
+          - "LDAP URI: ldaps://{{ ipa_hostname }}"
+          - "Service account: {{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}"
+          - "CA cert downloaded to: {{ playbook_dir }}/ipa_ca.crt"

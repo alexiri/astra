@@ -187,6 +187,30 @@ variable "freeipa_host" {
   default     = "ipa.demo1.freeipa.org"
 }
 
+variable "freeipa_private_dns_enabled" {
+  type        = bool
+  description = "If true, create a Route53 private hosted zone + A record in this VPC for FreeIPA (for VPC-internal name resolution)."
+  default     = false
+}
+
+variable "freeipa_private_zone_name" {
+  type        = string
+  description = "Private hosted zone name (e.g. astra-prod.test). Required if freeipa_private_dns_enabled=true."
+  default     = null
+}
+
+variable "freeipa_private_record_name" {
+  type        = string
+  description = "Record name to create in the private zone (e.g. ipa.astra-prod.test). Required if freeipa_private_dns_enabled=true."
+  default     = null
+}
+
+variable "freeipa_private_record_ip" {
+  type        = string
+  description = "Private IP address for the FreeIPA A record. Required if freeipa_private_dns_enabled=true."
+  default     = null
+}
+
 variable "freeipa_verify_ssl" {
   type        = bool
   description = "FREEIPA_VERIFY_SSL."

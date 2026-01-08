@@ -9,6 +9,18 @@
 # - The task definition references Secrets Manager ARNs. The task execution role is granted
 #   secretsmanager:GetSecretValue to those ARNs.
 
+# Fetch current running task to preserve CI/CD-deployed image when var.image_tag is "bootstrap"
+data "aws_ecs_service" "current" {
+  count        = var.image_tag == "bootstrap" ? 1 : 0
+  cluster_arn  = aws_ecs_cluster.this.arn
+  service_name = "${var.name}-service"
+}
+
+data "aws_ecs_task_definition" "current" {
+  count           = var.image_tag == "bootstrap" && length(data.aws_ecs_service.current) > 0 ? 1 : 0
+  task_definition = data.aws_ecs_service.current[0].task_definition
+}
+
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/ecs/${var.name}"
   retention_in_days = var.log_retention_days
@@ -92,7 +104,18 @@ resource "aws_iam_role" "task" {
 
 locals {
   container_name = "astra"
-  image          = "${var.image_repository_url}:${var.image_tag}"
+  
+  # When image_tag is "bootstrap", try to preserve the current image from CI/CD
+  current_image = try(
+    jsondecode(data.aws_ecs_task_definition.current[0].container_definitions)[0].image,
+    null
+  )
+  current_image_tag = local.current_image != null ? split(":", local.current_image)[1] : null
+  
+  # Use current image tag if available, otherwise fall back to var.image_tag
+  effective_image_tag = var.image_tag == "bootstrap" && local.current_image_tag != null ? local.current_image_tag : var.image_tag
+  
+  image = "${var.image_repository_url}:${local.effective_image_tag}"
 
   # Django requires CSRF_TRUSTED_ORIGINS when you're behind a TLS-terminating proxy
   # and serving HTTPS. Derive it from PUBLIC_BASE_URL by default, but allow explicit
@@ -153,7 +176,7 @@ locals {
 
   # Health checks use standalone server on port 9000 to avoid Django ALLOWED_HOSTS issues.
   container_healthcheck = {
-    command     = ["CMD-SHELL", "python -c \"import urllib.request, json; r = urllib.request.urlopen('http://localhost:9000/readyz'); data = json.loads(r.read()); exit(0 if data.get('status') == 'ready' else 1)\" || exit 1"]
+    command     = ["CMD-SHELL", "python -c \"import urllib.request; r = urllib.request.urlopen('http://localhost:9000/healthz'); exit(0 if r.status == 200 else 1)\" || exit 1"]
     interval    = 30
     timeout     = 5
     retries     = 3
