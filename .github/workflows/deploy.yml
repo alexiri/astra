@@ -182,6 +182,7 @@ jobs:
             --output text)
 
           echo "task_definition_arn=${NEW_TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
+          echo "Registered new task definition: ${NEW_TASK_DEF_ARN}"
 
       - name: Run Django migrations (one-off ECS task)
         shell: bash
@@ -208,6 +209,7 @@ jobs:
             --query 'tasks[0].taskArn' \
             --output text)
 
+          echo "Started migrate task: ${TASK_ARN}"
           aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
 
           EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
@@ -226,6 +228,8 @@ jobs:
             echo "--- CloudWatch logs: ${LOG_GROUP} / ${LOG_STREAM} ---" >&2
             aws logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" --start-from-head --limit 200 || true
             exit 1
+          else
+            echo "Migrate task completed successfully."
           fi
 
       - name: Deploy to ECS service
@@ -243,5 +247,6 @@ jobs:
             --task-definition "$TASK_DEF" \
             --force-new-deployment > /dev/null
 
+          echo "Updating service to task definition ${TASK_DEF}..."
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
           echo "Service is stable."

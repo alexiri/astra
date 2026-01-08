@@ -22,7 +22,7 @@ django.setup()
 
 from django.db import connection
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('healthcheck_server')
 
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
@@ -57,8 +57,9 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suppress successful health check access logs (200 OK)
         # but allow other status codes through for debugging
-        if "200" not in str(args):
-            logger.info(format % args)
+        # if "200" not in str(args):
+        #     logger.info(format % args)
+        logger.info(format % args)
 
 
 if __name__ == "__main__":
