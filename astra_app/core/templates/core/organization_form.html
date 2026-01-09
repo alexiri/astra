@@ -53,84 +53,29 @@
       </div>
     {% endif %}
 
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">Business Contact</h3>
-      </div>
-      <div class="card-body">
-        <p class="text-muted mb-3">
-          All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
-        </p>
-
-        <div class="form-group">
-          <label for="{{ form.business_contact_name.id_for_label }}">{{ form.business_contact_name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.business_contact_name }}
-          {% if form.business_contact_name.errors %}<div class="text-danger">{{ form.business_contact_name.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.business_contact_email.id_for_label }}">{{ form.business_contact_email.label }} <span class="text-danger">(required)</span></label>
-          {{ form.business_contact_email }}
-          {% if form.business_contact_email.errors %}<div class="text-danger">{{ form.business_contact_email.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.business_contact_phone.id_for_label }}">{{ form.business_contact_phone.label }}</label>
-          {{ form.business_contact_phone }}
-          {% if form.business_contact_phone.errors %}<div class="text-danger">{{ form.business_contact_phone.errors }}</div>{% endif %}
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">PR and/or Marketing Contact</h3>
-      </div>
-      <div class="card-body">
-        <p class="text-muted mb-3">This person will be contacted for press release and marketing benefit reasons</p>
-
-        <div class="form-group">
-          <label for="{{ form.pr_marketing_contact_name.id_for_label }}">{{ form.pr_marketing_contact_name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.pr_marketing_contact_name }}
-          {% if form.pr_marketing_contact_name.errors %}<div class="text-danger">{{ form.pr_marketing_contact_name.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.pr_marketing_contact_email.id_for_label }}">{{ form.pr_marketing_contact_email.label }} <span class="text-danger">(required)</span></label>
-          {{ form.pr_marketing_contact_email }}
-          {% if form.pr_marketing_contact_email.errors %}<div class="text-danger">{{ form.pr_marketing_contact_email.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.pr_marketing_contact_phone.id_for_label }}">{{ form.pr_marketing_contact_phone.label }}</label>
-          {{ form.pr_marketing_contact_phone }}
-          {% if form.pr_marketing_contact_phone.errors %}<div class="text-danger">{{ form.pr_marketing_contact_phone.errors }}</div>{% endif %}
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">Technical Contact</h3>
-      </div>
-      <div class="card-body">
-        <p class="text-muted mb-3">
-          All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
-        </p>
-
-        <div class="form-group">
-          <label for="{{ form.technical_contact_name.id_for_label }}">{{ form.technical_contact_name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.technical_contact_name }}
-          {% if form.technical_contact_name.errors %}<div class="text-danger">{{ form.technical_contact_name.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.technical_contact_email.id_for_label }}">{{ form.technical_contact_email.label }} <span class="text-danger">(required)</span></label>
-          {{ form.technical_contact_email }}
-          {% if form.technical_contact_email.errors %}<div class="text-danger">{{ form.technical_contact_email.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.technical_contact_phone.id_for_label }}">{{ form.technical_contact_phone.label }}</label>
-          {{ form.technical_contact_phone }}
-          {% if form.technical_contact_phone.errors %}<div class="text-danger">{{ form.technical_contact_phone.errors }}</div>{% endif %}
-        </div>
-      </div>
-    </div>
+    {% with selected_contact=selected_contact|default:"" %}
+      {% if selected_contact %}
+        {% if selected_contact == "representative" and not show_representatives %}
+          {% with active_contact="business" %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% else %}
+          {% with active_contact=selected_contact %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% endif %}
+      {% else %}
+        {% if show_representatives %}
+          {% with active_contact="representative" %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% else %}
+          {% with active_contact="business" %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% endif %}
+      {% endif %}
+    {% endwith %}
 
     <div class="card">
       <div class="card-header">
@@ -197,21 +142,7 @@
       </div>
     </div>
 
-    {% if show_representatives %}
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Representative</h3>
-        </div>
-        <div class="card-body">
-          <div class="form-group mb-0">
-            <label for="{{ form.representative.id_for_label }}">{{ form.representative.label }}</label>
-            {{ form.representative }}
-            {% if form.representative.help_text %}<small class="form-text text-muted">{{ form.representative.help_text }}</small>{% endif %}
-            {% if form.representative.errors %}<div class="text-danger">{{ form.representative.errors }}</div>{% endif %}
-          </div>
-        </div>
-      </div>
-    {% endif %}
+    
 
     <div class="card">
       <div class="card-body">

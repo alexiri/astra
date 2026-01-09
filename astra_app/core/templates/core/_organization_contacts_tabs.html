@@ -1,0 +1,162 @@
+<div class="card card-primary card-outline card-outline-tabs">
+  <div class="card-header p-0 border-bottom-0">
+    <ul class="nav nav-tabs" id="contacts-tabs" role="tablist">
+      <li class="pt-2 px-3"><h3 class="card-title">Contacts</h3></li>
+
+      {% if show_representatives %}
+        <li class="nav-item">
+          <a
+            class="nav-link {% if active_contact == 'representative' %}active{% endif %}"
+            id="contacts-representative-tab"
+            data-toggle="pill"
+            href="#contacts-representative"
+            role="tab"
+            aria-controls="contacts-representative"
+            aria-selected="{% if active_contact == 'representative' %}true{% else %}false{% endif %}"
+          >Representative</a>
+        </li>
+      {% endif %}
+
+      <li class="nav-item">
+        <a
+          class="nav-link {% if active_contact == 'business' %}active{% endif %}"
+          id="contacts-business-tab"
+          data-toggle="pill"
+          href="#contacts-business"
+          role="tab"
+          aria-controls="contacts-business"
+          aria-selected="{% if active_contact == 'business' %}true{% else %}false{% endif %}"
+        >Business</a>
+      </li>
+
+      <li class="nav-item">
+        <a
+          class="nav-link {% if active_contact == 'marketing' %}active{% endif %}"
+          id="contacts-marketing-tab"
+          data-toggle="pill"
+          href="#contacts-marketing"
+          role="tab"
+          aria-controls="contacts-marketing"
+          aria-selected="{% if active_contact == 'marketing' %}true{% else %}false{% endif %}"
+        >PR / Marketing</a>
+      </li>
+
+      <li class="nav-item">
+        <a
+          class="nav-link {% if active_contact == 'technical' %}active{% endif %}"
+          id="contacts-technical-tab"
+          data-toggle="pill"
+          href="#contacts-technical"
+          role="tab"
+          aria-controls="contacts-technical"
+          aria-selected="{% if active_contact == 'technical' %}true{% else %}false{% endif %}"
+        >Technical</a>
+      </li>
+    </ul>
+  </div>
+
+  <div class="card-body">
+    <div class="tab-content" id="contacts-tab-content">
+      {% if show_representatives %}
+        <div
+          class="tab-pane fade {% if active_contact == 'representative' %}active show{% endif %}"
+          id="contacts-representative"
+          role="tabpanel"
+          aria-labelledby="contacts-representative-tab"
+        >
+          <p class="text-muted mb-3">
+            The representative is the primary point of contact for the member organization and is authorized
+            to act on behalf of the organization in all matters related to the AlmaLinux OS Foundation, including
+            voting on elections, changing sponsorship levels, and other official business.
+          </p>
+
+          <div class="form-group mb-0">
+            <label for="{{ form.representative.id_for_label }}">{{ form.representative.label }}</label>
+            {{ form.representative }}
+            {% if form.representative.help_text %}<small class="form-text text-muted">{{ form.representative.help_text }}</small>{% endif %}
+            {% if form.representative.errors %}<div class="text-danger">{{ form.representative.errors }}</div>{% endif %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div
+        class="tab-pane fade {% if active_contact == 'business' %}active show{% endif %}"
+        id="contacts-business"
+        role="tabpanel"
+        aria-labelledby="contacts-business-tab"
+      >
+        <p class="text-muted mb-3">
+          All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
+        </p>
+
+        <div class="form-group">
+          <label for="{{ form.business_contact_name.id_for_label }}">{{ form.business_contact_name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.business_contact_name }}
+          {% if form.business_contact_name.errors %}<div class="text-danger">{{ form.business_contact_name.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.business_contact_email.id_for_label }}">{{ form.business_contact_email.label }} <span class="text-danger">(required)</span></label>
+          {{ form.business_contact_email }}
+          {% if form.business_contact_email.errors %}<div class="text-danger">{{ form.business_contact_email.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group mb-0">
+          <label for="{{ form.business_contact_phone.id_for_label }}">{{ form.business_contact_phone.label }}</label>
+          {{ form.business_contact_phone }}
+          {% if form.business_contact_phone.errors %}<div class="text-danger">{{ form.business_contact_phone.errors }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div
+        class="tab-pane fade {% if active_contact == 'marketing' %}active show{% endif %}"
+        id="contacts-marketing"
+        role="tabpanel"
+        aria-labelledby="contacts-marketing-tab"
+      >
+        <p class="text-muted mb-3">This person will be contacted for press release and marketing benefit reasons</p>
+
+        <div class="form-group">
+          <label for="{{ form.pr_marketing_contact_name.id_for_label }}">{{ form.pr_marketing_contact_name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.pr_marketing_contact_name }}
+          {% if form.pr_marketing_contact_name.errors %}<div class="text-danger">{{ form.pr_marketing_contact_name.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.pr_marketing_contact_email.id_for_label }}">{{ form.pr_marketing_contact_email.label }} <span class="text-danger">(required)</span></label>
+          {{ form.pr_marketing_contact_email }}
+          {% if form.pr_marketing_contact_email.errors %}<div class="text-danger">{{ form.pr_marketing_contact_email.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group mb-0">
+          <label for="{{ form.pr_marketing_contact_phone.id_for_label }}">{{ form.pr_marketing_contact_phone.label }}</label>
+          {{ form.pr_marketing_contact_phone }}
+          {% if form.pr_marketing_contact_phone.errors %}<div class="text-danger">{{ form.pr_marketing_contact_phone.errors }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div
+        class="tab-pane fade {% if active_contact == 'technical' %}active show{% endif %}"
+        id="contacts-technical"
+        role="tabpanel"
+        aria-labelledby="contacts-technical-tab"
+      >
+        <p class="text-muted mb-3">
+          All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
+        </p>
+
+        <div class="form-group">
+          <label for="{{ form.technical_contact_name.id_for_label }}">{{ form.technical_contact_name.label }} <span class="text-danger">(required)</span></label>
+          {{ form.technical_contact_name }}
+          {% if form.technical_contact_name.errors %}<div class="text-danger">{{ form.technical_contact_name.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group">
+          <label for="{{ form.technical_contact_email.id_for_label }}">{{ form.technical_contact_email.label }} <span class="text-danger">(required)</span></label>
+          {{ form.technical_contact_email }}
+          {% if form.technical_contact_email.errors %}<div class="text-danger">{{ form.technical_contact_email.errors }}</div>{% endif %}
+        </div>
+        <div class="form-group mb-0">
+          <label for="{{ form.technical_contact_phone.id_for_label }}">{{ form.technical_contact_phone.label }}</label>
+          {{ form.technical_contact_phone }}
+          {% if form.technical_contact_phone.errors %}<div class="text-danger">{{ form.technical_contact_phone.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
