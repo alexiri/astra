@@ -62,7 +62,7 @@
 
       {% if req.status == 'pending' %}
         <hr>
-        <div class="d-flex flex-wrap" style="gap: .5rem;">
+        <div class="membership-request-actions membership-request-actions--detail">
           {% include 'core/_membership_request_actions.html' with request=req %}
         </div>
       {% endif %}

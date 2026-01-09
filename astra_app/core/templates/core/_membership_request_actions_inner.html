@@ -39,6 +39,22 @@ Expected context:
   {% endif %}
 {% endwith %}
 
+{% if send_mail_can_add %}
+  {% if membership_request.requested_username %}
+    {% url 'send-mail' as send_mail_url %}
+    <a
+      class="btn btn-sm btn-outline-primary"
+      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_username|urlencode }}"
+    >Contact</a>
+  {% elif membership_request.requested_organization and membership_request.requested_organization.representative %}
+    {% url 'send-mail' as send_mail_url %}
+    <a
+      class="btn btn-sm btn-outline-primary"
+      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_organization.representative|urlencode }}"
+    >Contact</a>
+  {% endif %}
+{% endif %}
+
 <button
   type="button"
   class="btn btn-sm btn-outline-secondary"

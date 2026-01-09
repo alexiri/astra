@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from django.test import TestCase
+from django.urls import reverse
+
+from core.backends import FreeIPAUser
+from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_ADD_SEND_MAIL, ASTRA_VIEW_MEMBERSHIP
+
+
+class MembershipRequestContactButtonTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        committee_cn = "membership-committee"
+        for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP, ASTRA_ADD_SEND_MAIL):
+            FreeIPAPermissionGrant.objects.get_or_create(
+                permission=perm,
+                principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+                principal_name=committee_cn,
+            )
+
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_contact_button_links_to_send_mail_for_user_request(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": ["membership-committee"]},
+        )
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Contact")
+        expected = reverse("send-mail") + "?type=users&to=alice"
+        self.assertContains(resp, f'href="{expected}')
+
+    def test_contact_button_links_to_send_mail_for_org_representative(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "group_cn": "almalinux-gold",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Example Org", representative="orgrep")
+        req = MembershipRequest.objects.create(requested_username="", requested_organization=org, membership_type_id="gold")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": ["membership-committee"]},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Contact")
+        expected = reverse("send-mail") + "?type=users&to=orgrep"
+        self.assertContains(resp, f'href="{expected}')

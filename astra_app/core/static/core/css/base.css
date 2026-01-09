@@ -222,6 +222,45 @@ a:hover {
   font-family: var(--bs-font-monospace);
 }
 
+/* Membership request action buttons.
+   The list view has a constrained column width, so we explicitly form a 2x2 grid
+   when the container is narrow; the request detail view stays single-row. */
+.membership-request-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.membership-request-actions--list {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
+  container-type: inline-size;
+}
+
+@container (max-width: 360px) {
+  .membership-request-actions--list > .btn {
+    flex: 0 0 calc(50% - 0.25rem);
+  }
+}
+
+@supports not (container-type: inline-size) {
+  .membership-request-actions--list > .btn {
+    flex: 0 0 calc(50% - 0.25rem);
+  }
+}
+
+@media (max-width: 575.98px) {
+  .membership-request-actions--list > .btn {
+    flex: 0 0 calc(50% - 0.25rem);
+  }
+}
+
+.membership-request-actions--detail {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .profile-page .profile-pre-list pre {
   background: rgba(0, 0, 0, 0.03);
   border: 1px solid rgba(0, 0, 0, 0.12);

@@ -41,7 +41,7 @@
             <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Requested at</th>
             <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Target</th>
             <th>Type</th>
-            <th style="width: 280px" class="text-right">Actions</th>
+            <th class="text-right" style="width: 15%; white-space: nowrap;">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -167,7 +167,9 @@
 
               </td>
               <td class="text-right">
-                {% include 'core/_membership_request_actions.html' with request=r %}
+                <div class="membership-request-actions membership-request-actions--list">
+                  {% include 'core/_membership_request_actions.html' with request=r %}
+                </div>
               </td>
             </tr>
             {% endwith %}
