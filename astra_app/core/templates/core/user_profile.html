@@ -204,7 +204,11 @@
               {% if is_self and m.is_expiring_soon %}
                 <a href="{{ m.extend_url }}" class="btn btn-sm btn-primary">Extend</a>
               {% else %}
-                <span class="badge badge-success">Active</span>
+                {% if membership_can_view and m.request_id %}
+                  <a class="badge badge-success" href="{% url 'membership-request-detail' m.request_id %}">Active</a>
+                {% else %}
+                  <span class="badge badge-success">Active</span>
+                {% endif %}
               {% endif %}
 
               {% if membership_can_change and membership_can_delete %}
@@ -230,7 +234,11 @@
             <div>
               <div class="font-weight-bold">{{ req.membership_type.name }}</div>
             </div>
-            <span class="badge badge-secondary">In Review</span>
+            {% if membership_can_view %}
+              <a class="badge badge-secondary" href="{% url 'membership-request-detail' req.request_id %}">In Review</a>
+            {% else %}
+              <span class="badge badge-secondary">In Review</span>
+            {% endif %}
           </li>
         {% endfor %}
 

@@ -18,7 +18,7 @@ from core.agreements import (
 )
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.membership import get_valid_membership_type_codes_for_username, get_valid_memberships_for_username
-from core.models import MembershipRequest, MembershipType
+from core.models import MembershipLog, MembershipRequest, MembershipType
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,40 @@ def _profile_context_for_user(
     membership_request_url = reverse("membership-request")
     valid_memberships = get_valid_memberships_for_username(fu.username)
     valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
+
+    membership_type_ids = {m.membership_type_id for m in valid_memberships}
+
+    request_id_by_membership_type_id: dict[str, int] = {}
+    if membership_type_ids:
+        logs = (
+            MembershipLog.objects.filter(
+                target_username=fu.username,
+                membership_type_id__in=membership_type_ids,
+                membership_request__isnull=False,
+                action=MembershipLog.Action.approved,
+            )
+            .only("membership_type_id", "membership_request_id", "created_at")
+            .order_by("-created_at")
+        )
+        for log in logs:
+            req_id = log.membership_request_id
+            if req_id is None:
+                continue
+            request_id_by_membership_type_id.setdefault(log.membership_type_id, req_id)
+
+        missing = membership_type_ids - request_id_by_membership_type_id.keys()
+        if missing:
+            approved_requests = (
+                MembershipRequest.objects.filter(
+                    requested_username=fu.username,
+                    membership_type_id__in=missing,
+                    status=MembershipRequest.Status.approved,
+                )
+                .only("pk", "membership_type_id", "decided_at", "requested_at")
+                .order_by("-decided_at", "-requested_at")
+            )
+            for req in approved_requests:
+                request_id_by_membership_type_id.setdefault(req.membership_type_id, req.pk)
     now = timezone.now()
     expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
 
@@ -136,14 +170,24 @@ def _profile_context_for_user(
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
                 "extend_url": f"{membership_request_url}?membership_type={membership.membership_type.code}",
+                "request_id": request_id_by_membership_type_id.get(membership.membership_type_id),
             }
         )
 
-    pending_requests = list(
+    pending_requests_qs = list(
         MembershipRequest.objects.select_related("membership_type")
         .filter(requested_username=fu.username, status=MembershipRequest.Status.pending)
         .order_by("requested_at")
     )
+
+    pending_requests: list[dict[str, object]] = [
+        {
+            "membership_type": r.membership_type,
+            "requested_at": r.requested_at,
+            "request_id": r.pk,
+        }
+        for r in pending_requests_qs
+    ]
 
     membership_can_request_any = MembershipType.objects.filter(enabled=True, isIndividual=True).exclude(
         code__in=valid_membership_type_codes

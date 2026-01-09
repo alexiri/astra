@@ -109,6 +109,101 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "In Review")
         self.assertContains(resp, "Individual")
 
+    def test_committee_viewer_sees_in_review_badge_linked_to_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = self._make_user("alice", full_name="Alice User")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.views_users._get_full_user", return_value=alice):
+                with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                    with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "In Review")
+        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+
+    def test_committee_viewer_sees_active_badge_linked_to_request(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType
+
+        mt, _created = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id=mt.code,
+            status=MembershipRequest.Status.approved,
+            decided_at=timezone.now(),
+            decided_by_username="reviewer",
+        )
+
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id=mt.code,
+            membership_request=req,
+            requested_group_cn=mt.group_cn,
+            action=MembershipLog.Action.approved,
+            expires_at=timezone.now() + datetime.timedelta(days=200),
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = self._make_user("alice", full_name="Alice User")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.views_users._get_full_user", return_value=alice):
+                with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                    with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Active")
+        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+
     def test_committee_profile_renders_expiry_and_terminate_modals(self) -> None:
         from core.models import MembershipLog, MembershipType
 
