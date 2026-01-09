@@ -149,10 +149,18 @@ def _profile_context_for_user(
         code__in=valid_membership_type_codes
     ).exclude(group_cn="").exists()
 
+    email_is_blacklisted = False
+    if is_self and fu.email:
+        # Local import: this app uses django-ses to track delivery-related blacklisting.
+        from django_ses.models import BlacklistedEmail
+
+        email_is_blacklisted = BlacklistedEmail.objects.filter(email__iexact=fu.email).exists()
+
     return {
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
         "is_self": is_self,
+        "email_is_blacklisted": email_is_blacklisted,
         "membership_request_url": membership_request_url,
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,

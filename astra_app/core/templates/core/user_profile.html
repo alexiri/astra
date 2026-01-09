@@ -8,6 +8,14 @@
 
 {% block content %}
 <div class="profile-page">
+  {% if is_self and email_is_blacklisted %}
+    <div class="alert alert-danger" id="email-blacklisted-alert" role="alert">
+      <strong>Email delivery problem:</strong>
+      Your email address{% if fu.email %} (<a class="text-reset" href="mailto:{{ fu.email }}">{{ fu.email }}</a>){% endif %} has been blacklisted due to mail delivery issues.
+      Please <a href="{% url 'settings-emails' %}" class="alert-link">set a new email address</a>.
+    </div>
+  {% endif %}
+
   <div class="row">
     <div class="col-md-4">
       <div class="card">
