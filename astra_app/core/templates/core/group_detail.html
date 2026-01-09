@@ -30,7 +30,14 @@
     <div class="{% if is_sponsor %}col-lg-8{% else %}col-lg-12{% endif %}">
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">Group info</h3>
+          <div class="d-flex justify-content-between align-items-center" style="gap: .5rem;">
+            <h3 class="card-title mb-0">Group info</h3>
+            {% if is_sponsor %}
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'group-edit' group.cn %}">
+                <i class="fas fa-edit mr-1"></i> Edit group
+              </a>
+            {% endif %}
+          </div>
         </div>
         <ul class="list-group list-group-flush">
           {% if group.description %}

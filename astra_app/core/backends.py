@@ -1200,24 +1200,64 @@ class FreeIPAGroup:
         """
         Updates the group data in FreeIPA.
         """
-        updates = {}
-        if self.description:
-            updates['o_description'] = self.description
-        if self.fas_url:
-            updates['o_fasurl'] = self.fas_url
-        if self.fas_mailing_list:
-            updates['o_fasmailinglist'] = self.fas_mailing_list
-        if self.fas_irc_channels:
-            updates['o_fasircchannel'] = self.fas_irc_channels
-        if self.fas_discussion_url:
-            updates['o_fasdiscussionurl'] = self.fas_discussion_url
+        def _first_str(value: object) -> str:
+            if isinstance(value, list):
+                value = value[0] if value else ""
+            return str(value or "").strip()
+
+        old_description = _first_str(self._group_data.get("description"))
+        old_fas_url = _first_str(self._group_data.get("fasurl"))
+        old_fas_mailing_list = _first_str(self._group_data.get("fasmailinglist"))
+        old_fas_discussion_url = _first_str(self._group_data.get("fasdiscussionurl"))
+        old_fas_irc_channels = set(_clean_str_list(self._group_data.get("fasircchannel", [])))
+
+        new_description = str(self.description or "").strip()
+        new_fas_url = str(self.fas_url or "").strip()
+        new_fas_mailing_list = str(self.fas_mailing_list or "").strip()
+        new_fas_discussion_url = str(self.fas_discussion_url or "").strip()
+        new_fas_irc_channels = [str(ch or "").strip() for ch in (self.fas_irc_channels or [])]
+        new_fas_irc_channels = [ch for ch in new_fas_irc_channels if ch]
+        new_fas_irc_channels_set = set(new_fas_irc_channels)
+
+        # python_freeipa validates keyword args for group_mod against its built-in
+        # schema and does not include freeipa-fas extension options in some
+        # builds. Use FreeIPA's generic setattr/addattr/delattr support instead.
+        setattrs: list[str] = []
+        addattrs: list[str] = []
+        delattrs: list[str] = []
+
+        def _maybe_update_single(attr: str, *, old: str, new: str) -> None:
+            if (old or "") == (new or ""):
+                return
+            if new:
+                setattrs.append(f"{attr}={new}")
+            elif old:
+                delattrs.append(attr)
+
+        _maybe_update_single("description", old=old_description, new=new_description)
+        _maybe_update_single("fasurl", old=old_fas_url, new=new_fas_url)
+        _maybe_update_single("fasmailinglist", old=old_fas_mailing_list, new=new_fas_mailing_list)
+        _maybe_update_single("fasdiscussionurl", old=old_fas_discussion_url, new=new_fas_discussion_url)
+
+        if old_fas_irc_channels != new_fas_irc_channels_set:
+            if old_fas_irc_channels:
+                delattrs.append("fasircchannel")
+            for ch in sorted(new_fas_irc_channels_set):
+                addattrs.append(f"fasircchannel={ch}")
 
         try:
-            if updates:
+            if setattrs or addattrs or delattrs:
                 try:
+                    kwargs: dict[str, object] = {}
+                    if setattrs:
+                        kwargs["o_setattr"] = setattrs
+                    if addattrs:
+                        kwargs["o_addattr"] = addattrs
+                    if delattrs:
+                        kwargs["o_delattr"] = delattrs
                     _with_freeipa_service_client_retry(
                         self.get_client,
-                        lambda client: client.group_mod(self.cn, **updates),
+                        lambda client: client.group_mod(self.cn, **kwargs),
                     )
                 except exceptions.BadRequest as e:
                     # FreeIPA can return BadRequest("no modifications to be performed") when

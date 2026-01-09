@@ -20,6 +20,7 @@ urlpatterns = [
     path("groups/", views_groups.groups, name="groups"),
     path("groups/search/", views_groups.group_search, name="group-search"),
     path("group/<str:name>/", views_groups.group_detail, name="group-detail"),
+    path("group/<str:name>/edit/", views_groups.group_edit, name="group-edit"),
 
     path("organizations/", views_organizations.organizations, name="organizations"),
     path("organizations/create/", views_organizations.organization_create, name="organization-create"),

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 from django.contrib import messages
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
@@ -11,6 +12,7 @@ from django.views.decorators.http import require_GET
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
 from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed, FreeIPAUser
+from core.forms_groups import GroupEditForm
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.views_utils import _normalize_str
 
@@ -253,5 +255,63 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             "sponsor_groups_list": sponsor_groups_list,
             "required_agreements": required_agreements,
             "unsigned_usernames": sorted(unsigned_usernames, key=lambda s: s.lower()),
+        },
+    )
+
+
+def group_edit(request: HttpRequest, name: str) -> HttpResponse:
+    cn = _normalize_str(name)
+    if not cn:
+        raise Http404("Group not found")
+
+    group = FreeIPAGroup.get(cn)
+    if not group or not group.fas_group:
+        raise Http404("Group not found")
+
+    username = _normalize_str(request.user.get_username())
+    sponsors = set(group.sponsors)
+    sponsor_groups = set(group.sponsor_groups)
+    user_groups: set[str] = set()
+    if isinstance(request.user, FreeIPAUser):
+        user_groups = set(request.user.groups_list)
+
+    sponsor_groups_lower = {g.lower() for g in sponsor_groups}
+    user_groups_lower = {g.lower() for g in user_groups}
+    is_sponsor = (username in sponsors) or bool(sponsor_groups_lower & user_groups_lower)
+    if not is_sponsor:
+        raise PermissionDenied("Only sponsors can edit group info.")
+
+    if request.method == "POST":
+        form = GroupEditForm(request.POST)
+        if form.is_valid():
+            group.description = form.cleaned_data["description"]
+            group.fas_url = form.cleaned_data["fas_url"] or None
+            group.fas_mailing_list = form.cleaned_data["fas_mailing_list"] or None
+            group.fas_discussion_url = form.cleaned_data["fas_discussion_url"] or None
+            group.fas_irc_channels = list(form.cleaned_data["fas_irc_channels"])
+
+            try:
+                group.save()
+                messages.success(request, "Saved group info.")
+                return redirect("group-detail", cn)
+            except Exception:
+                messages.error(request, "Failed to save group info due to an internal error.")
+    else:
+        form = GroupEditForm(
+            initial={
+                "description": group.description or "",
+                "fas_url": group.fas_url or "",
+                "fas_mailing_list": group.fas_mailing_list or "",
+                "fas_discussion_url": group.fas_discussion_url or "",
+                "fas_irc_channels": "\n".join(group.fas_irc_channels or []),
+            }
+        )
+
+    return render(
+        request,
+        "core/group_edit.html",
+        {
+            "group": group,
+            "form": form,
         },
     )
