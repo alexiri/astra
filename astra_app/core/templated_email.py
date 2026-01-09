@@ -112,6 +112,24 @@ def placeholder_context_from_sources(*sources: str) -> dict[str, str]:
     return {name: f"-{name}-" for name in sorted(names)}
 
 
+def placeholderize_empty_values(context: Mapping[str, object]) -> dict[str, object]:
+    """Return a copy of context with empty values replaced by `-var-` placeholders.
+
+    This is intended for email preview/UX: if a variable is present but empty
+    (e.g. blank election name during create), show a deterministic placeholder
+    so templates remain readable.
+    """
+
+    out: dict[str, object] = dict(context)
+    for key, value in list(out.items()):
+        if value is None:
+            out[key] = f"-{key}-"
+            continue
+        if isinstance(value, str) and not value.strip():
+            out[key] = f"-{key}-"
+    return out
+
+
 def render_template_string(value: str, context: Mapping[str, object]) -> str:
     """Render a Django template string with a plain context.
 
@@ -128,11 +146,16 @@ def render_template_string(value: str, context: Mapping[str, object]) -> str:
 def render_templated_email_preview(*, subject: str, html_content: str, text_content: str, context: Mapping[str, object]) -> dict[str, str]:
     sources = (subject, html_content, text_content)
 
-    render_context: dict[str, object]
+    # Always start with placeholders inferred from the template sources, then
+    # overlay caller-provided values. This ensures:
+    # - missing keys render as `-var-` placeholders (even when context provided)
+    # - present-but-empty values render as `-var-` placeholders
+    placeholders: dict[str, str] = placeholder_context_from_sources(*sources)
+    render_context: dict[str, object] = dict(placeholders)
     if context:
-        render_context = dict(context)
-    else:
-        render_context = placeholder_context_from_sources(*sources)
+        render_context.update(dict(context))
+
+    render_context = placeholderize_empty_values(render_context)
 
     _coerce_pluralize_inputs(render_context=render_context, sources=sources)
 

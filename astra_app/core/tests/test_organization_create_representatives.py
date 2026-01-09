@@ -115,3 +115,31 @@ class OrganizationCreateRepresentativesTests(TestCase):
             self.assertIn("results", resp.json())
             ids = [r.get("id") for r in resp.json().get("results")]
             self.assertEqual(ids, ["bob", "bobby"])
+
+    def test_organization_edit_prefills_representative_with_full_name(self) -> None:
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        org = Organization.objects.create(
+            name="Org",
+            representative="bob",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        def get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return FreeIPAUser("reviewer", {"uid": ["reviewer"], "displayname": ["Reviewer"], "memberof_group": []})
+            if username == "bob":
+                return FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
+            return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+            resp = self.client.get(reverse("organization-edit", args=[org.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="representative"')
+        self.assertContains(resp, ">Bob Example (bob)<")

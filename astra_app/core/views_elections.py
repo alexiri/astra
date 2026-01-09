@@ -31,6 +31,7 @@ from core.elections_services import (
     issue_voting_credentials_from_memberships_detailed,
     submit_ballot,
 )
+from core.email_context import user_email_context
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
@@ -49,9 +50,11 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.templated_email import (
+    placeholderize_empty_values,
     render_templated_email_preview,
     render_templated_email_preview_response,
 )
+from core.user_labels import user_choice_from_freeipa, user_label
 
 _RECEIPT_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -138,15 +141,76 @@ def ballot_verify(request):
 @require_POST
 @json_permission_required(ASTRA_ADD_ELECTION)
 def election_email_render_preview(request, election_id: int) -> JsonResponse:
-    election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
-    if election is None:
-        raise Http404
+    def _parse_datetime_local(value: str) -> datetime.datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            dt = datetime.datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt)
+        return dt
+
+    if election_id == 0:
+        start_dt = _parse_datetime_local(str(request.POST.get("start_datetime") or "")) or timezone.now()
+        end_dt = _parse_datetime_local(str(request.POST.get("end_datetime") or "")) or start_dt
+        number_of_seats_raw = str(request.POST.get("number_of_seats") or "").strip()
+        try:
+            number_of_seats = int(number_of_seats_raw)
+        except ValueError:
+            number_of_seats = 1
+
+        election = Election(
+            id=0,
+            name=str(request.POST.get("name") or ""),
+            description=str(request.POST.get("description") or ""),
+            url=str(request.POST.get("url") or ""),
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            number_of_seats=number_of_seats,
+            status=Election.Status.draft,
+            eligible_group_cn=str(request.POST.get("eligible_group_cn") or ""),
+        )
+    else:
+        election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
+        if election is None:
+            raise Http404
+
+        # Allow the live preview to reflect unsaved edits on the page.
+        name_raw = str(request.POST.get("name") or "")
+        if name_raw:
+            election.name = name_raw
+        description_raw = str(request.POST.get("description") or "")
+        if description_raw:
+            election.description = description_raw
+        url_raw = str(request.POST.get("url") or "")
+        if url_raw:
+            election.url = url_raw
+
+        start_dt = _parse_datetime_local(str(request.POST.get("start_datetime") or ""))
+        if start_dt is not None:
+            election.start_datetime = start_dt
+        end_dt = _parse_datetime_local(str(request.POST.get("end_datetime") or ""))
+        if end_dt is not None:
+            election.end_datetime = end_dt
+
+        number_of_seats_raw = str(request.POST.get("number_of_seats") or "").strip()
+        if number_of_seats_raw:
+            try:
+                election.number_of_seats = int(number_of_seats_raw)
+            except ValueError:
+                pass
+        eligible_group_raw = str(request.POST.get("eligible_group_cn") or "")
+        if eligible_group_raw or "eligible_group_cn" in request.POST:
+            election.eligible_group_cn = eligible_group_raw
 
     username = str(request.user.get_username() or "").strip() or "preview"
+    user_context = user_email_context(username=username)
 
     context: dict[str, object] = {
-        "username": username,
-        "email": "",
+        **user_context,
         "election_id": election.id,
         "election_name": election.name,
         "election_description": election.description,
@@ -270,10 +334,8 @@ def election_eligible_users_search(request, election_id: int):
             # during a request. Eligibility is computed from local DB state, so
             # degrade gracefully by returning usernames without full names.
             user = None
-        full_name = user.full_name if user is not None else ""
-        text = username
-        if full_name and full_name != username:
-            text = f"{full_name} ({username})"
+
+        text = user_label(username, user=user)
 
         results.append({"id": username, "text": text})
         if len(results) >= 20:
@@ -340,10 +402,8 @@ def election_nomination_users_search(request, election_id: int):
             user = FreeIPAUser.get(username)
         except Exception:
             user = None
-        full_name = user.full_name if user is not None else ""
-        text = username
-        if full_name and full_name != username:
-            text = f"{full_name} ({username})"
+
+        text = user_label(username, user=user)
 
         results.append({"id": username, "text": text})
         if len(results) >= 20:
@@ -381,8 +441,23 @@ def election_edit(request, election_id: int):
         )
         nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
 
+    def _user_choice(username: str) -> tuple[str, str]:
+        return user_choice_from_freeipa(username)
+
     if request.method == "POST":
         action = str(request.POST.get("action") or "").strip()
+
+        if action == "delete_draft":
+            if election is None:
+                messages.error(request, "Save the draft first.")
+                return redirect("elections")
+            if election.status != Election.Status.draft:
+                messages.error(request, "Only draft elections can be deleted.")
+                return redirect("election-edit", election_id=election.id)
+
+            election.delete()
+            messages.success(request, "Draft deleted.")
+            return redirect("elections")
 
         if action in {"end_election", "end_election_and_tally"}:
             return HttpResponseBadRequest("Ending elections is not supported from the edit page.")
@@ -467,15 +542,25 @@ def election_edit(request, election_id: int):
                 reverse("election-nomination-users-search", args=[ajax_election_id])
             )
             for form in candidate_formset.forms:
-                freeipa_value = str(form.data.get(form.add_prefix("freeipa_username")) or form.initial.get("freeipa_username") or form.instance.freeipa_username or "").strip()
+                freeipa_value = str(
+                    form.data.get(form.add_prefix("freeipa_username"))
+                    or form.initial.get("freeipa_username")
+                    or form.instance.freeipa_username
+                    or ""
+                ).strip()
                 if freeipa_value:
-                    form.fields["freeipa_username"].choices = [(freeipa_value, freeipa_value)]
+                    form.fields["freeipa_username"].choices = [_user_choice(freeipa_value)]
                 form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url_candidate
                 form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
-                nominated_value = str(form.data.get(form.add_prefix("nominated_by")) or form.initial.get("nominated_by") or form.instance.nominated_by or "").strip()
+                nominated_value = str(
+                    form.data.get(form.add_prefix("nominated_by"))
+                    or form.initial.get("nominated_by")
+                    or form.instance.nominated_by
+                    or ""
+                ).strip()
                 if nominated_value:
-                    form.fields["nominated_by"].choices = [(nominated_value, nominated_value)]
+                    form.fields["nominated_by"].choices = [_user_choice(nominated_value)]
                 form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
                 form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
@@ -501,10 +586,14 @@ def election_edit(request, election_id: int):
                     if username:
                         submitted_usernames.append(username)
                 submitted_unique = sorted(set(submitted_usernames), key=str.lower)
-                choices = [(u, u) for u in submitted_unique]
+                choices = [user_choice_from_freeipa(u) for u in submitted_unique]
             else:
                 candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
-                choices = [(c.freeipa_username, c.freeipa_username) for c in candidates_qs if c.freeipa_username]
+                choices = [
+                    user_choice_from_freeipa(c.freeipa_username)
+                    for c in candidates_qs
+                    if c.freeipa_username
+                ]
 
             # The UI adds new rows by cloning the formset's empty-form template.
             # Populate its choices so the dynamic row has options immediately.
@@ -512,8 +601,9 @@ def election_edit(request, election_id: int):
 
             for form in group_formset.forms:
                 selected = form.data.getlist(form.add_prefix("candidate_usernames")) if hasattr(form.data, "getlist") else []
-                extra = [(u, u) for u in selected if u and u not in {c[0] for c in choices}]
-                form.fields["candidate_usernames"].choices = choices + extra
+                existing = {u for u, _label in choices}
+                extra = [user_choice_from_freeipa(u) for u in selected if u and u not in existing]
+                form.fields["candidate_usernames"].choices = [*choices, *extra]
 
         if action == "save_draft":
             _configure_candidate_form_choices()
@@ -803,13 +893,13 @@ def election_edit(request, election_id: int):
         for form in candidate_formset.forms:
             freeipa = str(form.instance.freeipa_username or "").strip()
             if freeipa:
-                form.fields["freeipa_username"].choices = [(freeipa, freeipa)]
+                form.fields["freeipa_username"].choices = [_user_choice(freeipa)]
             form.fields["freeipa_username"].widget.attrs["data-ajax-url"] = ajax_url_candidate
             form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
             nominator = str(form.instance.nominated_by or "").strip()
             if nominator:
-                form.fields["nominated_by"].choices = [(nominator, nominator)]
+                form.fields["nominated_by"].choices = [_user_choice(nominator)]
             form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
             form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
@@ -820,7 +910,11 @@ def election_edit(request, election_id: int):
 
         if election is not None:
             candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
-            choices = [(c.freeipa_username, c.freeipa_username) for c in candidates_qs if c.freeipa_username]
+            choices = [
+                user_choice_from_freeipa(c.freeipa_username)
+                for c in candidates_qs
+                if c.freeipa_username
+            ]
             for form in group_formset.forms:
                 form.fields["candidate_usernames"].choices = choices
                 if form.instance.pk:
@@ -834,41 +928,45 @@ def election_edit(request, election_id: int):
 
     rendered_preview: dict[str, str] = {"html": "", "text": "", "subject": ""}
     email_template_variables: list[tuple[str, str]] = []
-    if election is not None:
-        preview_context: dict[str, object] | None = None
-        try:
-            preview_context = {
-                "username": "preview",
-                "email": "",
-                "election_id": election.id,
-                "election_name": details_form.instance.name if details_form.instance else "",
-                "election_description": details_form.instance.description if details_form.instance else "",
-                "election_url": details_form.instance.url if details_form.instance else "",
-                "election_start_datetime": details_form.instance.start_datetime if details_form.instance else "",
-                "election_end_datetime": details_form.instance.end_datetime if details_form.instance else "",
-                "election_number_of_seats": details_form.instance.number_of_seats if details_form.instance else "",
-                "credential_public_id": "PREVIEW",
-                "vote_url": elections_services.election_vote_url(request=request, election=election),
-                "vote_url_with_credential_fragment": elections_services.election_vote_url_with_credential_fragment(
-                    request=request,
-                    election=election,
-                    credential_public_id="PREVIEW",
-                ),
-            }
 
-            email_template_variables = [(k, str(v)) for k, v in preview_context.items()]
-            email_template_variables.sort(key=lambda item: item[0])
+    preview_election = election if election is not None else Election(id=0)
+    username = str(request.user.get_username() or "").strip() or "preview"
+    user_context = user_email_context(username=username)
 
-            rendered_preview.update(
-                render_templated_email_preview(
-                    subject=str(email_form.data.get("subject") or email_form.initial.get("subject") or ""),
-                    html_content=str(email_form.data.get("html_content") or email_form.initial.get("html_content") or ""),
-                    text_content=str(email_form.data.get("text_content") or email_form.initial.get("text_content") or ""),
-                    context=preview_context,
-                )
+    try:
+        preview_context: dict[str, object] = {
+            **user_context,
+            "election_id": int(preview_election.id or 0),
+            "election_name": str(details_form.instance.name or ""),
+            "election_description": str(details_form.instance.description or ""),
+            "election_url": str(details_form.instance.url or ""),
+            "election_start_datetime": details_form.instance.start_datetime or "",
+            "election_end_datetime": details_form.instance.end_datetime or "",
+            "election_number_of_seats": details_form.instance.number_of_seats or "",
+            "credential_public_id": "PREVIEW",
+            "vote_url": elections_services.election_vote_url(request=request, election=preview_election),
+            "vote_url_with_credential_fragment": elections_services.election_vote_url_with_credential_fragment(
+                request=request,
+                election=preview_election,
+                credential_public_id="PREVIEW",
+            ),
+        }
+
+        preview_context_for_examples = placeholderize_empty_values(preview_context)
+
+        email_template_variables = [(k, str(v)) for k, v in preview_context_for_examples.items()]
+        email_template_variables.sort(key=lambda item: item[0])
+
+        rendered_preview.update(
+            render_templated_email_preview(
+                subject=str(email_form.data.get("subject") or email_form.initial.get("subject") or ""),
+                html_content=str(email_form.data.get("html_content") or email_form.initial.get("html_content") or ""),
+                text_content=str(email_form.data.get("text_content") or email_form.initial.get("text_content") or ""),
+                context=preview_context,
             )
-        except ValueError:
-            rendered_preview = {"html": "", "text": "", "subject": ""}
+        )
+    except ValueError:
+        rendered_preview = {"html": "", "text": "", "subject": ""}
 
     # The JS adds exclusion-group rows by cloning the rendered empty-form HTML.
     # Ensure that empty form has candidate options, even if the formset recreates
@@ -876,7 +974,11 @@ def election_edit(request, election_id: int):
     group_empty_form = group_formset.empty_form
     if election is not None:
         candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
-        candidate_choices = [(c.freeipa_username, c.freeipa_username) for c in candidates_qs if c.freeipa_username]
+        candidate_choices = [
+            user_choice_from_freeipa(c.freeipa_username)
+            for c in candidates_qs
+            if c.freeipa_username
+        ]
         group_empty_form.fields["candidate_usernames"].choices = candidate_choices
 
     return render(

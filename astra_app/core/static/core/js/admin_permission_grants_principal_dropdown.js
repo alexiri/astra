@@ -63,10 +63,16 @@
     blank.textContent = "---------";
     principalNameSelect.appendChild(blank);
 
-    for (const name of principals) {
+    for (const item of principals) {
+      const id = typeof item === "string" ? item : String(item?.id || "");
+      const text = typeof item === "string" ? item : String(item?.text || item?.id || "");
+      if (!id) {
+        continue;
+      }
+
       const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
+      opt.value = id;
+      opt.textContent = text;
       principalNameSelect.appendChild(opt);
     }
 

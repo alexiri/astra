@@ -7,10 +7,18 @@ from python_freeipa import exceptions
 from core.backends import FreeIPAUser
 
 
+def _clear_service_client_cache() -> None:
+    # Import lazily so the tests remain robust if internals move.
+    from core.backends import clear_freeipa_service_client_cache
+
+    clear_freeipa_service_client_cache()
+
+
 class FreeIPAServiceClientRetryTests(TestCase):
     def setUp(self):
         cache.delete("freeipa_users_all")
         cache.delete("freeipa_user_alice")
+        _clear_service_client_cache()
 
     def test_all_retries_on_unauthorized(self):
         first_client = Mock()
@@ -47,3 +55,17 @@ class FreeIPAServiceClientRetryTests(TestCase):
         assert user is not None
         self.assertEqual(user.username, "alice")
         self.assertEqual(get_client.call_count, 2)
+
+    def test_get_raises_on_password_expired(self) -> None:
+        with patch(
+            "core.backends._get_freeipa_client",
+            autospec=True,
+            side_effect=exceptions.PasswordExpired(),
+        ):
+            with self.assertLogs("core.backends", level="ERROR") as captured:
+                with self.assertRaises(exceptions.PasswordExpired):
+                    FreeIPAUser.get("alice")
+
+        # Ensure we emit a clear log line (not just a silent None).
+        combined = "\n".join(captured.output).lower()
+        self.assertIn("password expired", combined)

@@ -21,6 +21,7 @@ from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
     json_permission_required_any,
 )
+from core.user_labels import user_choice_from_freeipa
 from core.views_utils import _normalize_str
 
 
@@ -169,7 +170,7 @@ class OrganizationEditForm(forms.ModelForm):
             else:
                 initial = self.initial.get("representative")
                 current = str(initial or "").strip()
-            self.fields["representative"].choices = [(current, current)] if current else []
+            self.fields["representative"].choices = [user_choice_from_freeipa(current)] if current else []
 
     def clean_representative(self) -> str:
         if "representative" not in self.fields:

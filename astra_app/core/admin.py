@@ -37,6 +37,7 @@ from core.membership_csv_import import (
     MembershipCSVImportForm,
     MembershipCSVImportResource,
 )
+from core.user_labels import user_choice, user_choice_from_freeipa, user_choices_from_users
 from core.views_utils import _normalize_str
 
 from .backends import (
@@ -639,9 +640,10 @@ class IPAGroupForm(forms.ModelForm):
         self._validate_unique = False
 
         users = FreeIPAUser.all()
-        usernames = sorted({getattr(u, "username", "") for u in users if getattr(u, "username", "")})
-        self.fields["members"].choices = [(u, u) for u in usernames]
-        self.fields["sponsors"].choices = [(u, u) for u in usernames]
+        users_by_username: dict[str, FreeIPAUser] = {u.username: u for u in users if u.username}
+        usernames = sorted(users_by_username, key=str.lower)
+        self.fields["members"].choices = user_choices_from_users(usernames, users_by_username=users_by_username)
+        self.fields["sponsors"].choices = user_choices_from_users(usernames, users_by_username=users_by_username)
 
         groups = FreeIPAGroup.all()
         group_names = sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
@@ -661,13 +663,21 @@ class IPAGroupForm(forms.ModelForm):
                 # Groups can contain entries that aren't part of the standard user listing.
                 missing = [u for u in current if u not in dict(self.fields["members"].choices)]
                 if missing:
-                    self.fields["members"].choices = [(u, u) for u in (usernames + missing)]
+                    merged = sorted(set([*usernames, *missing]), key=str.lower)
+                    self.fields["members"].choices = [
+                        user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
+                        for u in merged
+                    ]
                 self.initial.setdefault("members", current)
 
                 current_sponsors = sorted(freeipa.sponsors)
                 missing_sponsors = [u for u in current_sponsors if u not in dict(self.fields["sponsors"].choices)]
                 if missing_sponsors:
-                    self.fields["sponsors"].choices = [(u, u) for u in (usernames + missing_sponsors)]
+                    merged = sorted(set([*usernames, *missing_sponsors]), key=str.lower)
+                    self.fields["sponsors"].choices = [
+                        user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
+                        for u in merged
+                    ]
                 self.initial.setdefault("sponsors", current_sponsors)
 
                 current_member_groups = sorted(getattr(freeipa, "member_groups", []) or [])
@@ -795,8 +805,9 @@ class IPAFASAgreementForm(forms.ModelForm):
         self.fields["groups"].choices = [(name, name) for name in group_names]
 
         users = FreeIPAUser.all()
-        usernames = sorted({getattr(u, "username", "") for u in users if getattr(u, "username", "")})
-        self.fields["users"].choices = [(u, u) for u in usernames]
+        users_by_username = {u.username: u for u in users if u.username}
+        usernames = sorted(users_by_username, key=str.lower)
+        self.fields["users"].choices = user_choices_from_users(usernames, users_by_username=users_by_username)
 
         # Agreement name is immutable in FreeIPA.
         if self.instance and getattr(self.instance, "cn", None):
@@ -818,7 +829,11 @@ class IPAFASAgreementForm(forms.ModelForm):
                 current_users = sorted(freeipa.users)
                 missing_users = [u for u in current_users if u not in dict(self.fields["users"].choices)]
                 if missing_users:
-                    self.fields["users"].choices = [(u, u) for u in (usernames + missing_users)]
+                    merged = sorted(set([*usernames, *missing_users]), key=str.lower)
+                    self.fields["users"].choices = [
+                        user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
+                        for u in merged
+                    ]
                 self.initial.setdefault("users", current_users)
 
     @override
@@ -1696,7 +1711,8 @@ class OrganizationAdmin(admin.ModelAdmin):
             self.fields["notes"].label = "Committee notes (private)"
 
             users = FreeIPAUser.all()
-            usernames = sorted({u.username for u in users if u.username})
+            users_by_username = {u.username: u for u in users if u.username}
+            usernames = sorted(users_by_username, key=str.lower)
 
             current = str(self.initial.get("representative") or "").strip()
             if not current and self.instance:
@@ -1705,7 +1721,14 @@ class OrganizationAdmin(admin.ModelAdmin):
             if current and current not in usernames:
                 usernames.append(current)
 
-            self.fields["representative"].choices = [("", "—"), *[(u, u) for u in sorted(set(usernames), key=str.lower)]]
+            merged = sorted(set(usernames), key=str.lower)
+            self.fields["representative"].choices = [
+                ("", "—"),
+                *[
+                    user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
+                    for u in merged
+                ],
+            ]
 
     form = OrganizationAdminForm
 
@@ -1823,15 +1846,32 @@ class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
 
             if selected_type == FreeIPAPermissionGrant.PrincipalType.group:
                 principals = [g.cn for g in FreeIPAGroup.all() if g.cn]
-            else:
-                principals = [u.username for u in FreeIPAUser.all() if u.username]
+                principal_names = sorted(set(principals), key=str.lower)
+                if current and current not in principal_names:
+                    principal_names.append(current)
+                    principal_names = sorted(set(principal_names), key=str.lower)
 
-            principal_names = sorted(set(principals), key=str.lower)
+                self.fields["principal_name"].choices = [("", "---------"), *[(n, n) for n in principal_names]]
+                return
+
+            users = [u for u in FreeIPAUser.all() if u.username]
+            users_by_username = {u.username: u for u in users if u.username}
+            principal_names = sorted(set(users_by_username.keys()), key=str.lower)
             if current and current not in principal_names:
                 principal_names.append(current)
                 principal_names = sorted(set(principal_names), key=str.lower)
 
-            self.fields["principal_name"].choices = [("", "---------"), *[(n, n) for n in principal_names]]
+            self.fields["principal_name"].choices = [
+                ("", "---------"),
+                *[
+                    (
+                        user_choice(u, user=users_by_username.get(u))
+                        if u in users_by_username
+                        else user_choice_from_freeipa(u)
+                    )
+                    for u in principal_names
+                ],
+            ]
 
     class Media:
         js = (
@@ -1859,18 +1899,31 @@ class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
 
         return custom + urls
 
-    def principals_view(self, request):
+    def principals_view(self, request: HttpRequest) -> JsonResponse:
         raw = request.GET.get("principal_type")
         principal_type = str(raw or "").strip()
 
-        if principal_type == FreeIPAPermissionGrant.PrincipalType.group:
-            names = [g.cn for g in FreeIPAGroup.all() if g.cn]
-        else:
-            # Default to user if unspecified/invalid.
-            names = [u.username for u in FreeIPAUser.all() if u.username]
+        valid_types = {
+            FreeIPAPermissionGrant.PrincipalType.user,
+            FreeIPAPermissionGrant.PrincipalType.group,
+        }
+        if principal_type not in valid_types:
+            principal_type = FreeIPAPermissionGrant.PrincipalType.user
 
-        names = sorted(set(names), key=str.lower)
-        return JsonResponse({"principal_type": principal_type or FreeIPAPermissionGrant.PrincipalType.user, "principals": names})
+        if principal_type == FreeIPAPermissionGrant.PrincipalType.group:
+            principal_names = [g.cn for g in FreeIPAGroup.all() if g.cn]
+            principal_names = sorted(set(principal_names), key=str.lower)
+            principals = [{"id": n, "text": n} for n in principal_names]
+            return JsonResponse({"principal_type": principal_type, "principals": principals})
+
+        users = [u for u in FreeIPAUser.all() if u.username]
+        users_by_username = {u.username: u for u in users if u.username}
+        principal_names = sorted(set(users_by_username.keys()), key=str.lower)
+        principals = [
+            {"id": u, "text": user_choice(u, user=users_by_username.get(u))[1]}
+            for u in principal_names
+        ]
+        return JsonResponse({"principal_type": principal_type, "principals": principals})
 
 # Replace DB-backed auth models in admin with FreeIPA-backed listings.
 try:

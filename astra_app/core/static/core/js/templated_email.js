@@ -701,6 +701,38 @@
     data.append('html_content', compose.getField('html_content'));
     data.append('text_content', compose.getField('text_content'));
 
+    // Election edit page: include the current (possibly unsaved) election details so
+    // the server-side preview can reflect draft values without requiring a save.
+    // Other preview endpoints ignore extra fields safely.
+    var extraFields = [
+      ['name', 'id_name'],
+      ['description', 'id_description'],
+      ['url', 'id_url'],
+      ['start_datetime', 'id_start_datetime'],
+      ['end_datetime', 'id_end_datetime'],
+      ['number_of_seats', 'id_number_of_seats'],
+      ['eligible_group_cn', 'id_eligible_group_cn'],
+    ];
+    for (var i = 0; i < extraFields.length; i++) {
+      var pair = extraFields[i];
+      var key = pair[0];
+      var elId = pair[1];
+      var el = null;
+      try {
+        el = document.getElementById(elId);
+      } catch (_e0) {
+        el = null;
+      }
+      if (!el) continue;
+      var val = '';
+      try {
+        val = String(el.value || '');
+      } catch (_e1) {
+        val = '';
+      }
+      data.append(key, val);
+    }
+
     try {
       var resp = await window.fetch(url, {
         method: 'POST',

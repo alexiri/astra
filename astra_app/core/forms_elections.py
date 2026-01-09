@@ -35,10 +35,12 @@ class ElectionDetailsForm(forms.ModelForm):
     number_of_seats = forms.IntegerField(
         min_value=1,
         widget=forms.NumberInput(attrs={"class": "form-control smallNumber", "min": 1, "step": 1}),
+        initial=1,
     )
     quorum = forms.IntegerField(
         min_value=0,
         max_value=100,
+        initial=50,
         widget=forms.NumberInput(
             attrs={
                 "class": "form-control smallNumber",

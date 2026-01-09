@@ -132,43 +132,61 @@
               Save Draft
             </button>
 
-            <button
-              type="button"
-              class="btn btn-success btn-block"
-              {% if not election or election.status != 'draft' %}disabled{% endif %}
-              {% if election and election.status == 'draft' %}data-toggle="modal" data-target="#start-election-modal"{% endif %}
-            >
-              Start Election
-            </button>
+            {% if not election %}
+              <div class="alert alert-info py-2 m-2">
+                Save the draft to enable starting the election.
+              </div>
+            {% else %}
+              {% if election.status == 'draft' %}
+                <button
+                  type="submit"
+                  class="btn btn-outline-danger btn-block"
+                  onclick="document.getElementById('election-edit-action').value='delete_draft'; return confirm('Delete this draft election?');"
+                >
+                  Delete Draft
+                </button>
+              {% endif %}
 
-            <div class="text-muted small mt-2">
-              Starting an election sends credential emails to all eligible voters and locks settings.
+              <button
+                type="button"
+                class="btn btn-success btn-block"
+                {% if election.status != 'draft' %}disabled{% endif %}
+                {% if election.status == 'draft' %}data-toggle="modal" data-target="#start-election-modal"{% endif %}
+              >
+                Start Election
+              </button>
+
+              <div class="text-muted small mt-2">
+                Starting an election sends credential emails to all eligible voters and locks settings.
+              </div>
+            {% endif %}           
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if election and election.status == 'draft' %}
+      <div class="modal fade" id="start-election-modal" tabindex="-1" role="dialog" aria-labelledby="start-election-modal-label" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="start-election-modal-label">Start election?</h5>
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div class="modal-body">
+              <p class="mb-2">This will open the election and email voting credentials to all eligible voters.</p>
+              <p class="small mb-0">Eligible voters: <strong class="js-eligible-voters-count">{{ eligible_voters_count }}</strong></p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'">Start election &amp; send credentials</button>
             </div>
           </div>
         </div>
       </div>
-    </div>
-
-    <div class="modal fade" id="start-election-modal" tabindex="-1" role="dialog" aria-labelledby="start-election-modal-label" aria-hidden="true">
-      <div class="modal-dialog" role="document">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="start-election-modal-label">Start election?</h5>
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-              <span aria-hidden="true">&times;</span>
-            </button>
-          </div>
-          <div class="modal-body">
-            <p class="mb-2">This will open the election and email voting credentials to all eligible voters.</p>
-            <p class="small mb-0">Eligible voters: <strong class="js-eligible-voters-count">{{ eligible_voters_count }}</strong></p>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-            <button type="submit" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'">Start election &amp; send credentials</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    {% endif %}
 
     <div class="row">
       <div class="col-lg-12">
@@ -317,7 +335,7 @@
 
     <div class="row">
       <div class="col-lg-12">
-        {% url 'election-email-render-preview' election_id=election.id as compose_preview_url %}
+        {% url 'election-email-render-preview' election_id=election.id|default:0 as compose_preview_url %}
         {% include "core/_templated_email_compose.html" with card_title="Voting credential email" templates=templates form=email_form rendered_preview=rendered_preview available_variables=email_template_variables compose_description="Use election variables to personalize the subject and content." compose_preview_url=compose_preview_url %}
       </div>
     </div>

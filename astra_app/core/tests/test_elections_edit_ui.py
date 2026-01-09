@@ -106,6 +106,29 @@ class ElectionEditPermissionTests(TestCase):
         resp = self.client.get(reverse("election-edit", args=[0]))
         self.assertEqual(resp.status_code, 200)
 
+    def test_new_election_shows_email_template_variables_without_saving(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+        # The compose widget should not start in a state where it has no variable examples.
+        self.assertNotContains(resp, "No variables available yet.")
+        self.assertContains(resp, "{{ username }}")
+        self.assertContains(resp, "{{ election_name }}")
+
+        # Preview endpoint should use election_id=0 in create mode.
+        self.assertContains(resp, 'data-compose-preview-url="/elections/0/email/render-preview/"')
+
+        # Empty values should render as placeholders in the example column.
+        self.assertContains(resp, "-election_name-")
+        self.assertContains(resp, "-election_description-")
+
     def test_new_election_details_card_shows_draft_badge_and_hides_status_field(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -120,6 +143,61 @@ class ElectionEditPermissionTests(TestCase):
         self.assertContains(resp, "Election details")
         self.assertContains(resp, ">draft</span>")
         self.assertNotContains(resp, "<label>Status</label>")
+
+    def test_new_election_hides_start_button_until_saved(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+        # In create mode (unsaved election), showing a disabled "Start" button is confusing.
+        # We should instead guide the user to save the draft first.
+        self.assertContains(resp, "Save the draft to enable starting the election")
+        self.assertNotContains(resp, 'data-target="#start-election-modal"')
+        self.assertNotContains(resp, 'id="start-election-modal"')
+
+
+class ElectionDraftDeletionTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_draft_election_is_deletable(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft to delete",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Delete Draft")
+
+        resp2 = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={"action": "delete_draft"},
+            follow=False,
+        )
+        self.assertEqual(resp2.status_code, 302)
+        self.assertFalse(Election.objects.filter(pk=election.pk).exists())
 
     def test_new_election_post_save_draft_creates_election(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -363,6 +441,61 @@ class ElectionEditPermissionTests(TestCase):
         self.assertIsNotNone(m)
         self.assertIn("/eligible-users/search/", m.group(1))
 
+
+
+class ElectionEditCandidateSelect2LabelTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_draft_edit_page_prefills_candidate_fields_with_full_name(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="bob",
+            description="",
+            url="",
+        )
+
+        def _fake_user(username: str) -> FreeIPAUser | None:
+            if username == "admin":
+                return FreeIPAUser("admin", {"uid": ["admin"], "displayname": ["Admin"], "memberof_group": []})
+            if username == "alice":
+                return FreeIPAUser("alice", {"uid": ["alice"], "displayname": ["Alice Example"], "memberof_group": []})
+            if username == "bob":
+                return FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_fake_user):
+            resp = self.client.get(reverse("election-edit", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertIn('value="alice"', html)
+        self.assertIn(">Alice Example (alice)<", html)
+
+        self.assertIn('value="bob"', html)
+        self.assertIn(">Bob Example (bob)<", html)
 class ElectionEditExclusionGroupsSelectTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
@@ -416,6 +549,56 @@ class ElectionEditExclusionGroupsSelectTests(TestCase):
         tmpl = html[start:end]
         self.assertIn('value="alex"', tmpl)
         self.assertIn('value="andreberry"', tmpl)
+
+    def test_groups_empty_form_prefills_candidate_labels_with_full_name(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="alice",
+            description="",
+            url="",
+        )
+
+        def _fake_user(username: str) -> FreeIPAUser | None:
+            if username == "admin":
+                return FreeIPAUser("admin", {"uid": ["admin"], "displayname": ["Admin"], "memberof_group": []})
+            if username == "alice":
+                return FreeIPAUser("alice", {"uid": ["alice"], "displayname": ["Alice Example"], "memberof_group": []})
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_fake_user):
+            resp = self.client.get(reverse("election-edit", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        start = html.find('id="groups-empty-form"')
+        self.assertNotEqual(start, -1)
+
+        end = html.find("</template>", start)
+        self.assertNotEqual(end, -1)
+
+        tmpl = html[start:end]
+        self.assertIn('value="alice"', tmpl)
+        self.assertIn(">Alice Example (alice)<", tmpl)
 
     def test_groups_empty_form_has_ajax_url_for_candidate_search(self) -> None:
         self._login_as_freeipa_user("admin")

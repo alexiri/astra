@@ -26,8 +26,8 @@ class AdminPermissionGrantPrincipalsEndpointTests(TestCase):
             with patch(
                 "core.admin.FreeIPAUser.all",
                 return_value=[
-                    FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
-                    FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []}),
+                    FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []}),
+                    FreeIPAUser("alice", {"uid": ["alice"], "displayname": ["Alice Example"], "memberof_group": []}),
                 ],
             ):
                 resp = self.client.get(url, data={"principal_type": "user"}, follow=False)
@@ -35,7 +35,13 @@ class AdminPermissionGrantPrincipalsEndpointTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["principal_type"], "user")
-        self.assertEqual(data["principals"], ["alice", "bob"])
+        self.assertEqual(
+            data["principals"],
+            [
+                {"id": "alice", "text": "Alice Example (alice)"},
+                {"id": "bob", "text": "Bob Example (bob)"},
+            ],
+        )
 
     def test_principals_endpoint_returns_groups_for_group_type(self) -> None:
         admin_username = "alice"
@@ -59,4 +65,10 @@ class AdminPermissionGrantPrincipalsEndpointTests(TestCase):
         data = resp.json()
         # The view echoes back the param when valid.
         self.assertEqual(data["principal_type"], "group")
-        self.assertEqual(data["principals"], ["group-a", "group-b"])
+        self.assertEqual(
+            data["principals"],
+            [
+                {"id": "group-a", "text": "group-a"},
+                {"id": "group-b", "text": "group-b"},
+            ],
+        )
