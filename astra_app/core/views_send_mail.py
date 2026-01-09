@@ -113,6 +113,7 @@ def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
         "template",
         "type",
         "to",
+        "cc",
     }
 
     raw_items: list[tuple[str, str]] = []
@@ -554,6 +555,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_USERS
                 initial["user_usernames"] = _parse_username_list(to_raw)
                 deep_link_autoload_recipients = True
+
+        cc_raw = str(request.GET.get("cc") or "").strip()
+        if cc_raw:
+            initial["cc"] = cc_raw
 
         if extra_context:
             initial["extra_context_json"] = json.dumps(extra_context)

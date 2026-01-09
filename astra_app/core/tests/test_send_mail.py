@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from urllib.parse import quote
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -204,6 +205,29 @@ class SendMailTests(TestCase):
         self.assertContains(resp, "2")
         self.assertContains(resp, "{{ full_name }}")
         self.assertContains(resp, "alice@example.com")
+
+    def test_get_prefills_cc_from_query_params(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        cc_raw = "cc1@example.com,cc2@example.com"
+        url = reverse("send-mail") + f"?cc={quote(cc_raw)}"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="id_cc"')
+        self.assertContains(resp, f'value="{cc_raw}"')
+        # When cc is prefilled, open the Additional recipients section by default.
+        self.assertContains(resp, 'id="send-mail-extra-options-toggle"')
+        self.assertContains(resp, 'aria-expanded="true"')
+        self.assertContains(resp, 'id="send-mail-extra-options"')
+        self.assertContains(resp, 'class="collapse mt-2 show"')
 
     def test_empty_group_still_shows_placeholder_variable_examples(self) -> None:
         self._login_as_freeipa_user("reviewer")
