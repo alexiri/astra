@@ -262,7 +262,7 @@
         {% endif %}
       </ul>
 
-      <ul class="list-group h-100 profile-memberships">
+      <ul class="list-group profile-memberships">
         <li class="list-group-item profile-memberships-header text-right">
           <strong>
             {{ groups|length }} Group{{ groups|pluralize }}{% if agreements %}, {{ agreements|length }} Signed Agreement{{ agreements|pluralize }}{%endif%}{% if missing_agreements %}, {{ missing_agreements|length }} Missing Agreement{{ missing_agreements|pluralize }}{% endif %}
@@ -326,6 +326,7 @@
 {% endblock %}
 
 {% block scripts %}
+  {{ block.super }}
 <script>
 (function () {
   var tzNode = document.getElementById('user-timezone');

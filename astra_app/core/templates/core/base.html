@@ -308,6 +308,7 @@
 </div>
 {% endwith %}
 
+{% block scripts %}
 <script src="{% static 'admin/js/vendor/jquery/jquery.js' %}"></script>
 <script src="{% static 'vendor/bootstrap/js/bootstrap.min.js' %}"></script>
 <script src="{% static 'vendor/adminlte/js/adminlte.min.js' %}"></script>
@@ -449,6 +450,6 @@
     });
   })();
 </script>
-{% block scripts %}{% endblock %}
+{% endblock %}
 </body>
 </html>
