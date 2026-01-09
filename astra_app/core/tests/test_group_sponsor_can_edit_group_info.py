@@ -79,6 +79,13 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertContains(resp, 'name="fas_discussion_url"')
         self.assertContains(resp, 'value="https://discussion.example.org/c/fas1"')
 
+        # Group chat values should use the reusable chat channels editor.
+        self.assertContains(resp, "core/js/chat_channels_editor.js")
+        self.assertContains(resp, 'class="d-none js-chat-channels-editor"')
+        self.assertContains(resp, 'data-textarea-id="id_fas_irc_channels"')
+        self.assertContains(resp, 'data-mattermost-default-server="chat.almalinux.org"')
+        self.assertContains(resp, 'data-mattermost-default-team="almalinux"')
+
     def test_sponsor_can_post_updates(self) -> None:
         self._login_as_freeipa("bob")
 
@@ -120,7 +127,7 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(group.description, "Updated desc")
         self.assertEqual(group.fas_url, "https://example.org/new")
         self.assertEqual(group.fas_mailing_list, "new@example.org")
-        self.assertEqual(sorted(group.fas_irc_channels), ["#new", "#new-dev"])
+        self.assertEqual(sorted(group.fas_irc_channels), ["irc:/#new", "irc:/#new-dev"])
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
         group.save.assert_called_once()
 

@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 
 from django import forms
 
+from core.chatnicknames import normalize_chat_channels_text
+
 
 class GroupEditForm(forms.Form):
     description = forms.CharField(
@@ -32,23 +34,16 @@ class GroupEditForm(forms.Form):
     )
     fas_irc_channels = forms.CharField(
         required=False,
-        label="IRC channels",
+        label="Chat channels",
         widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
-        help_text="One per line (or comma-separated).",
+        help_text=(
+            "One per line (or comma-separated). "
+            "Use protocol-aware channel formats: "
+            "~channel or ~channel:server:team (Mattermost); "
+            "#channel or #channel:server (IRC); "
+            "matrix:/#channel or matrix://server/#channel (Matrix)."
+        ),
     )
-
-    @staticmethod
-    def _split_list_field(value: str) -> list[str]:
-        out: list[str] = []
-        for raw_line in (value or "").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            for part in line.split(","):
-                p = part.strip()
-                if p:
-                    out.append(p)
-        return out
 
     @staticmethod
     def _validate_http_url(value: str, *, field_label: str) -> str:
@@ -86,19 +81,10 @@ class GroupEditForm(forms.Form):
 
     def clean_fas_irc_channels(self) -> list[str]:
         raw = str(self.cleaned_data.get("fas_irc_channels") or "")
-        channels: list[str] = []
-        for ch in self._split_list_field(raw):
-            if len(ch) > 64:
-                raise forms.ValidationError("Invalid IRC channels: each channel must be at most 64 characters")
-            if not ch.startswith("#"):
-                raise forms.ValidationError("Invalid IRC channels: channels must start with '#'")
-            channels.append(ch)
-        # Preserve user intent but avoid duplicates.
-        seen: set[str] = set()
-        unique: list[str] = []
-        for ch in channels:
-            if ch in seen:
-                continue
-            seen.add(ch)
-            unique.append(ch)
-        return unique
+        try:
+            normalized = normalize_chat_channels_text(raw, max_item_len=64)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+        # Store as FreeIPA list attribute (multi-valued)
+        return [line for line in normalized.splitlines() if line.strip()]

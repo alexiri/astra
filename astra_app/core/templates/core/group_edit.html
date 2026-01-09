@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load static %}
+
 {% block title %}Edit {{ group.cn }}{% endblock %}
 
 {% block header %}
@@ -43,11 +45,40 @@
             </div>
 
             <div class="form-group mb-0">
-              <label for="id_fas_irc_channels">IRC channels</label>
-              {{ form.fas_irc_channels }}
-              {% if form.fas_irc_channels.help_text %}
-                <small class="form-text text-muted">{{ form.fas_irc_channels.help_text }}</small>
-              {% endif %}
+              {{ form.fas_irc_channels.label_tag }}
+
+              <small class="form-text text-muted">
+                Chat channels:
+                <ul class="mb-0">
+                  <li>Mattermost: <strong>~channel</strong> or <strong>~channel:server.name:team</strong> (default <strong>{{ chat_networks.mattermost.default_server }}</strong>, team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
+                  <li>IRC: <strong>#channel</strong> or <strong>#channel:server.name</strong> (default <strong>{{ chat_networks.irc.default_server }}</strong>)</li>
+                  <li>Matrix: <strong>matrix:/#channel</strong> or <strong>matrix://server.name/#channel</strong> (default <strong>{{ chat_networks.matrix.default_server }}</strong>)</li>
+                </ul>
+              </small>
+
+              <div
+                id="group-chat-channels-widget"
+                class="d-none js-chat-channels-editor"
+                data-textarea-id="{{ form.fas_irc_channels.id_for_label }}"
+                data-fallback-id="group-chat-channels-fallback"
+                data-mattermost-default-server="{{ chat_networks.mattermost.default_server }}"
+                data-mattermost-default-team="{{ chat_networks.mattermost.default_team }}"
+                data-irc-default-server="{{ chat_networks.irc.default_server }}"
+                data-matrix-default-server="{{ chat_networks.matrix.default_server }}"
+              >
+                <div class="table-responsive">
+                  <table class="table table-sm table-bordered align-middle mb-2" id="group-chat-channels-table">
+                    <tbody></tbody>
+                  </table>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add" id="group-chat-channels-add">Add channel</button>
+              </div>
+
+              <div id="group-chat-channels-fallback">
+                {{ form.fas_irc_channels }}
+                {% if form.fas_irc_channels.errors %}<div class="invalid-feedback d-block">{{ form.fas_irc_channels.errors }}</div>{% endif %}
+                {% if form.fas_irc_channels.help_text %}<small class="form-text text-muted">{{ form.fas_irc_channels.help_text }}</small>{% endif %}
+              </div>
             </div>
 
             {% if form.non_field_errors %}
@@ -75,4 +106,9 @@
       </div>
     </div>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'core/js/chat_channels_editor.js' %}"></script>
 {% endblock %}

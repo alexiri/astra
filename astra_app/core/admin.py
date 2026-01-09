@@ -24,6 +24,7 @@ from import_export.admin import ImportMixin
 from python_freeipa import exceptions
 
 from core.agreements import missing_required_agreements_for_user_in_group
+from core.chatnicknames import normalize_chat_channels_text
 from core.elections_services import (
     ElectionError,
     close_election,
@@ -751,16 +752,14 @@ class IPAGroupForm(forms.ModelForm):
 
     def clean_fas_irc_channels(self) -> str:
         raw = self.cleaned_data.get("fas_irc_channels") or ""
-        channels = []
-        for ch in self._split_list_field(raw):
-            if len(ch) > 64:
-                raise forms.ValidationError("Invalid FAS IRC Channels: each channel must be at most 64 characters")
-            if not ch.startswith("#"):
-                raise forms.ValidationError("Invalid FAS IRC Channels: channels must start with '#'")
-            channels.append(ch)
+        try:
+            normalized = normalize_chat_channels_text(raw, max_item_len=64)
+        except ValueError as exc:
+            raise forms.ValidationError(f"Invalid FAS IRC Channels: {exc}") from exc
 
+        lines = [line for line in normalized.splitlines() if line.strip()]
         # Keep stable ordering for diffs.
-        deduped = sorted(set(channels), key=str.lower)
+        deduped = sorted(set(lines), key=str.lower)
         return "\n".join(deduped)
 
 

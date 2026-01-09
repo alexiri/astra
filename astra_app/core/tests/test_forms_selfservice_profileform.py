@@ -55,6 +55,32 @@ class ProfileFormValidationTests(SimpleTestCase):
         self.assertIn("matrix://matrix.example/alice", cleaned)
         self.assertIn("matrix:/bob", cleaned)
 
+    def test_chat_nick_accepts_mattermost_url_forms_and_keeps_scheme(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+                "fasIRCNick": "mattermost://chat.almalinux.org/almalinux/alice\nmattermost:/bob",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+
+        cleaned = form.cleaned_data["fasIRCNick"].splitlines()
+        self.assertIn("mattermost://chat.almalinux.org/almalinux/alice", cleaned)
+        self.assertIn("mattermost:/bob", cleaned)
+
+    def test_chat_nick_rejects_mattermost_custom_server_without_team(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+                "fasIRCNick": "mattermost://chat.example.org/alice",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("fasIRCNick", form.errors)
+        self.assertIn("team", " ".join(form.errors["fasIRCNick"]).lower())
+
     def test_timezone_accepts_valid_iana_timezone(self):
         form = ProfileForm(
             data={

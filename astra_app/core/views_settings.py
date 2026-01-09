@@ -277,7 +277,6 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
 
     context = {
         "form": form,
-        "chat_networks": settings.CHAT_NETWORKS,
         **settings_context("profile"),
     }
     return render(request, "core/settings_profile.html", context)

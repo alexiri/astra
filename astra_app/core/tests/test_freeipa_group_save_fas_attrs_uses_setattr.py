@@ -51,3 +51,47 @@ class FreeIPAGroupSaveFASAttrsTests(SimpleTestCase):
         ):
             # Should not raise UnknownOption.
             group.save()
+
+    def test_save_uses_name_value_delattr_for_fasircchannel(self) -> None:
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "fasircchannel": ["irc:/#old"],
+                "objectclass": ["fasGroup"],
+            },
+        )
+
+        # Change the set of channels to force a delta update.
+        group.fas_irc_channels = ["irc:/#old", "irc:/#new"]
+
+        class _FakeClient:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def group_mod(self, cn: str, **kwargs):
+                self.calls.append((cn, dict(kwargs)))
+
+                delattrs = kwargs.get("o_delattr")
+                if delattrs is not None:
+                    for item in delattrs:
+                        assert "=" in str(item), f"delattr must be name=value, got: {item!r}"
+                return {"result": {}}
+
+        fake_client = _FakeClient()
+
+        with (
+            patch(
+                "core.backends._with_freeipa_service_client_retry",
+                side_effect=lambda _get_client, fn: fn(fake_client),
+            ),
+            patch("core.backends._invalidate_group_cache"),
+            patch("core.backends._invalidate_groups_list_cache"),
+            patch("core.backends.FreeIPAGroup.get", return_value=group),
+        ):
+            group.save()
+
+        self.assertTrue(fake_client.calls)
+        cn, kwargs = fake_client.calls[-1]
+        self.assertEqual(cn, "fas1")
+        self.assertIn("o_addattr", kwargs)

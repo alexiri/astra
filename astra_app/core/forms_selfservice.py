@@ -9,12 +9,8 @@ from urllib.parse import urlparse
 import pyotp
 from django import forms
 
+from core.chatnicknames import normalize_chat_nicknames_text
 from core.views_utils import _normalize_str
-
-# Noggin-inspired nickname validation (adapted for our simpler fields)
-_IRC_NICK_RE = re.compile(r"^[a-z_\[\]\\^{}|`-][a-z0-9_\[\]\\^{}|`-]*$", re.IGNORECASE)
-_MATRIX_LOCALPART_RE = re.compile(r"^[a-z0-9.=_/-]+$", re.IGNORECASE)
-_SERVER_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*(:[0-9]+)?$", re.IGNORECASE)
 
 # GitHub username rules (close enough for validation UX)
 _GITHUB_USERNAME_RE = re.compile(r"^(?!-)(?!.*--)[A-Za-z0-9-]{1,39}(?<!-)$")
@@ -161,6 +157,7 @@ class ProfileForm(_StyledForm):
         help_text=(
             "One per line (or comma-separated). "
             "Use URL-style values to specify protocol: "
+            "mattermost:/nick or mattermost://server/team/nick; "
             "irc:/nick or irc://server/nick; "
             "matrix:/nick or matrix://server/nick. "
             "(Tip: Matrix handles like @nick:server are accepted too.)"
@@ -275,66 +272,11 @@ class ProfileForm(_StyledForm):
 
     def clean_fasIRCNick(self):
         # baseruserfas: Str("fasircnick*", maxlength=64)
-        # Noggin-style: store chat identities as URL-ish strings (irc/matrix).
-        raw = self._validate_multivalued_maxlen(self.cleaned_data.get("fasIRCNick", ""), field_label="IRC nick", maxlen=64)
-        items = [i.strip() for i in self._split_list_field(raw)]
-        normalized: list[str] = []
-        for item in items:
-            if not item:
-                continue
-            compact = item.replace(" ", "")
-            parsed = urlparse(compact)
-            scheme = (parsed.scheme or "").lower()
-
-            nick = ""
-            server = ""
-
-            if scheme in {"irc", "matrix"}:
-                nick = (parsed.path or "").lstrip("/")
-                if not nick and parsed.fragment:
-                    nick = parsed.fragment.lstrip("#@")
-                nick = nick.lstrip("@").strip()
-                server = _normalize_str(parsed.netloc)
-            else:
-                # Heuristics for common inputs:
-                # - Matrix: @nick:server
-                # - IRC legacy: nick or nick:server or nick@server
-                if compact.startswith("@") and ":" in compact:
-                    scheme = "matrix"
-                    value = compact.lstrip("@").strip()
-                    nick, _, server = value.partition(":")
-                else:
-                    scheme = "irc"
-                    value = compact.lstrip("@").strip()
-                    if ":" in value:
-                        nick, _, server = value.partition(":")
-                    elif "@" in value:
-                        nick, _, server = value.partition("@")
-                    else:
-                        nick, server = value, ""
-
-            if scheme == "irc":
-                if not _IRC_NICK_RE.match(nick):
-                    raise forms.ValidationError("This does not look like a valid IRC nickname.")
-                if server and not _SERVER_RE.match(server):
-                    raise forms.ValidationError("This does not look like a valid IRC server name.")
-            elif scheme == "matrix":
-                if not _MATRIX_LOCALPART_RE.match(nick):
-                    raise forms.ValidationError("This does not look like a valid Matrix username.")
-                if server and not _SERVER_RE.match(server):
-                    raise forms.ValidationError("This does not look like a valid Matrix server name.")
-            else:
-                raise forms.ValidationError(f"Unsupported chat protocol: '{scheme}'")
-
-            # Normalize to Noggin's stored form:
-            # - matrix:/nick (no server) or matrix://server/nick
-            # - irc:/nick (no server) or irc://server/nick
-            if server:
-                normalized.append(f"{scheme}://{server}/{nick}")
-            else:
-                normalized.append(f"{scheme}:/{nick}")
-
-        return self._rejoin_lines(normalized)
+        # Noggin-style: store chat identities as URL-ish strings (irc/matrix/mattermost).
+        try:
+            return normalize_chat_nicknames_text(self.cleaned_data.get("fasIRCNick", ""), max_item_len=64)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
 
     def clean_fasPronoun(self):
         # Matches baseruserfas: Str("faspronoun*", maxlength=64)

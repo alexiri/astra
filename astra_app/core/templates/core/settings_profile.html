@@ -1,6 +1,7 @@
 {% extends 'core/base.html' %}
 
 {% load avatar_tags %}
+{% load static %}
 
 {% block title %}Settings{% endblock %}
 
@@ -119,20 +120,30 @@
             <label>Chat Nicknames</label>
 
             <small class="form-text text-muted">
-              The format is either <strong>username</strong> or <strong>username:server.name</strong> if you're not using the default servers:
+              The format is either <strong>username</strong> or <strong>username:server.name</strong> (IRC/Matrix). For Mattermost custom servers use <strong>@username:server.name:team</strong>:
               <ul class="mb-0">
+                <li>For Mattermost: <strong>{{ chat_networks.mattermost.default_server }}</strong> (team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
                 <li>For IRC: <strong>{{ chat_networks.irc.default_server }}</strong></li>
                 <li>For Matrix: <strong>{{ chat_networks.matrix.default_server }}</strong></li>
               </ul>
             </small>
 
-            <div id="chat-nicks-widget" class="d-none" data-irc-default-server="{{ chat_networks.irc.default_server }}" data-matrix-default-server="{{ chat_networks.matrix.default_server }}">
+            <div
+              id="chat-nicks-widget"
+              class="d-none js-chat-nicks-editor"
+              data-textarea-id="{{ form.fasIRCNick.id_for_label }}"
+              data-fallback-id="chat-nicks-fallback"
+              data-mattermost-default-server="{{ chat_networks.mattermost.default_server }}"
+              data-mattermost-default-team="{{ chat_networks.mattermost.default_team }}"
+              data-irc-default-server="{{ chat_networks.irc.default_server }}"
+              data-matrix-default-server="{{ chat_networks.matrix.default_server }}"
+            >
               <div class="table-responsive">
                 <table class="table table-sm table-bordered align-middle mb-2" id="chat-nicks-table">
                   <tbody></tbody>
                 </table>
               </div>
-              <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-nicks-add">Add nickname</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary js-chat-nicks-add" id="chat-nicks-add">Add nickname</button>
             </div>
 
             <div id="chat-nicks-fallback">
@@ -183,6 +194,8 @@
 
 {% block scripts %}
   {{ block.super }}
+
+  <script src="{% static 'core/js/chat_nicknames_editor.js' %}"></script>
 
   <script>
     (function () {
@@ -285,171 +298,6 @@
         widget.classList.remove('d-none');
       }
 
-      function escapeHtml(s) {
-        return String(s)
-          .replaceAll('&', '&amp;')
-          .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;')
-          .replaceAll('"', '&quot;')
-          .replaceAll("'", '&#39;');
-      }
-
-      function parseStoredLine(line, defaults) {
-        const raw = String(line || '').trim();
-        if (!raw) return null;
-
-        const lower = raw.toLowerCase();
-        const startsWithScheme = lower.startsWith('irc:') || lower.startsWith('matrix:');
-
-        let scheme = 'irc';
-        let nick = raw;
-        let server = '';
-
-        if (startsWithScheme) {
-          const parts = raw.split(':', 2);
-          scheme = (parts[0] || 'irc').toLowerCase();
-
-          // Handle url-ish: scheme://server/nick OR scheme:/nick
-          const rest = raw.slice((scheme + ':').length);
-          if (rest.startsWith('//')) {
-            const withoutSlashes = rest.slice(2);
-            const firstSlash = withoutSlashes.indexOf('/');
-            if (firstSlash >= 0) {
-              server = withoutSlashes.slice(0, firstSlash);
-              nick = withoutSlashes.slice(firstSlash + 1);
-            } else {
-              server = withoutSlashes;
-              nick = '';
-            }
-          } else if (rest.startsWith('/')) {
-            nick = rest.slice(1);
-          } else {
-            nick = rest;
-          }
-        } else if (raw.startsWith('@') && raw.includes(':')) {
-          scheme = 'matrix';
-          const withoutAt = raw.slice(1);
-          const idx = withoutAt.lastIndexOf(':');
-          nick = withoutAt.slice(0, idx);
-          server = withoutAt.slice(idx + 1);
-        } else if (raw.includes(':')) {
-          // Heuristic: nick:server (IRC) unless it looks like @user:server
-          scheme = 'irc';
-          const idx = raw.lastIndexOf(':');
-          nick = raw.slice(0, idx);
-          server = raw.slice(idx + 1);
-        } else if (raw.includes('@')) {
-          scheme = 'irc';
-          const idx = raw.lastIndexOf('@');
-          nick = raw.slice(0, idx);
-          server = raw.slice(idx + 1);
-        }
-
-        nick = String(nick || '').trim();
-        server = String(server || '').trim();
-        if (!nick && !server) return null;
-
-        const defaultServer = (scheme === 'matrix') ? defaults.matrix : defaults.irc;
-
-        if (scheme === 'matrix') {
-          const base = `@${nick}`;
-          const value = (server && defaultServer && server !== defaultServer) ? `${base}:${server}` : base;
-          return { scheme, value };
-        }
-
-        const value = (server && defaultServer && server !== defaultServer) ? (nick ? `${nick}:${server}` : server) : nick;
-        return { scheme, value };
-      }
-
-      function toStoredLine(scheme, value, defaults) {
-        const raw = String(value || '').trim();
-        if (!raw) return '';
-
-        const normalizedScheme = (scheme === 'matrix') ? 'matrix' : 'irc';
-        const defaultServer = (normalizedScheme === 'matrix') ? defaults.matrix : defaults.irc;
-
-        // Allow users to paste full stored/URL-ish values into the input.
-        const lower = raw.toLowerCase();
-        if (lower.startsWith('irc:') || lower.startsWith('matrix:')) return raw;
-
-        if (normalizedScheme === 'matrix') {
-          if (raw.startsWith('@') && raw.includes(':')) {
-            const withoutAt = raw.slice(1);
-            const idx = withoutAt.lastIndexOf(':');
-            const nick = withoutAt.slice(0, idx).trim();
-            const server = withoutAt.slice(idx + 1).trim();
-            if (nick && server) return `matrix://${server}/${nick}`;
-          }
-
-          if (raw.includes(':')) {
-            const idx = raw.lastIndexOf(':');
-            const nick = raw.slice(0, idx).trim().replace(/^@/, '');
-            const server = raw.slice(idx + 1).trim();
-            if (nick && server) {
-              if (server === defaultServer) return `matrix:/${nick}`;
-              return `matrix://${server}/${nick}`;
-            }
-          }
-
-          return `matrix:/${raw.replace(/^@/, '')}`;
-        }
-
-        // IRC
-        if (raw.includes(':')) {
-          const idx = raw.lastIndexOf(':');
-          const nick = raw.slice(0, idx).trim();
-          const server = raw.slice(idx + 1).trim();
-          if (nick && server) {
-            if (server === defaultServer) return `irc:/${nick}`;
-            return `irc://${server}/${nick}`;
-          }
-        }
-        if (raw.includes('@')) {
-          const idx = raw.lastIndexOf('@');
-          const nick = raw.slice(0, idx).trim();
-          const server = raw.slice(idx + 1).trim();
-          if (nick && server) {
-            if (server === defaultServer) return `irc:/${nick}`;
-            return `irc://${server}/${nick}`;
-          }
-        }
-        return `irc:/${raw}`;
-      }
-
-      function buildRow(rowData) {
-        const tr = document.createElement('tr');
-        tr.className = 'chat-nicks-row';
-
-        tr.innerHTML = `
-          <td style="width: 140px;">
-            <select class="custom-select custom-select-sm chat-nicks-scheme" aria-label="Chat protocol">
-              <option value="irc">IRC</option>
-              <option value="matrix">Matrix</option>
-            </select>
-          </td>
-          <td>
-            <input type="text" class="form-control form-control-sm chat-nicks-value" placeholder="username" />
-          </td>
-          <td style="width: 44px;" class="text-center">
-            <button type="button" class="btn btn-sm btn-outline-secondary chat-nicks-remove" aria-label="Remove">×</button>
-          </td>
-        `;
-
-        const schemeEl = tr.querySelector('.chat-nicks-scheme');
-        const valueEl = tr.querySelector('.chat-nicks-value');
-
-        function setPlaceholder() {
-          valueEl.placeholder = (schemeEl.value === 'matrix') ? '@username' : 'username';
-        }
-
-        schemeEl.value = rowData.scheme;
-        valueEl.value = rowData.value;
-        setPlaceholder();
-
-        schemeEl.addEventListener('change', setPlaceholder);
-        return tr;
-      }
-
       onReady(function () {
         setupUrlListEditor({
           textareaId: 'id_fasWebsiteUrl',
@@ -472,78 +320,6 @@
           inputClass: 'rss-urls-value',
           placeholder: 'https://example.com/rss.xml'
         });
-
-        const textarea = document.getElementById('id_fasIRCNick');
-        const widget = document.getElementById('chat-nicks-widget');
-        const fallback = document.getElementById('chat-nicks-fallback');
-        const tableBody = document.querySelector('#chat-nicks-table tbody');
-        const addBtn = document.getElementById('chat-nicks-add');
-        const form = textarea && textarea.form;
-
-        if (!textarea || !widget || !fallback || !tableBody || !addBtn || !form) return;
-
-        const defaults = {
-          irc: widget.getAttribute('data-irc-default-server') || 'irc.libera.chat',
-          matrix: widget.getAttribute('data-matrix-default-server') || 'matrix.org'
-        };
-
-        function syncToTextarea() {
-          const rows = Array.from(tableBody.querySelectorAll('tr.chat-nicks-row'));
-          const lines = [];
-          for (const row of rows) {
-            const scheme = (row.querySelector('.chat-nicks-scheme') || {}).value || 'irc';
-            const value = (row.querySelector('.chat-nicks-value') || {}).value || '';
-            const stored = toStoredLine(scheme, value, defaults);
-            if (stored) lines.push(stored);
-          }
-          textarea.value = lines.join('\n');
-        }
-
-        function addRow(rowData) {
-          const tr = buildRow(rowData);
-
-          const schemeEl = tr.querySelector('.chat-nicks-scheme');
-          const valueEl = tr.querySelector('.chat-nicks-value');
-          const removeBtn = tr.querySelector('.chat-nicks-remove');
-
-          schemeEl.addEventListener('change', syncToTextarea);
-          valueEl.addEventListener('input', syncToTextarea);
-          removeBtn.addEventListener('click', function () {
-            tr.remove();
-            syncToTextarea();
-          });
-
-          tableBody.appendChild(tr);
-          syncToTextarea();
-        }
-
-        const existing = String(textarea.value || '')
-          .replaceAll('\r', '')
-          .split('\n')
-          .map(function (l) { return parseStoredLine(l, defaults); })
-          .filter(Boolean);
-
-        if (existing.length === 0) {
-          existing.push({ scheme: 'irc', value: '' });
-        }
-
-        for (const rowData of existing) {
-          addRow(rowData);
-        }
-
-        addBtn.addEventListener('click', function () {
-          addRow({ scheme: 'irc', value: '' });
-          const lastInput = tableBody.querySelector('tr.chat-nicks-row:last-child .chat-nicks-value');
-          if (lastInput) lastInput.focus();
-        });
-
-        form.addEventListener('submit', function () {
-          syncToTextarea();
-        });
-
-        // Progressive enhancement: hide textarea UI once JS is active.
-        fallback.classList.add('d-none');
-        widget.classList.remove('d-none');
       });
     })();
   </script>

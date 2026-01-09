@@ -3,6 +3,7 @@
 {% load core_user_grid %}
 {% load core_user_widget %}
 {% load core_group_widget %}
+{% load core_chatnickname %}
 
 {% block title %}Group {{ group.cn }}{% endblock %}
 
@@ -42,7 +43,7 @@
         <ul class="list-group list-group-flush">
           {% if group.description %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
-              <strong class="profile-attr-label" title="Description"><i class="fas fa-align-left"></i> Description</strong>
+              <strong class="profile-attr-label mr-2" title="Description"><i class="fas fa-align-left"></i> Description</strong>
               <div class="profile-attr-value text-end">{{ group.description }}</div>
             </li>
           {% endif %}
@@ -63,10 +64,10 @@
 
           {% if group.fas_irc_channels %}
             <li class="list-group-item d-flex justify-content-between">
-              <strong class="profile-attr-label" title="IRC channels"><i class="fas fa-comments"></i> IRC channels</strong>
+              <strong class="profile-attr-label" title="Chat channels"><i class="fas fa-comments"></i> Chat</strong>
               <div class="profile-attr-value text-end">
                 {% for ch in group.fas_irc_channels %}
-                  <div class="mb-0 text-monospace"><span class="badge badge-secondary">{{ ch }}</span></div>
+                  <div class="mb-0 text-monospace">{{ ch|channel }}</div>
                 {% endfor %}
               </div>
             </li>

@@ -206,6 +206,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.membership_review',
                 'core.context_processors.organization_nav',
+                'core.context_processors.chat_networks',
             ],
         },
     },
@@ -468,6 +469,11 @@ AWS_DEFAULT_ACL = None
 
 # Profile chat link formatting (Noggin-style).
 CHAT_NETWORKS = {
+    "mattermost": {
+        "default_server": _env_str("CHAT_MATTERMOST_DEFAULT_SERVER", default="chat.almalinux.org")
+        or "chat.almalinux.org",
+        "default_team": _env_str("CHAT_MATTERMOST_DEFAULT_TEAM", default="almalinux") or "almalinux",
+    },
     "irc": {"default_server": _env_str("CHAT_IRC_DEFAULT_SERVER", default="irc.libera.chat") or "irc.libera.chat"},
     "matrix": {"default_server": _env_str("CHAT_MATRIX_DEFAULT_SERVER", default="matrix.org") or "matrix.org"},
 }

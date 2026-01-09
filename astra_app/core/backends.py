@@ -1232,7 +1232,8 @@ class FreeIPAGroup:
             if new:
                 setattrs.append(f"{attr}={new}")
             elif old:
-                delattrs.append(attr)
+                # python_freeipa validates delattr entries as name=value.
+                delattrs.append(f"{attr}=")
 
         _maybe_update_single("description", old=old_description, new=new_description)
         _maybe_update_single("fasurl", old=old_fas_url, new=new_fas_url)
@@ -1240,9 +1241,14 @@ class FreeIPAGroup:
         _maybe_update_single("fasdiscussionurl", old=old_fas_discussion_url, new=new_fas_discussion_url)
 
         if old_fas_irc_channels != new_fas_irc_channels_set:
-            if old_fas_irc_channels:
-                delattrs.append("fasircchannel")
-            for ch in sorted(new_fas_irc_channels_set):
+            # Update multi-valued attribute using per-value add/remove.
+            # Clearing with a bare name triggers python_freeipa ValidationError (expects name=value).
+            to_remove = old_fas_irc_channels - new_fas_irc_channels_set
+            to_add = new_fas_irc_channels_set - old_fas_irc_channels
+
+            for ch in sorted(to_remove, key=str.lower):
+                delattrs.append(f"fasircchannel={ch}")
+            for ch in sorted(to_add, key=str.lower):
                 addattrs.append(f"fasircchannel={ch}")
 
         try:

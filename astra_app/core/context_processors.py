@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 from core.models import MembershipRequest
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
@@ -68,3 +70,7 @@ def organization_nav(request) -> dict[str, object]:
 
     # Users can self-serve creating organizations, so keep the navigation visible.
     return {"has_organizations": True}
+
+
+def chat_networks(_request) -> dict[str, object]:
+    return {"chat_networks": settings.CHAT_NETWORKS}
