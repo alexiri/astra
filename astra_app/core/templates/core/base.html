@@ -242,6 +242,15 @@
                 </ul>
               </li>
             {% endif %}
+
+            {% if request.user.is_staff or request.user.is_superuser %}
+              <li class="nav-item">
+                <a href="{% url 'admin:index' %}" class="nav-link {% if request.path|slice:':7' == '/admin/' %}active{% endif %}">
+                  <i class="nav-icon fas fa-cogs"></i>
+                  <p>Admin</p>
+                </a>
+              </li>
+            {% endif %}
           </ul>
         </nav>
       </div>
