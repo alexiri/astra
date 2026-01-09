@@ -463,7 +463,7 @@
 {% block scripts %}
   {{ block.super }}
   {% if can_manage_elections and turnout_stats and election.status == 'open' %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
     <script src="{% static 'core/js/election_turnout_chart.js' %}"></script>
   {% endif %}
 {% endblock %}

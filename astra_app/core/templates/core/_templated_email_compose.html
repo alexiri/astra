@@ -141,8 +141,8 @@
     </div>
   </div>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/codemirror.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/theme/mdn-like.min.css">
+<link rel="stylesheet" href="{% static 'core/vendor/codemirror/codemirror.min.css' %}">
+<link rel="stylesheet" href="{% static 'core/vendor/codemirror/mdn-like.min.css' %}">
 
 <style>
   /* Ensure CodeMirror editors feel like AdminLTE form-controls. */
@@ -164,12 +164,12 @@
   }
 </style>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/codemirror.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/xml/xml.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/javascript/javascript.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/css/css.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/mode/htmlmixed/htmlmixed.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.40.2/addon/mode/overlay.min.js"></script>
+<script src="{% static 'core/vendor/codemirror/codemirror.min.js' %}"></script>
+<script src="{% static 'core/vendor/codemirror/xml.min.js' %}"></script>
+<script src="{% static 'core/vendor/codemirror/javascript.min.js' %}"></script>
+<script src="{% static 'core/vendor/codemirror/css.min.js' %}"></script>
+<script src="{% static 'core/vendor/codemirror/htmlmixed.min.js' %}"></script>
+<script src="{% static 'core/vendor/codemirror/overlay.min.js' %}"></script>
 
 <script src="{% static 'core/js/templated_email.js' %}"></script>
 

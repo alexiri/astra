@@ -125,3 +125,31 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(payload["subject"], "Hi -name-")
         self.assertEqual(payload["html"], "<p>-name-</p>")
         self.assertEqual(payload["text"], "-name-")
+
+    def test_edit_page_uses_local_codemirror_assets(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        tpl = EmailTemplate.objects.create(
+            name="t-1",
+            description="First",
+            subject="Subj",
+            content="Text",
+            html_content="<p>Hi</p>",
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("email-template-edit", kwargs={"template_id": tpl.pk}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'href="/static/core/vendor/codemirror/codemirror.min.css"')
+        self.assertContains(resp, 'href="/static/core/vendor/codemirror/mdn-like.min.css"')
+        self.assertContains(resp, 'src="/static/core/vendor/codemirror/codemirror.min.js"')
+        self.assertContains(resp, 'src="/static/core/vendor/codemirror/xml.min.js"')
+        self.assertContains(resp, 'src="/static/core/vendor/codemirror/javascript.min.js"')
+        self.assertContains(resp, 'src="/static/core/vendor/codemirror/css.min.js"')
+        self.assertContains(resp, 'src="/static/core/vendor/codemirror/htmlmixed.min.js"')
+        self.assertContains(resp, 'src="/static/core/vendor/codemirror/overlay.min.js"')
+        self.assertNotContains(resp, "cdnjs.cloudflare.com/ajax/libs/codemirror")

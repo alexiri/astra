@@ -338,8 +338,9 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         # ChartJS turnout timeline.
         self.assertContains(resp, 'id="election-turnout-chart"')
         self.assertContains(resp, 'id="election-turnout-chart-data"')
-        self.assertContains(resp, "chart.umd.min.js", html=False)
+        self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
         self.assertContains(resp, "election_turnout_chart.js", html=False)
+        self.assertNotContains(resp, "cdn.jsdelivr.net/npm/chart.js")
 
     def test_election_voting_window_renders_in_users_timezone(self) -> None:
         # If the user has a FreeIPA timezone configured, our middleware activates it.
