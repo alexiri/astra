@@ -592,14 +592,8 @@
             return;
           }
 
-          // Fallback if Bootstrap modal isn't available.
-          var ok = false;
-          try {
-            ok = window.confirm('Email template changed. OK to save new template + contents?\nCancel to keep previously saved email.');
-          } catch (_e) {
-            ok = false;
-          }
-          if (saveModeEl) saveModeEl.value = ok ? 'save' : 'keep_existing';
+          // If Bootstrap modal isn't available, be conservative.
+          if (saveModeEl) saveModeEl.value = 'keep_existing';
           form.submit();
         }
       });

@@ -442,14 +442,13 @@
         // Validate current recipients config before even showing the modal.
         if (!validateRecipientsBeforeSubmit(evt)) return;
 
-        // Prefer Bootstrap modal confirmation; fallback to built-in confirm.
+        // Prefer Bootstrap modal confirmation. If the modal isn't available,
+        // proceed without blocking on browser confirm().
         if (!showSendConfirmModal()) {
-          if (window.confirm('Send mail now?')) {
-            var form = $('send-mail-form');
-            if (!form) return;
-            setAction('send');
-            form.submit();
-          }
+          var form = $('send-mail-form');
+          if (!form) return;
+          setAction('send');
+          form.submit();
         }
       });
     }

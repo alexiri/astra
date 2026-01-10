@@ -2,30 +2,32 @@
 
 {% block object-tools-items %}
   {% if change and has_change_permission %}
+    {% url 'admin:auth_ipauser_send_password_reset' original.pk as admin_password_reset_url %}
     <button
-      type="submit"
+      type="button"
       class="btn btn-block btn-warning btn-sm"
-      name="post"
-      value="1"
-      formaction="{% url 'admin:auth_ipauser_send_password_reset' original.pk %}"
-      formmethod="post"
       {% if not has_email %}disabled{% endif %}
-      onclick="return confirm('Queue a password reset email for this user?')"
+      data-toggle="modal"
+      data-target="#admin-password-reset-modal"
     >
       Reset user's password
     </button>
     {% if has_otp_tokens %}
+      {% url 'admin:auth_ipauser_disable_otp_tokens' original.pk as admin_disable_otp_url %}
       <button
-        type="submit"
+        type="button"
         class="btn btn-block btn-danger btn-sm"
-        name="post"
-        value="1"
-        formaction="{% url 'admin:auth_ipauser_disable_otp_tokens' original.pk %}"
-        formmethod="post"
-        onclick="return confirm('Disable ALL OTP tokens for this user?')"
+        data-toggle="modal"
+        data-target="#admin-disable-otp-modal"
       >
         Disable user's OTP tokens
       </button>
+    {% endif %}
+
+    {% include "core/_modal_confirm.html" with modal_id="admin-password-reset-modal" title="Reset password?" body="Queue a password reset email for this user?" action_url=admin_password_reset_url submit_label="Queue password reset" submit_class="btn-warning" form_fields_template="core/_modal_confirm_fields.html" confirm_post=True %}
+
+    {% if has_otp_tokens %}
+      {% include "core/_modal_confirm.html" with modal_id="admin-disable-otp-modal" title="Disable OTP tokens?" body="Disable ALL OTP tokens for this user?" action_url=admin_disable_otp_url submit_label="Disable OTP tokens" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_post=True %}
     {% endif %}
   {% endif %}
   {{ block.super }}

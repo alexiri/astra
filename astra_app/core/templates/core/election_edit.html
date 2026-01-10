@@ -139,9 +139,10 @@
             {% else %}
               {% if election.status == 'draft' %}
                 <button
-                  type="submit"
+                  type="button"
                   class="btn btn-outline-danger btn-block"
-                  onclick="document.getElementById('election-edit-action').value='delete_draft'; return confirm('Delete this draft election?');"
+                  data-toggle="modal"
+                  data-target="#delete-draft-election-modal"
                 >
                   Delete Draft
                 </button>
@@ -361,6 +362,10 @@
       </div>
     </div>
   </form>
+
+  {% if election and election.status == 'draft' %}
+    {% include "core/_modal_confirm.html" with modal_id="delete-draft-election-modal" title="Delete draft election?" body="Delete this draft election?" action_url="" submit_label="Delete draft" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_action="delete_draft" %}
+  {% endif %}
 
 {% endblock %}
 

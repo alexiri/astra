@@ -477,13 +477,7 @@
           var saveModalEl = getModalEl('save');
           if (saveModalEl && showModal(saveModalEl)) return;
 
-          var ok = false;
-          try {
-            ok = window.confirm('Overwrite the selected email template with the current subject and contents?');
-          } catch (_e) {
-            ok = false;
-          }
-          if (ok) dispatch('templated-email-compose:save-confirmed', { instance: api });
+          dispatch('templated-email-compose:save-confirmed', { instance: api });
         });
       }
 

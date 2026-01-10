@@ -15,13 +15,9 @@
     </h1>
 
     {% if is_member %}
-      <form method="post" class="m-0" onsubmit="return confirm('Leave this group?');">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="leave" />
-        <button type="submit" class="btn btn-outline-danger">
-          Leave group
-        </button>
-      </form>
+      <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#leave-group-modal">
+        Leave group
+      </button>
     {% endif %}
   </div>
 {% endblock %}
@@ -131,11 +127,12 @@
 
             <datalist id="sponsor-user-suggestions"></datalist>
 
-            <form method="post" class="m-0" onsubmit="return confirm('Stop being a sponsor of this group?');">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="stop_sponsoring" />
-              <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Stop being a sponsor</button>
-            </form>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm w-100"
+              data-toggle="modal"
+              data-target="#stop-sponsoring-modal"
+            >Stop being a sponsor</button>
 
             <small class="text-muted d-block mt-2">
               Users must have signed required agreements before being added.
@@ -271,4 +268,34 @@
       });
     })();
   </script>
+
+  {% if is_member %}
+    {% include "core/_modal_confirm.html" with modal_id="leave-group-modal" title="Leave group?" body="Leave this group?" action_url="" submit_label="Leave group" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_action="leave" %}
+  {% endif %}
+
+  {% if is_sponsor %}
+    {% include "core/_modal_confirm.html" with modal_id="stop-sponsoring-modal" title="Stop being a sponsor?" body="Stop being a sponsor of this group?" action_url="" submit_label="Stop sponsoring" submit_class="btn-warning" form_fields_template="core/_modal_confirm_fields.html" confirm_action="stop_sponsoring" %}
+
+    {% url "group-detail" group.cn as group_detail_url %}
+    {% include "core/_modal_confirm.html" with modal_id="remove-member-modal" title="Remove member?" body_prefix="Remove " body_emphasis="" body_suffix=" from this group?" action_url=group_detail_url submit_label="Remove" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_action="remove_member" confirm_username_field=True %}
+
+    <script>
+      (function () {
+        var jq = window.jQuery;
+        if (!jq || !jq.fn) return;
+
+        jq('#remove-member-modal').on('show.bs.modal', function (evt) {
+          var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
+          var username = btn ? String(btn.getAttribute('data-username') || '') : '';
+
+          var modalEl = this;
+          var userEl = modalEl.querySelector('.js-confirm-username');
+          if (userEl) userEl.value = username;
+
+          var strongEl = modalEl.querySelector('.modal-body strong');
+          if (strongEl) strongEl.textContent = username;
+        });
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

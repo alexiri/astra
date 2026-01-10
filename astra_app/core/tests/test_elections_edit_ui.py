@@ -190,6 +190,9 @@ class ElectionDraftDeletionTests(TestCase):
         resp = self.client.get(reverse("election-edit", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Delete Draft")
+        self.assertNotContains(resp, "return confirm(")
+        self.assertContains(resp, 'data-target="#delete-draft-election-modal"')
+        self.assertContains(resp, 'id="delete-draft-election-modal"')
 
         resp2 = self.client.post(
             reverse("election-edit", args=[election.id]),
