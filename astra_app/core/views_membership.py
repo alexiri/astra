@@ -378,11 +378,10 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             )
         else:
             fu = FreeIPAUser.get(r.requested_username)
-            full_name = fu.full_name if fu is not None else ""
             request_rows.append(
                 {
                     "r": r,
-                    "full_name": full_name,
+                    "full_name": fu.full_name if fu is not None else "",
                     "user_deleted": fu is None,
                 }
             )
@@ -403,12 +402,11 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     target_user = None
     target_full_name = ""
-    target_user_deleted = False
+    target_deleted = False
     if req.requested_username:
         target_user = FreeIPAUser.get(req.requested_username)
-        if target_user is None:
-            target_user_deleted = True
-        else:
+        target_deleted = target_user is None
+        if target_user is not None:
             target_full_name = target_user.full_name
 
     return render(
@@ -418,7 +416,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "req": req,
             "target_user": target_user,
             "target_full_name": target_full_name,
-            "target_user_deleted": target_user_deleted,
+            "target_deleted": target_deleted,
         },
     )
 
@@ -490,7 +488,7 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
         if is_ajax:
             from core.templatetags.core_membership_notes import membership_notes
 
-            notes_context = membership_notes(
+            html = membership_notes(
                 {
                     "request": request,
                     "membership_can_add": request.user.has_perm(ASTRA_ADD_MEMBERSHIP),
@@ -501,8 +499,7 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
                 compact=False,
                 next_url=redirect_to,
             )
-            html = render_to_string("core/_membership_notes.html", notes_context, request=request)
-            return JsonResponse({"ok": True, "html": html, "message": user_message})
+            return JsonResponse({"ok": True, "html": str(html), "message": user_message})
 
         messages.success(request, user_message)
         return redirect(redirect_to)

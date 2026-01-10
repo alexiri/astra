@@ -2,10 +2,10 @@
 {% load avatar_tags %}
 {% load tz %}
 
-{% if ok %}
   <div
     id="membership-notes-container-{{ membership_request.pk }}"
     data-membership-notes-container="{{ membership_request.pk }}"
+    data-membership-notes-default-open="{% if compact %}0{% else %}1{% endif %}"
   >
     <style>
       /* Scoped per widget to avoid affecting other direct-chat blocks. */
@@ -14,6 +14,40 @@
         width: auto;
         max-width: 80%;
         overflow-wrap: anywhere;
+      }
+
+      /*
+       * Compact header: title on the left (ellipsis if needed), tools on the right.
+       * Keep everything on a single row.
+       */
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-header-compact {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .5rem;
+      }
+
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-title {
+        min-width: 0;
+      }
+
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-header-compact .membership-notes-title {
+        margin: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-header-compact .card-tools {
+        float: none;
+        flex: 0 0 auto;
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        white-space: nowrap;
+        gap: .25rem;
       }
 
       #membership-notes-container-{{ membership_request.pk }} .membership-notes-bubble {
@@ -46,11 +80,11 @@
 
     <div
       id="membership-notes-card-{{ membership_request.pk }}"
-      class="card card-primary card-outline direct-chat direct-chat-primary mb-0 collapsed-card"
+      class="card card-primary card-outline direct-chat direct-chat-primary mb-0{% if compact %} collapsed-card{% endif %}"
       data-membership-notes-card="{{ membership_request.pk }}"
     >
       <div
-        class="card-header"
+        class="card-header{% if compact %} membership-notes-header-compact{% endif %}"
         data-membership-notes-header="{{ membership_request.pk }}"
         role="button"
         tabindex="0"
@@ -58,8 +92,7 @@
         style="cursor: pointer;"
       >
         <h3
-          class="card-title{% if compact %} text-sm text-truncate{% endif %}"
-          {% if compact %}style="max-width: 12rem;"{% endif %}
+          class="card-title membership-notes-title {% if compact %}text-sm text-truncate{% endif %}"
         >
           Membership Committee Notes
         </h3>
@@ -83,7 +116,7 @@
             aria-label="Collapse"
             data-membership-notes-collapse="{{ membership_request.pk }}"
           >
-            <i class="fas fa-plus"></i>
+            <i class="fas {% if compact %}fa-plus{% else %}fa-minus{% endif %}"></i>
           </button>
         </div>
       </div>
@@ -95,14 +128,24 @@
           {% if compact %} style="max-height: 260px;"{% endif %}
         >
           {% for entry in entries %}
-            <div class="direct-chat-msg{% if entry.is_self %} right{% endif %}">
+            <div class="direct-chat-msg {% if not forloop.last %}mb-3{% endif %} {% if entry.is_self %} right{% endif %}">
               <div class="direct-chat-infos clearfix">
                 {% if entry.is_self %}
                   <span class="direct-chat-name float-right">{{ entry.note.username }}</span>
-                  <span class="direct-chat-timestamp float-left">{{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}</span>
+                  <span class="direct-chat-timestamp float-left">
+                    {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
+                    {% if entry.membership_request_id and entry.membership_request_url %}
+                      <a href="{{ entry.membership_request_url }}" class="text-muted ml-1">(req. #{{ entry.membership_request_id }})</a>
+                    {% endif %}
+                  </span>
                 {% else %}
                   <span class="direct-chat-name float-left">{{ entry.note.username }}</span>
-                  <span class="direct-chat-timestamp float-right">{{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}</span>
+                  <span class="direct-chat-timestamp float-right">
+                    {% if entry.membership_request_id and entry.membership_request_url %}
+                      <a href="{{ entry.membership_request_url }}" class="text-muted mr-1">(req. #{{ entry.membership_request_id }})</a>
+                    {% endif %}
+                    {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
+                  </span>
                 {% endif %}
               </div>
 
@@ -175,36 +218,70 @@
                 rows="2"
               ></textarea>
               <div class="input-group-append">
-                <div class="btn-group" role="group" aria-label="Note actions">
-                  <button
-                    type="button"
-                    class="btn btn-light border"
-                    data-note-action="vote_approve"
-                    title="Vote approve"
-                    aria-label="Vote approve"
-                  >
-                    <i class="fas fa-thumbs-up text-success"></i>
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-light border"
-                    data-note-action="vote_disapprove"
-                    title="Vote disapprove"
-                    aria-label="Vote disapprove"
-                  >
-                    <i class="fas fa-thumbs-down text-danger"></i>
-                  </button>
+                {% if compact %}
                   <button
                     type="submit"
-                    class="btn btn-primary"
+                    class="btn btn-light border"
                     title="Send (Ctrl+Enter)"
                     aria-label="Send note"
                   >
-                    <i class="fas fa-paper-plane mr-1"></i> Send
+                    <i class="fas fa-paper-plane"></i>
                   </button>
-                </div>
+                {% else %}
+                  <div class="btn-group" role="group" aria-label="Note actions">
+                    <button
+                      type="submit"
+                      class="btn btn-light border"
+                      title="Send (Ctrl+Enter)"
+                      aria-label="Send note"
+                    >
+                      <i class="fas fa-paper-plane mr-1"></i> Send
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-light border"
+                      data-note-action="vote_approve"
+                      title="Vote approve"
+                      aria-label="Vote approve"
+                    >
+                      <i class="fas fa-thumbs-up text-success"></i>
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-light border"
+                      data-note-action="vote_disapprove"
+                      title="Vote disapprove"
+                      aria-label="Vote disapprove"
+                    >
+                      <i class="fas fa-thumbs-down text-danger"></i>
+                    </button>
+                  </div>
+                {% endif %}
               </div>
             </div>
+
+            {% if compact %}
+              <div class="d-flex w-100 mt-1" role="group" aria-label="Vote actions">
+                <button
+                  type="button"
+                  class="btn btn-light border btn-sm flex-fill py-1"
+                  data-note-action="vote_approve"
+                  title="Vote approve"
+                  aria-label="Vote approve"
+                >
+                  <i class="fas fa-thumbs-up text-success"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-light border btn-sm flex-fill py-1"
+                  data-note-action="vote_disapprove"
+                  title="Vote disapprove"
+                  aria-label="Vote disapprove"
+                >
+                  <i class="fas fa-thumbs-down text-danger"></i>
+                </button>
+              </div>
+            {% endif %}
           </form>
         </div>
       {% endif %}
@@ -244,20 +321,32 @@
             }
           }
 
-          function getOpenState() {
+          function readStoredOpenState() {
             try {
-              return window.localStorage.getItem(window.AstraMembershipNotes._storageKey(requestPk)) === '1';
+              return window.localStorage.getItem(window.AstraMembershipNotes._storageKey(requestPk));
             } catch (e) {
-              return false;
+              return null;
             }
           }
 
-          function ensureExpanded() {
+          function getDesiredOpenState() {
+            var stored = readStoredOpenState();
+            if (stored === '1') return true;
+            if (stored === '0') return false;
+            return (container && container.dataset && container.dataset.membershipNotesDefaultOpen === '1');
+          }
+
+          function ensureDesiredOpenState() {
             if (!card || !collapseBtn) return;
-            if (!getOpenState()) return;
-            if (!card.classList.contains('collapsed-card')) return;
-            collapseBtn.click();
-            scrollToBottomSoon();
+            var desiredOpen = getDesiredOpenState();
+            var isCollapsed = card.classList.contains('collapsed-card');
+
+            if (desiredOpen && isCollapsed) {
+              collapseBtn.click();
+              scrollToBottomSoon();
+            } else if (!desiredOpen && !isCollapsed) {
+              collapseBtn.click();
+            }
           }
 
           function scrollToBottom() {
@@ -310,7 +399,7 @@
           function ajaxSubmit(action) {
             if (!form) return;
             setOpenState(true);
-            ensureExpanded();
+            ensureDesiredOpenState();
 
             var errorBox = document.getElementById('membership-notes-error-' + requestPk);
             var errorText = document.getElementById('membership-notes-error-text-' + requestPk);
@@ -363,22 +452,28 @@
                 }
 
                 var newCount = newContainer.querySelector('[data-membership-notes-count="' + requestPk + '"]');
-                var curCount = currentContainer.querySelector('[data-membership-notes-count="' + requestPk + '"]');
-                if (curCount && newCount) {
-                  curCount.textContent = newCount.textContent;
-                  curCount.setAttribute('title', newCount.getAttribute('title') || '');
+                var curCounts = currentContainer.querySelectorAll('[data-membership-notes-count="' + requestPk + '"]');
+                if (newCount && curCounts && curCounts.length) {
+                  for (var cIdx = 0; cIdx < curCounts.length; cIdx++) {
+                    curCounts[cIdx].textContent = newCount.textContent;
+                    curCounts[cIdx].setAttribute('title', newCount.getAttribute('title') || '');
+                  }
                 }
 
                 var newApprovals = newContainer.querySelector('[data-membership-notes-approvals="' + requestPk + '"]');
-                var curApprovals = currentContainer.querySelector('[data-membership-notes-approvals="' + requestPk + '"]');
-                if (curApprovals && newApprovals) {
-                  curApprovals.innerHTML = newApprovals.innerHTML;
+                var curApprovals = currentContainer.querySelectorAll('[data-membership-notes-approvals="' + requestPk + '"]');
+                if (newApprovals && curApprovals && curApprovals.length) {
+                  for (var aIdx = 0; aIdx < curApprovals.length; aIdx++) {
+                    curApprovals[aIdx].innerHTML = newApprovals.innerHTML;
+                  }
                 }
 
                 var newDisapprovals = newContainer.querySelector('[data-membership-notes-disapprovals="' + requestPk + '"]');
-                var curDisapprovals = currentContainer.querySelector('[data-membership-notes-disapprovals="' + requestPk + '"]');
-                if (curDisapprovals && newDisapprovals) {
-                  curDisapprovals.innerHTML = newDisapprovals.innerHTML;
+                var curDisapprovals = currentContainer.querySelectorAll('[data-membership-notes-disapprovals="' + requestPk + '"]');
+                if (newDisapprovals && curDisapprovals && curDisapprovals.length) {
+                  for (var dIdx = 0; dIdx < curDisapprovals.length; dIdx++) {
+                    curDisapprovals[dIdx].innerHTML = newDisapprovals.innerHTML;
+                  }
                 }
 
                 if (message) {
@@ -488,7 +583,7 @@
             });
           }
 
-          ensureExpanded();
+          ensureDesiredOpenState();
           scrollToBottomSoon();
         };
 
@@ -496,4 +591,3 @@
       })();
     </script>
   </div>
-{% endif %}

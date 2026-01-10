@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 from typing import Any
 
 from django import template
 from django.http import HttpRequest
+from django.template.loader import render_to_string
+from django.urls import reverse
+from django.utils.safestring import SafeString, mark_safe
 
 from core.backends import FreeIPAUser
 from core.membership_notes import note_action_icon, note_action_label, tally_last_votes
@@ -74,14 +78,181 @@ def _bubble_style_for_username(username: str) -> str:
     return f"--bubble-bg: {bg}; --bubble-fg: {fg};"
 
 
-@register.inclusion_tag("core/_membership_notes.html", takes_context=True)
+def _timeline_dom_id(key: str) -> str:
+    digest = hashlib.blake2s(key.encode("utf-8"), digest_size=4).hexdigest()
+    return f"timeline-{digest}"
+
+
+def _current_username_from_request(http_request: HttpRequest | None) -> str:
+    if http_request is None or getattr(http_request, "user", None) is None:
+        return ""
+    try:
+        return str(http_request.user.get_username() or "").strip()
+    except Exception:
+        return ""
+
+
+def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
+    avatar_users_by_username: dict[str, object] = {}
+    for username in {n.username for n in notes if n.username}:
+        user_obj = FreeIPAUser.get(username)
+        if user_obj is not None:
+            avatar_users_by_username[username] = user_obj
+    return avatar_users_by_username
+
+
+def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> list[dict[str, Any]]:
+    avatar_users_by_username = _avatar_users_by_username(notes)
+    entries: list[dict[str, Any]] = []
+    for n in notes:
+        is_self = current_username and n.username.lower() == current_username.lower()
+        avatar_user = avatar_users_by_username.get(n.username)
+
+        membership_request_id = n.membership_request_id
+        membership_request_url = reverse("membership-request-detail", args=[membership_request_id])
+
+        if isinstance(n.action, dict) and n.action:
+            label = note_action_label(n.action)
+            icon = note_action_icon(n.action)
+            entries.append(
+                {
+                    "kind": "action",
+                    "note": n,
+                    "label": label,
+                    "icon": icon,
+                    "is_self": is_self,
+                    "avatar_user": avatar_user,
+                    "bubble_style": "--bubble-bg: #f8f9fa; --bubble-fg: #212529;",
+                    "membership_request_id": membership_request_id,
+                    "membership_request_url": membership_request_url,
+                }
+            )
+
+        if n.content is not None and str(n.content).strip() != "":
+            bubble_style: str | None = None
+            if not is_self and n.username:
+                bubble_style = _bubble_style_for_username(n.username.strip().lower())
+
+            entries.append(
+                {
+                    "kind": "message",
+                    "note": n,
+                    "is_self": is_self,
+                    "avatar_user": avatar_user,
+                    "bubble_style": bubble_style,
+                    "membership_request_id": membership_request_id,
+                    "membership_request_url": membership_request_url,
+                }
+            )
+
+    return entries
+
+
+@register.simple_tag(takes_context=True)
+def membership_notes_aggregate_for_user(
+    context: dict[str, Any],
+    username: str,
+    *,
+    compact: bool = True,
+) -> SafeString | str:
+    request = context.get("request")
+    http_request = request if isinstance(request, HttpRequest) else None
+
+    membership_can_view = bool(context.get("membership_can_view", False))
+    if not membership_can_view:
+        return ""
+
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        return ""
+
+    notes = list(
+        Note.objects.filter(membership_request__requested_username=normalized_username).order_by("timestamp", "pk")
+    )
+    approvals, disapprovals = tally_last_votes(notes)
+
+    dom_id = _timeline_dom_id(f"user:{normalized_username}")
+    dummy_request = SimpleNamespace(pk=dom_id)
+
+    resolved_next_url = http_request.get_full_path() if http_request is not None else ""
+
+    html = render_to_string(
+        "core/_membership_notes.html",
+        {
+            "compact": compact,
+            "membership_request": dummy_request,
+            "entries": _timeline_entries_for_notes(
+                notes,
+                current_username=_current_username_from_request(http_request),
+            ),
+            "note_count": len(notes),
+            "approvals": approvals,
+            "disapprovals": disapprovals,
+            "can_post": False,
+            "next_url": resolved_next_url,
+        },
+        request=http_request,
+    )
+    return mark_safe(html)
+
+
+@register.simple_tag(takes_context=True)
+def membership_notes_aggregate_for_organization(
+    context: dict[str, Any],
+    organization_id: int,
+    *,
+    compact: bool = True,
+) -> SafeString | str:
+    request = context.get("request")
+    http_request = request if isinstance(request, HttpRequest) else None
+
+    membership_can_view = bool(context.get("membership_can_view", False))
+    if not membership_can_view:
+        return ""
+
+    if not organization_id:
+        return ""
+
+    notes = list(
+        Note.objects.filter(membership_request__requested_organization_id=organization_id).order_by(
+            "timestamp", "pk"
+        )
+    )
+    approvals, disapprovals = tally_last_votes(notes)
+
+    dom_id = _timeline_dom_id(f"org:{organization_id}")
+    dummy_request = SimpleNamespace(pk=dom_id)
+
+    resolved_next_url = http_request.get_full_path() if http_request is not None else ""
+
+    html = render_to_string(
+        "core/_membership_notes.html",
+        {
+            "compact": compact,
+            "membership_request": dummy_request,
+            "entries": _timeline_entries_for_notes(
+                notes,
+                current_username=_current_username_from_request(http_request),
+            ),
+            "note_count": len(notes),
+            "approvals": approvals,
+            "disapprovals": disapprovals,
+            "can_post": False,
+            "next_url": resolved_next_url,
+        },
+        request=http_request,
+    )
+    return mark_safe(html)
+
+
+@register.simple_tag(takes_context=True)
 def membership_notes(
     context: dict[str, Any],
     membership_request: MembershipRequest | int,
     *,
     compact: bool = False,
     next_url: str | None = None,
-) -> dict[str, Any]:
+) -> SafeString | str:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
 
@@ -92,7 +263,7 @@ def membership_notes(
         mr = MembershipRequest.objects.select_related("membership_type", "requested_organization").filter(pk=membership_request).first()
 
     if mr is None:
-        return {"ok": False, "compact": compact}
+        return ""
 
     notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
     approvals, disapprovals = tally_last_votes(notes)
@@ -101,18 +272,8 @@ def membership_notes(
     if resolved_next_url is None:
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
 
-    avatar_users_by_username: dict[str, object] = {}
-    for username in {n.username for n in notes if n.username}:
-        user_obj = FreeIPAUser.get(username)
-        if user_obj is not None:
-            avatar_users_by_username[username] = user_obj
-
-    current_username = ""
-    if http_request is not None and getattr(http_request, "user", None) is not None:
-        try:
-            current_username = str(http_request.user.get_username() or "").strip()
-        except Exception:
-            current_username = ""
+    avatar_users_by_username = _avatar_users_by_username(notes)
+    current_username = _current_username_from_request(http_request)
 
     membership_can_add = bool(context.get("membership_can_add", False))
     membership_can_change = bool(context.get("membership_can_change", False))
@@ -154,14 +315,18 @@ def membership_notes(
                 }
             )
 
-    return {
-        "ok": True,
-        "compact": compact,
-        "membership_request": mr,
-        "entries": entries,
-        "note_count": len(notes),
-        "approvals": approvals,
-        "disapprovals": disapprovals,
-        "can_post": can_post,
-        "next_url": resolved_next_url,
-    }
+    html = render_to_string(
+        "core/_membership_notes.html",
+        {
+            "compact": compact,
+            "membership_request": mr,
+            "entries": entries,
+            "note_count": len(notes),
+            "approvals": approvals,
+            "disapprovals": disapprovals,
+            "can_post": can_post,
+            "next_url": resolved_next_url,
+        },
+        request=http_request,
+    )
+    return mark_safe(html)

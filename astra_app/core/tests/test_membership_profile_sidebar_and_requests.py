@@ -824,6 +824,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
         self.assertContains(resp, "Needs manual review")
+        self.assertContains(resp, f"(req. #{req.pk})")
+        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
 
     def test_profile_hides_status_note_without_membership_view_perm(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note

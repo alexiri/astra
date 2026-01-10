@@ -243,16 +243,8 @@
           </li>
         {% endfor %}
 
-        {% if membership_can_view and membership_pending_requests %}
-          <li class="list-group-item">
-            <div class="small text-muted mb-2">Membership Committee Notes</div>
-            {% for req in membership_pending_requests %}
-              <div class="mb-3">
-                <div class="small text-muted mb-1">Request #{{ req.request_id }} — {{ req.membership_type.name }}</div>
-                {% membership_notes req.request_id compact=True %}
-              </div>
-            {% endfor %}
-          </li>
+        {% if membership_can_view %}
+          {% membership_notes_aggregate_for_user fu.username compact=True %}
         {% endif %}
       </ul>
 

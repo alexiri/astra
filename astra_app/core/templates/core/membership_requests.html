@@ -17,10 +17,13 @@
         <form id="bulk-action-form" method="post" action="{% url 'membership-requests-bulk' %}" class="form-inline">
           {% csrf_token %}
           <div class="input-group input-group-sm">
-            <select name="bulk_action" class="custom-select" aria-label="Bulk action">
+                      <div>{{ row.full_name }}</div>
               <option value="">Bulk action…</option>
-              <option value="approve">Accept</option>
+                      <div>{{ r.requested_username }}</div>
               <option value="reject">Reject</option>
+                    {% if row.user_deleted %}
+                      <div class="text-muted small">(deleted)</div>
+                    {% endif %}
               <option value="ignore">Ignore</option>
             </select>
             <div class="input-group-append">
@@ -40,7 +43,7 @@
             <th style="width: 40px;" class="text-center">
               <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
             </th>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Requested at</th>
+            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Request</th>
             <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Target</th>
             <th>Type</th>
             <th class="text-right" style="width: 15%; white-space: nowrap;">Actions</th>
@@ -60,7 +63,10 @@
                   aria-label="Select request"
                 >
               </td>
-              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">{{ r.requested_at }}</td>
+              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">
+                <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
+                {{ r.requested_at }}
+              </td>
               <td>
                 {% if row.organization or row.organization_code %}
                   <div>
@@ -72,27 +78,20 @@
                       <span class="text-muted">(deleted)</span>
                     {% endif %}
                   </div>
-
-                  {% if membership_can_view %}
-                    {% membership_notes r compact=True %}
-                  {% endif %}
                 {% elif r.requested_username %}
-                  <div>
-                    <a href="{% url 'user-profile' r.requested_username %}">{{ r.requested_username }}</a>
-                    {% if row.user_deleted %}
-                      <span class="text-muted">(deleted)</span>
+                  <a href="{% url 'user-profile' r.requested_username %}">
+                    {% if row.full_name %}
+                      <div>{{ row.full_name }} <span class="text-muted small">({{ r.requested_username }})</span></div>
+                    {% else %}
+                      <div>{{ r.requested_username }}</div>
                     {% endif %}
-                  </div>
-                  {% if row.full_name %}
-                    <div class="text-muted small">{{ row.full_name }}</div>
-                  {% endif %}
-
-                  {% if membership_can_view %}
-                    {% membership_notes r compact=True %}
-                  {% endif %}
+                  </a>
                 {% endif %}
 
-
+                <div class="mt-2">
+                  {% membership_notes r compact=True %}
+                </div>
+                
               </td>
               <td>
                 {{ r.membership_type.name }}

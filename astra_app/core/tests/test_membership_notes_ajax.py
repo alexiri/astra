@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -68,6 +69,14 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("html", payload)
         self.assertIn("Hello via ajax", payload["html"])
         self.assertIn("Membership Committee Notes", payload["html"])
+
+        # Non-compact widgets render expanded by default.
+        self.assertIsNone(
+            re.search(
+                rf'id="membership-notes-card-{req.pk}"[^>]*class="[^"]*\bcollapsed-card\b',
+                payload["html"],
+            )
+        )
 
         self.assertTrue(
             Note.objects.filter(

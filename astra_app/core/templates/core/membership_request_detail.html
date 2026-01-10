@@ -32,8 +32,11 @@
             {% endif %}
           {% else %}
             <a href="{% url 'user-profile' req.requested_username %}">{{ req.requested_username }}</a>
-            {% if target_full_name %}<span class="text-muted">({{ target_full_name }})</span>{% endif %}
-            {% if target_user_deleted %}<span class="text-muted">(deleted)</span>{% endif %}
+            {% if target_full_name %}
+              <span class="text-muted">({{ target_full_name }})</span>
+            {% elif target_deleted %}
+              <span class="text-muted">(deleted)</span>
+            {% endif %}
           {% endif %}
         </dd>
 

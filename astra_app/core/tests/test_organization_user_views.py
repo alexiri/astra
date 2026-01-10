@@ -507,6 +507,49 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Approved")
         self.assertContains(resp, reverse("membership-request-detail", args=[req.pk]))
 
+    def test_organization_detail_shows_committee_notes_with_request_link(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Note, Organization
+        from core.permissions import ASTRA_VIEW_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
+        Note.objects.create(membership_request=req, username="reviewer", content="Org note")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, "Org note")
+        self.assertContains(resp, f"(req. #{req.pk})")
+        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+
 
     def test_sponsorship_expiration_display_and_extend_request(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
