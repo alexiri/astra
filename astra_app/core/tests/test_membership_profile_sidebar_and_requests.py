@@ -707,7 +707,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, reverse("user-profile", kwargs={"username": req.requested_username}))
         self.assertContains(resp, "Alice User")
 
-    def test_membership_requests_list_shows_deleted_user_request(self) -> None:
+    def test_membership_requests_list_hides_deleted_user_request(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -738,8 +738,50 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("membership-request-detail", args=[req.pk]))
-        self.assertContains(resp, req.requested_username)
+        self.assertNotContains(resp, reverse("membership-request-detail", args=[req.pk]))
+        self.assertNotContains(resp, req.requested_username)
+        self.assertContains(resp, "No pending requests.")
+
+    def test_membership_requests_list_hides_deleted_org_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "group_cn": "almalinux-gold",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=None,
+            requested_organization_code="acme",
+            requested_organization_name="Acme",
+            membership_type_id="gold",
+        )
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, reverse("membership-request-detail", args=[req.pk]))
+        self.assertNotContains(resp, "Acme")
+        self.assertContains(resp, "No pending requests.")
 
     def test_membership_request_detail_shows_deleted_user(self) -> None:
         from core.models import MembershipRequest, MembershipType

@@ -65,15 +65,9 @@
                 {{ r.requested_at }}
               </td>
               <td>
-                {% if row.organization or row.organization_code %}
+                {% if row.organization %}
                   <div>
-                    {% if row.organization %}
-                      <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
-                    {% else %}
-                      <span>{{ row.organization_name }}</span>
-                      <span class="text-muted">({{ row.organization_code }})</span>
-                      <span class="text-muted">(deleted)</span>
-                    {% endif %}
+                    <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
                   </div>
                 {% elif r.requested_username %}
                   <a href="{% url 'user-profile' r.requested_username %}">

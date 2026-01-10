@@ -373,6 +373,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     )
 
     request_rows: list[dict[str, object]] = []
+    visible_requests: list[MembershipRequest] = []
     for r in requests:
         requested_log = r.requested_logs[0] if r.requested_logs else None
         requested_by_username = requested_log.actor_username if requested_log is not None else ""
@@ -386,12 +387,15 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 
         if r.requested_username == "":
             org = r.requested_organization
+            if org is None:
+                # If the org is gone, the committee can't take action on it.
+                continue
+
+            visible_requests.append(r)
             request_rows.append(
                 {
                     "r": r,
                     "organization": org,
-                    "organization_code": r.requested_organization_code,
-                    "organization_name": r.requested_organization_name,
                     "requested_by_username": requested_by_username,
                     "requested_by_full_name": requested_by_full_name,
                     "requested_by_deleted": requested_by_deleted,
@@ -399,11 +403,15 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             )
         else:
             fu = FreeIPAUser.get(r.requested_username)
+            if fu is None:
+                # If the user is gone, the committee can't take action on them.
+                continue
+
+            visible_requests.append(r)
             request_rows.append(
                 {
                     "r": r,
-                    "full_name": fu.full_name if fu is not None else "",
-                    "user_deleted": fu is None,
+                    "full_name": fu.full_name,
                     "requested_by_username": requested_by_username,
                     "requested_by_full_name": requested_by_full_name,
                     "requested_by_deleted": requested_by_deleted,
@@ -414,7 +422,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
         request,
         "core/membership_requests.html",
         {
-            "requests": requests,
+            "requests": visible_requests,
             "request_rows": request_rows,
         },
     )
