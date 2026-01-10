@@ -10,6 +10,7 @@ import pyotp
 from django import forms
 
 from core.chatnicknames import normalize_chat_nicknames_text
+from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.views_utils import _normalize_str
 
 # GitHub username rules (close enough for validation UX)
@@ -316,6 +317,48 @@ class ProfileForm(_StyledForm):
         value = value.lstrip("@").strip()
         if value and not _GITLAB_USERNAME_RE.match(value):
             raise forms.ValidationError("GitLab username is not valid")
+        return value
+
+
+class AddressForm(_StyledForm):
+    street = forms.CharField(
+        label="Street address",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"autocomplete": "street-address"}),
+    )
+    l = forms.CharField(  # noqa: E741
+        label="City",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"autocomplete": "address-level2"}),
+    )
+    st = forms.CharField(
+        label="State / Province",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"autocomplete": "address-level1"}),
+    )
+    postalcode = forms.CharField(
+        label="Postal code",
+        required=False,
+        max_length=40,
+        widget=forms.TextInput(attrs={"autocomplete": "postal-code"}),
+    )
+    c = forms.CharField(
+        label="Country code",
+        required=True,
+        max_length=2,
+        help_text="ISO 3166-1 alpha-2 (example: US)",
+        widget=forms.TextInput(attrs={"autocomplete": "country"}),
+    )
+
+    def clean_c(self) -> str:
+        value = normalize_country_alpha2(self.cleaned_data.get("c"))
+        if not value:
+            raise forms.ValidationError("Country code is required")
+        if not is_valid_country_alpha2(value):
+            raise forms.ValidationError("Country code must be a valid ISO 3166-1 alpha-2")
         return value
 
 class EmailsForm(_StyledForm):

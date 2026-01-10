@@ -221,6 +221,17 @@ urlpatterns = [
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),
 
     path("settings/profile/", views_settings.settings_profile, name="settings-profile"),
+    path("settings/address/", views_settings.settings_address, name="settings-address"),
+    path(
+        "settings/address/lookup/",
+        views_settings.settings_address_lookup,
+        name="settings-address-lookup",
+    ),
+    path(
+        "settings/address/suggest/",
+        views_settings.settings_address_suggest,
+        name="settings-address-suggest",
+    ),
     path("settings/emails/", views_settings.settings_emails, name="settings-emails"),
     path("settings/emails/validate/", views_settings.settings_email_validate, name="settings-email-validate"),
     path("settings/keys/", views_settings.settings_keys, name="settings-keys"),

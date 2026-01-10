@@ -5,8 +5,7 @@ import json
 from unittest.mock import patch
 from urllib.parse import quote
 
-from django.test import TestCase
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.backends import FreeIPAUser

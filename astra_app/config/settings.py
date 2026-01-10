@@ -105,6 +105,14 @@ def _parse_email_url(email_url: str) -> dict[str, Any]:
 
 DEBUG = _env_bool("DEBUG", default=False)
 
+# Self-service Address settings: where to store the ISO 3166-1 country code.
+# Some FreeIPA dev schemas don't allow writing to the LDAP "c" attribute.
+# Configure in production via SELF_SERVICE_ADDRESS_COUNTRY_ATTR=c
+SELF_SERVICE_ADDRESS_COUNTRY_ATTR = (
+    _env_str("SELF_SERVICE_ADDRESS_COUNTRY_ATTR", default="fasstatusnote")
+    or "fasstatusnote"
+)
+
 # Django management commands (e.g. `migrate`) still import settings, but they don't
 # need certain web-runtime-only secrets. This makes one-off tasks safer and easier
 # to run without granting access to unrelated secrets.

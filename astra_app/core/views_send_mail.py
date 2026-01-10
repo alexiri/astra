@@ -29,10 +29,9 @@ from core.models import MembershipRequest
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.templated_email import (
     create_email_template_unique,
-    render_templated_email_preview,
-    render_templated_email_preview_response,
     preview_drop_inline_image_tags,
     preview_rewrite_inline_image_tags_to_urls,
+    render_templated_email_preview,
     stage_inline_images_for_sending,
     update_email_template,
 )

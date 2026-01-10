@@ -13,4 +13,5 @@ python-freeipa
 django-avatar
 pyotp
 qrcode
+pycountry
 ruff

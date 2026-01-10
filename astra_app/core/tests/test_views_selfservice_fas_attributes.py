@@ -4,12 +4,20 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 
-from core.views_settings import settings_emails, settings_keys, settings_profile
+from core.views_settings import (
+    settings_address,
+    settings_address_lookup,
+    settings_address_suggest,
+    settings_emails,
+    settings_keys,
+    settings_profile,
+)
 from core.views_users import user_profile
 
 
@@ -31,6 +39,12 @@ class _DummyFreeIPAUser:
 class FASAttributesTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
+
+    def _seed_valid_country_code(self, fu: _DummyFreeIPAUser, *, code: str = "US") -> None:
+        data = fu._user_data or {}
+        country_attr = settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR
+        data[country_attr] = [code]
+        fu._user_data = data
 
     def _add_session_and_messages(self, request):
         SessionMiddleware(lambda r: None).process_request(request)
@@ -159,6 +173,7 @@ class FASAttributesTests(TestCase):
             email="",
             _user_data={},
         )
+        self._seed_valid_country_code(fu)
 
         client = SimpleNamespace(user_mod=Mock())
         client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
@@ -220,6 +235,209 @@ class FASAttributesTests(TestCase):
         self.assertEqual(after.get("pronouns"), "she/her")
         self.assertEqual(after["fu"].full_name, "Alice User")
 
+    @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")
+    def test_address_set_fields_uses_configured_country_attr(self):
+        fu = _DummyFreeIPAUser(
+            first_name="Alice",
+            last_name="User",
+            email="alice@example.com",
+            _user_data={},
+        )
+
+        client = SimpleNamespace(user_mod=Mock())
+        client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
+
+        req = self.factory.post(
+            "/settings/address/",
+            data={
+                "street": "Main St 5",
+                "l": "Springfield",
+                "st": "Illinois",
+                "postalcode": "62701",
+                "c": "us",
+            },
+        )
+        self._add_session_and_messages(req)
+        req.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+                    resp = settings_address(req)
+
+        self.assertEqual(resp.status_code, 302)
+        self._assert_user_mod_called_with_sets(
+            client.user_mod,
+            "alice",
+            set_={
+                "street=Main St 5",
+                "l=Springfield",
+                "st=Illinois",
+                "postalcode=62701",
+                "fasstatusnote=US",
+            },
+            add=set(),
+            del_=set(),
+            direct={},
+        )
+
+        self.assertEqual((fu._user_data or {}).get("street"), ["Main St 5"])
+        self.assertEqual((fu._user_data or {}).get("l"), ["Springfield"])
+        self.assertEqual((fu._user_data or {}).get("st"), ["Illinois"])
+        self.assertEqual((fu._user_data or {}).get("postalcode"), ["62701"])
+        self.assertEqual((fu._user_data or {}).get("fasstatusnote"), ["US"])
+
+    def test_address_photon_suggest_returns_options(self):
+        req = self.factory.get("/settings/address/suggest/?q=Main%20St")
+        self._add_session_and_messages(req)
+        req.user = self._auth_user("alice")
+
+        photon_payload = {
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "street": "Main St",
+                        "housenumber": "5",
+                        "postcode": "62701",
+                        "city": "Springfield",
+                        "state": "Illinois",
+                        "countrycode": "us",
+                    },
+                },
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "street": "Main St",
+                        "housenumber": "6",
+                        "postcode": "62701",
+                        "city": "Springfield",
+                        "state": "Illinois",
+                        "countrycode": "us",
+                    },
+                },
+            ]
+        }
+
+        class _FakeResp:
+            def __init__(self, payload: dict):
+                import json
+
+                self._data = json.dumps(payload).encode("utf-8")
+
+            def read(self) -> bytes:
+                return self._data
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("core.views_settings.urlopen", autospec=True, return_value=_FakeResp(photon_payload)):
+            resp = settings_address_suggest(req)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/json")
+        import json
+
+        data = json.loads(resp.content.decode("utf-8"))
+        self.assertTrue(data.get("found"))
+        options = data.get("options")
+        self.assertIsInstance(options, list)
+        self.assertEqual(len(options), 2)
+        self.assertEqual(options[0].get("street"), "Main St 5")
+        self.assertEqual(options[0].get("c"), "US")
+
+    @patch("core.views_users.render", autospec=True)
+    @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")
+    def test_user_profile_self_shows_danger_when_missing_country_code(self, mocked_render):
+        fu = _DummyFreeIPAUser(
+            username="alice",
+            first_name="Alice",
+            last_name="User",
+            email="alice@example.com",
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                # Missing fasstatusnote -> no country
+            },
+        )
+
+        req = self.factory.get("/user/alice/")
+        self._add_session_and_messages(req)
+        req.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        mocked_render.side_effect = fake_render
+
+        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
+            resp = user_profile(req, "alice")
+
+        self.assertEqual(resp.status_code, 200)
+        ctx = captured.get("context")
+        self.assertIsNotNone(ctx)
+        self.assertTrue(ctx.get("is_self"))
+        self.assertTrue(ctx.get("country_code_missing_or_invalid"))
+
+    def test_address_photon_lookup_parses_result(self):
+        req = self.factory.get("/settings/address/lookup/?q=Main%20St%205%20Springfield")
+        self._add_session_and_messages(req)
+        req.user = self._auth_user("alice")
+
+        photon_payload = {
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "street": "Main St",
+                        "housenumber": "5",
+                        "postcode": "62701",
+                        "city": "Springfield",
+                        "state": "Illinois",
+                        "countrycode": "us",
+                    },
+                }
+            ]
+        }
+
+        class _FakeResp:
+            def __init__(self, payload: dict):
+                import json
+
+                self._data = json.dumps(payload).encode("utf-8")
+
+            def read(self) -> bytes:
+                return self._data
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("core.views_settings.urlopen", autospec=True, return_value=_FakeResp(photon_payload)):
+            resp = settings_address_lookup(req)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/json")
+        import json
+
+        data = json.loads(resp.content.decode("utf-8"))
+        self.assertTrue(data.get("found"))
+        self.assertEqual(data.get("street"), "Main St 5")
+        self.assertEqual(data.get("l"), "Springfield")
+        self.assertEqual(data.get("st"), "Illinois")
+        self.assertEqual(data.get("postalcode"), "62701")
+        self.assertEqual(data.get("c"), "US")
+
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC", "Europe/Paris"])
     @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en_US", "fr_FR"])
     def test_profile_edit_all_fas_fields(self, _mock_locales, _mock_tzs):
@@ -242,6 +460,7 @@ class FASAttributesTests(TestCase):
                 "fasIsPrivate": ["TRUE"],
             },
         )
+        self._seed_valid_country_code(fu)
 
         client = SimpleNamespace(user_mod=Mock())
         client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
@@ -329,6 +548,7 @@ class FASAttributesTests(TestCase):
                 "fasIsPrivate": ["TRUE"],
             },
         )
+        self._seed_valid_country_code(fu)
 
         client = SimpleNamespace(user_mod=Mock())
         client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
@@ -390,6 +610,7 @@ class FASAttributesTests(TestCase):
             email="",
             _user_data={},
         )
+        self._seed_valid_country_code(fu)
         client = SimpleNamespace(user_mod=Mock())
         client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
 
@@ -426,6 +647,7 @@ class FASAttributesTests(TestCase):
             "mail": ["alice@example.com"],
             "fasRHBZEmail": ["alice@bugzilla.example"],
         }
+        self._seed_valid_country_code(fu)
         client.user_mod.reset_mock()
 
         req2 = self.factory.post(
@@ -458,6 +680,7 @@ class FASAttributesTests(TestCase):
             "mail": ["alice2@example.com"],
             "fasRHBZEmail": ["alice2@bugzilla.example"],
         }
+        self._seed_valid_country_code(fu)
         client.user_mod.reset_mock()
 
         req3 = self.factory.post(
@@ -493,6 +716,7 @@ class FASAttributesTests(TestCase):
                 "ipasshpubkey": [],
             },
         )
+        self._seed_valid_country_code(fu)
         client = SimpleNamespace(user_mod=Mock())
         client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
 

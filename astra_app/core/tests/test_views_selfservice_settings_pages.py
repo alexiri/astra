@@ -21,7 +21,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         return request
 
     def _auth_user(self, username: str = "alice"):
-        return SimpleNamespace(is_authenticated=True, get_username=lambda: username)
+        return SimpleNamespace(is_authenticated=True, get_username=lambda: username, email=f"{username}@example.org")
 
     def test_settings_profile_get_accepts_boolean_fasisprivate(self):
         factory = RequestFactory()
@@ -121,6 +121,63 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_VERIFY_SSL=False,
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote",
+    )
+    def test_settings_profile_post_changes_blocked_without_country_code(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            first_name="Alice",
+            last_name="User",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "fasLocale": ["en_US"],
+                "fasTimezone": ["UTC"],
+                "fasIsPrivate": ["FALSE"],
+                # Missing fasstatusnote -> no country code on file.
+            },
+        )
+
+        request = factory.post(
+            "/settings/profile/",
+            data={
+                "givenname": "Alicia",
+                "sn": "User",
+                "fasPronoun": "",
+                "fasLocale": "en_US",
+                "fasTimezone": "UTC",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",  # unchecked
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                response = views_settings.settings_profile(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings-address"))
+        mocked_update.assert_not_called()
+
+        msgs = [m.message for m in get_messages(request)]
+        self.assertTrue(any("country" in m.lower() for m in msgs))
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
     )
     def test_settings_emails_post_no_changes_short_circuits(self):
         factory = RequestFactory()
@@ -207,12 +264,15 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
-            mocked_client = mocked_client_cls.return_value
-            mocked_client.login.return_value = None
-            mocked_client.passwd.return_value = None
+        fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
 
-            response = views_settings.settings_password(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
+                mocked_client = mocked_client_cls.return_value
+                mocked_client.login.return_value = None
+                mocked_client.passwd.return_value = None
+
+                response = views_settings.settings_password(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-password"))
@@ -236,15 +296,18 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
-            mocked_client = mocked_client_cls.return_value
-            mocked_client.login.return_value = None
-            # Simulate no passwd attribute in this client version.
-            if hasattr(mocked_client, "passwd"):
-                delattr(mocked_client, "passwd")
-            mocked_client.user_mod.return_value = None
+        fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
 
-            response = views_settings.settings_password(request)
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
+                mocked_client = mocked_client_cls.return_value
+                mocked_client.login.return_value = None
+                # Simulate no passwd attribute in this client version.
+                if hasattr(mocked_client, "passwd"):
+                    delattr(mocked_client, "passwd")
+                mocked_client.user_mod.return_value = None
+
+                response = views_settings.settings_password(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings-password"))

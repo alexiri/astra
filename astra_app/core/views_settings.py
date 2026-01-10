@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
+from urllib.request import urlopen
 
 import post_office.mail
 from django.conf import settings
@@ -17,8 +19,9 @@ from python_freeipa import ClientMeta
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.backends import FreeIPAFASAgreement, FreeIPAUser
+from core.country_codes import country_code_status_from_user_data
 from core.email_context import user_email_context
-from core.forms_selfservice import EmailsForm, KeysForm, PasswordChangeFreeIPAForm, ProfileForm
+from core.forms_selfservice import AddressForm, EmailsForm, KeysForm, PasswordChangeFreeIPAForm, ProfileForm
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import (
     _add_change,
@@ -40,6 +43,124 @@ from core.views_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _block_settings_change_without_country_code(request: HttpRequest, *, user_data: dict | None) -> HttpResponse | None:
+    status = country_code_status_from_user_data(user_data)
+    if status.is_valid:
+        return None
+
+    messages.error(
+        request,
+        "A valid country code is required before you can change settings. Please set it on the Address tab.",
+    )
+    return redirect("settings-address")
+
+
+def _photon_best_address_fields(payload: dict) -> dict[str, str] | None:
+    features = payload.get("features")
+    if not isinstance(features, list) or not features:
+        return None
+
+    feature = features[0]
+    if not isinstance(feature, dict):
+        return None
+
+    props = feature.get("properties")
+    if not isinstance(props, dict):
+        return None
+
+    street_name = (props.get("street") or props.get("name") or "").strip()
+    house = (props.get("housenumber") or "").strip()
+    street = f"{street_name} {house}".strip() or ""
+
+    city = (
+        props.get("city")
+        or props.get("town")
+        or props.get("village")
+        or props.get("hamlet")
+        or props.get("locality")
+        or ""
+    )
+    state = (props.get("state") or "").strip()
+    postcode = (props.get("postcode") or "").strip()
+    countrycode = (props.get("countrycode") or "").strip().upper()
+
+    out = {
+        "street": str(street).strip(),
+        "l": str(city).strip(),
+        "st": str(state).strip(),
+        "postalcode": str(postcode).strip(),
+        "c": str(countrycode).strip(),
+    }
+    if not any(out.values()):
+        return None
+    return {k: v for k, v in out.items() if v}
+
+
+def _photon_address_fields_from_feature(feature: dict) -> dict[str, str] | None:
+    props = feature.get("properties")
+    if not isinstance(props, dict):
+        return None
+
+    street_name = (props.get("street") or props.get("name") or "").strip()
+    house = (props.get("housenumber") or "").strip()
+    street = f"{street_name} {house}".strip() or ""
+
+    city = (
+        props.get("city")
+        or props.get("town")
+        or props.get("village")
+        or props.get("hamlet")
+        or props.get("locality")
+        or ""
+    )
+    state = (props.get("state") or "").strip()
+    postcode = (props.get("postcode") or "").strip()
+    countrycode = (props.get("countrycode") or "").strip().upper()
+
+    out = {
+        "street": str(street).strip(),
+        "l": str(city).strip(),
+        "st": str(state).strip(),
+        "postalcode": str(postcode).strip(),
+        "c": str(countrycode).strip(),
+    }
+    if not any(out.values()):
+        return None
+    return {k: v for k, v in out.items() if v}
+
+
+def _photon_suggestions(payload: dict, *, limit: int) -> list[dict[str, str]]:
+    features = payload.get("features")
+    if not isinstance(features, list) or not features:
+        return []
+
+    out: list[dict[str, str]] = []
+    for item in features:
+        if not isinstance(item, dict):
+            continue
+        fields = _photon_address_fields_from_feature(item)
+        if not fields:
+            continue
+
+        label_parts: list[str] = []
+        if fields.get("street"):
+            label_parts.append(fields["street"])
+        if fields.get("l"):
+            label_parts.append(fields["l"])
+        if fields.get("st"):
+            label_parts.append(fields["st"])
+        if fields.get("postalcode"):
+            label_parts.append(fields["postalcode"])
+        if fields.get("c"):
+            label_parts.append(fields["c"])
+
+        out.append({"label": ", ".join(label_parts), **fields})
+        if len(out) >= limit:
+            break
+
+    return out
 
 
 def _send_email_validation_email(
@@ -248,6 +369,10 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
                 messages.info(request, "No changes to save.")
                 return redirect("settings-profile")
 
+            blocked = _block_settings_change_without_country_code(request, user_data=data)
+            if blocked is not None:
+                return blocked
+
             skipped, applied = _update_user_attrs(
                 username,
                 direct_updates=direct_updates,
@@ -280,6 +405,161 @@ def settings_profile(request: HttpRequest) -> HttpResponse:
         **settings_context("profile"),
     }
     return render(request, "core/settings_profile.html", context)
+
+
+def settings_address(request: HttpRequest) -> HttpResponse:
+    username = request.user.get_username()
+    fu = _get_full_user(username)
+    if not fu:
+        messages.error(request, "Unable to load your FreeIPA profile.")
+        return redirect("home")
+
+    data = fu._user_data
+    country_attr = str(getattr(settings, "SELF_SERVICE_ADDRESS_COUNTRY_ATTR", "c")).strip() or "c"
+    initial = {
+        "street": _first(data, "street", "") or "",
+        "l": _first(data, "l", "") or "",
+        "st": _first(data, "st", "") or "",
+        "postalcode": _first(data, "postalcode", "") or "",
+        "c": _first(data, country_attr, "") or "",
+    }
+
+    form = AddressForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        setattrs: list[str] = []
+        delattrs: list[str] = []
+
+        _add_change_setattr(
+            setattrs=setattrs,
+            delattrs=delattrs,
+            attr="street",
+            current_value=initial.get("street"),
+            new_value=form.cleaned_data["street"],
+        )
+        _add_change_setattr(
+            setattrs=setattrs,
+            delattrs=delattrs,
+            attr="l",
+            current_value=initial.get("l"),
+            new_value=form.cleaned_data["l"],
+        )
+        _add_change_setattr(
+            setattrs=setattrs,
+            delattrs=delattrs,
+            attr="st",
+            current_value=initial.get("st"),
+            new_value=form.cleaned_data["st"],
+        )
+        _add_change_setattr(
+            setattrs=setattrs,
+            delattrs=delattrs,
+            attr="postalcode",
+            current_value=initial.get("postalcode"),
+            new_value=form.cleaned_data["postalcode"],
+        )
+        _add_change_setattr(
+            setattrs=setattrs,
+            delattrs=delattrs,
+            attr=country_attr,
+            current_value=initial.get("c"),
+            new_value=form.cleaned_data["c"],
+            transform=str.upper,
+        )
+
+        try:
+            if not setattrs and not delattrs:
+                messages.info(request, "No changes to save.")
+                return redirect("settings-address")
+
+            skipped, applied = _update_user_attrs(
+                username,
+                setattrs=setattrs,
+                delattrs=delattrs,
+            )
+            if skipped:
+                for attr in skipped:
+                    if attr == country_attr:
+                        label = form.fields["c"].label
+                    else:
+                        label = _form_label_for_attr(form, attr)
+                    messages.warning(
+                        request,
+                        f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
+                    )
+
+            if applied:
+                messages.success(request, "Address updated in FreeIPA.")
+            else:
+                messages.info(request, "No changes were applied.")
+            return redirect("settings-address")
+        except Exception as e:
+            logger.exception("Failed to update address username=%s", username)
+            if settings.DEBUG:
+                messages.error(request, f"Failed to update address (debug): {e}")
+            else:
+                messages.error(request, "Failed to update address due to an internal error.")
+
+    context = {
+        "form": form,
+        **settings_context("address"),
+    }
+    return render(request, "core/settings_address.html", context)
+
+
+def settings_address_lookup(request: HttpRequest) -> HttpResponse:
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return HttpResponse(
+            json.dumps({"found": False, "error": "Missing q"}),
+            content_type="application/json",
+            status=400,
+        )
+
+    url = f"https://photon.komoot.io/api/?{urlencode({'q': q, 'limit': 1})}"
+    try:
+        with urlopen(url, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return HttpResponse(
+            json.dumps({"found": False}),
+            content_type="application/json",
+            status=200,
+        )
+
+    fields = _photon_best_address_fields(payload) or {}
+    return HttpResponse(
+        json.dumps({"found": bool(fields), **fields}),
+        content_type="application/json",
+        status=200,
+    )
+
+
+def settings_address_suggest(request: HttpRequest) -> HttpResponse:
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return HttpResponse(
+            json.dumps({"found": False, "options": [], "error": "Missing q"}),
+            content_type="application/json",
+            status=400,
+        )
+
+    url = f"https://photon.komoot.io/api/?{urlencode({'q': q, 'limit': 5})}"
+    try:
+        with urlopen(url, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return HttpResponse(
+            json.dumps({"found": False, "options": []}),
+            content_type="application/json",
+            status=200,
+        )
+
+    options = _photon_suggestions(payload, limit=5)
+    return HttpResponse(
+        json.dumps({"found": bool(options), "options": options}),
+        content_type="application/json",
+        status=200,
+    )
 
 
 def settings_emails(request: HttpRequest) -> HttpResponse:
@@ -340,6 +620,10 @@ def settings_emails(request: HttpRequest) -> HttpResponse:
             if not pending_validations and not direct_updates and not setattrs and not delattrs:
                 messages.info(request, "No changes to save.")
                 return redirect("settings-emails")
+
+            blocked = _block_settings_change_without_country_code(request, user_data=data)
+            if blocked is not None:
+                return blocked
 
             if direct_updates or setattrs or delattrs:
                 skipped, applied = _update_user_attrs(
@@ -504,6 +788,10 @@ def settings_keys(request: HttpRequest) -> HttpResponse:
                 messages.info(request, "No changes to save.")
                 return redirect("settings-keys")
 
+            blocked = _block_settings_change_without_country_code(request, user_data=data)
+            if blocked is not None:
+                return blocked
+
             skipped, applied = _update_user_attrs(
                 username,
                 direct_updates=direct_updates,
@@ -548,6 +836,11 @@ def settings_password(request: HttpRequest) -> HttpResponse:
         using_otp = False
 
     if request.method == "POST" and form.is_valid():
+        fu = _get_full_user(username)
+        if fu:
+            blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data)
+            if blocked is not None:
+                return blocked
         current = form.cleaned_data["current_password"]
         otp = _normalize_str(form.cleaned_data.get("otp"))
         if otp:

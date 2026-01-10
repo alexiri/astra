@@ -17,6 +17,7 @@ from core.agreements import (
     missing_required_agreements_for_user_in_group,
 )
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.country_codes import country_code_status_from_user_data
 from core.membership import get_valid_membership_type_codes_for_username, get_valid_memberships_for_username
 from core.models import MembershipLog, MembershipRequest, MembershipType
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
@@ -200,11 +201,15 @@ def _profile_context_for_user(
 
         email_is_blacklisted = BlacklistedEmail.objects.filter(email__iexact=fu.email).exists()
 
+    country_status = country_code_status_from_user_data(data)
+
     return {
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
         "is_self": is_self,
         "email_is_blacklisted": email_is_blacklisted,
+        "country_code": country_status.code,
+        "country_code_missing_or_invalid": not country_status.is_valid,
         "membership_request_url": membership_request_url,
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,

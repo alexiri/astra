@@ -17,6 +17,14 @@
     </div>
   {% endif %}
 
+  {% if is_self and country_code_missing_or_invalid %}
+    <div class="alert alert-danger" id="country-code-missing-alert" role="alert">
+      <strong>Action required:</strong>
+      Your profile is missing a valid <em>country code</em>. For legal reasons, all users must have a valid ISO 3166-1 alpha-2 country code on file.
+      Please <a href="{% url 'settings-address' %}" class="alert-link">set your country code</a>.
+    </div>
+  {% endif %}
+
   <div class="row">
     <div class="col-md-4">
       <div class="card">

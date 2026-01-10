@@ -15,8 +15,21 @@ from django.shortcuts import redirect, render
 from python_freeipa import ClientMeta, exceptions
 
 from core.backends import FreeIPAUser
+from core.country_codes import country_code_status_from_user_data
 from core.forms_selfservice import OTPAddForm, OTPConfirmForm, OTPTokenActionForm, OTPTokenRenameForm
 from core.views_utils import _normalize_str, settings_context
+
+
+def _block_settings_change_without_country_code(request: HttpRequest, *, user_data: dict | None) -> HttpResponse | None:
+    status = country_code_status_from_user_data(user_data)
+    if status.is_valid:
+        return None
+
+    messages.error(
+        request,
+        "A valid country code is required before you can change settings. Please set it on the Address tab.",
+    )
+    return redirect("settings-address")
 
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
 # For maximum compatibility, must be a multiple of 5.
@@ -124,6 +137,10 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
         secret = _normalize_str(request.POST.get("confirm-secret")) or None
 
         if confirm_form.is_valid():
+            fu = FreeIPAUser.get(username)
+            blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+            if blocked is not None:
+                return blocked
             description = _normalize_str(confirm_form.cleaned_data.get("description"))
             try:
                 svc = _service_client()
@@ -181,6 +198,10 @@ def settings_otp(request: HttpRequest) -> HttpResponse:
 
 
 def otp_enable(request: HttpRequest) -> HttpResponse:
+    fu = FreeIPAUser.get(request.user.get_username())
+    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+    if blocked is not None:
+        return blocked
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         token = form.cleaned_data["token"]
@@ -197,6 +218,10 @@ def otp_enable(request: HttpRequest) -> HttpResponse:
 
 
 def otp_disable(request: HttpRequest) -> HttpResponse:
+    fu = FreeIPAUser.get(request.user.get_username())
+    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+    if blocked is not None:
+        return blocked
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         token = form.cleaned_data["token"]
@@ -213,6 +238,10 @@ def otp_disable(request: HttpRequest) -> HttpResponse:
 
 
 def otp_delete(request: HttpRequest) -> HttpResponse:
+    fu = FreeIPAUser.get(request.user.get_username())
+    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+    if blocked is not None:
+        return blocked
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         token = form.cleaned_data["token"]
@@ -234,6 +263,10 @@ def otp_delete(request: HttpRequest) -> HttpResponse:
 
 
 def otp_rename(request: HttpRequest) -> HttpResponse:
+    fu = FreeIPAUser.get(request.user.get_username())
+    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+    if blocked is not None:
+        return blocked
     form = OTPTokenRenameForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         token = form.cleaned_data["token"]
