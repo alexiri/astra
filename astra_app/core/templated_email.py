@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import re
+import tempfile
 from collections.abc import Iterable, Mapping
+from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
+from django.conf import settings
+from django.core.files.storage import default_storage
 from django.http import HttpRequest, JsonResponse
-from django.template import Context, Template
+from django.template import Context, Template, engines
 from django.template.exceptions import TemplateSyntaxError
 from post_office.models import EmailTemplate
 
@@ -12,6 +17,116 @@ _VAR_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_]+)")
 _PLURALIZE_PATTERN = re.compile(
     r"{{\s*(?P<var>[A-Za-z0-9_]+)\s*\|\s*pluralize(?:\s*:\s*(?P<q>['\"])(?P<arg>.*?)(?P=q))?\s*}}"
 )
+
+_INLINE_IMAGE_TAG_PATTERN = re.compile(
+    r"{%-?\s*inline_image\s+(?:(?P<q>['\"])(?P<urlq>.*?)(?P=q)|(?P<urlb>[^\s%}]+))\s*-?%}"
+)
+
+_INLINE_IMAGE_TAG_REWRITE_PATTERN = re.compile(
+    r"(?P<prefix>{%-?\s*inline_image\s+)"
+    r"(?:(?P<q>['\"])(?P<urlq>.*?)(?P=q)|(?P<urlb>[^\s%}]+))"
+    r"(?P<suffix>\s*-?%})"
+)
+
+_MAX_INLINE_IMAGE_BYTES: int = 10 * 1024 * 1024
+
+
+def _storage_key_from_inline_image_arg(raw: str) -> str:
+    """Infer a storage key from an inline_image argument.
+
+    django-post-office's built-in `inline_image` tag only supports:
+    - absolute filesystem paths, or
+    - staticfiles finders paths.
+
+    In this app we store uploaded images in default_storage (S3/MinIO). Users
+    paste either a storage URL or a bucket-prefixed path; for sending, we stage
+    the object into a local temp file and point inline_image at that temp path.
+    """
+
+    value = str(raw or "").strip()
+    if not value:
+        raise ValueError("inline_image requires a non-empty path or URL")
+
+    bucket = str(settings.AWS_STORAGE_BUCKET_NAME or "").strip()
+
+    if "://" in value:
+        parts = urlsplit(value)
+        path = str(parts.path or "").lstrip("/")
+
+        # Path-style URL: /<bucket>/<key>
+        if bucket and path.startswith(f"{bucket}/"):
+            return path[len(bucket) + 1 :]
+
+        # Virtual-host style: <bucket>.<domain>/<key>
+        if bucket and str(parts.netloc or "").startswith(f"{bucket}."):
+            return path
+
+        raise ValueError(
+            "inline_image URLs must point to the configured storage bucket; "
+            f"could not infer storage key from: {value}"
+        )
+
+    # Common: user pastes a bucket-prefixed key like "astra-media/mail-images/logo.png".
+    if bucket:
+        normalized = value.lstrip("/")
+        if normalized.startswith(f"{bucket}/"):
+            return normalized[len(bucket) + 1 :]
+
+    return value.lstrip("/")
+
+
+def stage_inline_images_for_sending(html_content: str) -> tuple[str, list[str]]:
+    """Rewrite inline_image arguments to local temp files for sending.
+
+    Returns (rewritten_html, temp_paths). Callers must delete temp_paths.
+    """
+
+    staged: dict[str, str] = {}
+    temp_paths: list[str] = []
+
+    def repl(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        suffix = match.group("suffix")
+        quote = match.group("q")
+        raw_arg = match.group("urlq") or match.group("urlb") or ""
+        raw_arg = str(raw_arg).strip()
+        if not raw_arg:
+            return match.group(0)
+
+        local_path = staged.get(raw_arg)
+        if local_path is None:
+            key = _storage_key_from_inline_image_arg(raw_arg)
+            try:
+                file_obj = default_storage.open(key, "rb")
+            except Exception as exc:
+                raise ValueError(f"No such file in storage: {key}") from exc
+
+            with file_obj:
+                data = file_obj.read(_MAX_INLINE_IMAGE_BYTES + 1)
+            if len(data) > _MAX_INLINE_IMAGE_BYTES:
+                raise ValueError(f"Inline image is too large (> {_MAX_INLINE_IMAGE_BYTES} bytes): {key}")
+
+            suffix_ext = PurePosixPath(key).suffix
+            if not suffix_ext:
+                suffix_ext = ".bin"
+
+            tmp = tempfile.NamedTemporaryFile(prefix="astra-inline-image-", suffix=suffix_ext, delete=False)
+            try:
+                tmp.write(data)
+                tmp.flush()
+            finally:
+                tmp.close()
+
+            local_path = tmp.name
+            staged[raw_arg] = local_path
+            temp_paths.append(local_path)
+
+        if quote:
+            return f"{prefix}{quote}{local_path}{quote}{suffix}"
+        return f"{prefix}{local_path}{suffix}"
+
+    rewritten = _INLINE_IMAGE_TAG_REWRITE_PATTERN.sub(repl, str(html_content or ""))
+    return rewritten, temp_paths
 
 
 def _iter_pluralize_vars(*sources: str) -> Iterable[str]:
@@ -112,6 +227,29 @@ def placeholder_context_from_sources(*sources: str) -> dict[str, str]:
     return {name: f"-{name}-" for name in sorted(names)}
 
 
+def preview_rewrite_inline_image_tags_to_urls(value: str) -> str:
+    """Rewrite `{% inline_image 'URL' %}` to `URL` for HTML previews.
+
+    This is intentionally preview-only: real sending needs the tag so
+    django-post-office can embed the image as an inline attachment.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        quoted = match.group("urlq")
+        if quoted is not None:
+            return quoted
+        bare = match.group("urlb")
+        return bare or ""
+
+    return _INLINE_IMAGE_TAG_PATTERN.sub(repl, str(value or ""))
+
+
+def preview_drop_inline_image_tags(value: str) -> str:
+    """Drop `{% inline_image '...' %}` entirely (useful for plain-text previews)."""
+
+    return _INLINE_IMAGE_TAG_PATTERN.sub("", str(value or ""))
+
+
 def placeholderize_empty_values(context: Mapping[str, object]) -> dict[str, object]:
     """Return a copy of context with empty values replaced by `-var-` placeholders.
 
@@ -136,6 +274,20 @@ def render_template_string(value: str, context: Mapping[str, object]) -> str:
     Raise ValueError for template syntax errors so callers can consistently
     surface user-facing messages.
     """
+
+    post_office_engine = None
+    try:
+        post_office_engine = engines["post_office"]
+    except Exception:
+        post_office_engine = None
+
+    if post_office_engine is not None:
+        try:
+            return post_office_engine.from_string(value or "").render(dict(context))
+        except TemplateSyntaxError as exc:
+            raise ValueError(str(exc)) from exc
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
 
     try:
         return Template(value or "").render(Context(dict(context)))
@@ -178,8 +330,8 @@ def render_templated_email_preview_response(*, request: HttpRequest, context: Ma
     """
 
     subject = str(request.POST.get("subject") or "")
-    html_content = str(request.POST.get("html_content") or "")
-    text_content = str(request.POST.get("text_content") or "")
+    html_content = preview_rewrite_inline_image_tags_to_urls(str(request.POST.get("html_content") or ""))
+    text_content = preview_drop_inline_image_tags(str(request.POST.get("text_content") or ""))
 
     try:
         return JsonResponse(

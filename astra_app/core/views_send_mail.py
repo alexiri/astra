@@ -4,19 +4,22 @@ import csv
 import io
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
+from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.http import HttpRequest, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import render
+from django.template import engines
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
-from post_office import mail
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
@@ -26,9 +29,11 @@ from core.models import MembershipRequest
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.templated_email import (
     create_email_template_unique,
-    render_template_string,
     render_templated_email_preview,
     render_templated_email_preview_response,
+    preview_drop_inline_image_tags,
+    preview_rewrite_inline_image_tags_to_urls,
+    stage_inline_images_for_sending,
     update_email_template,
 )
 
@@ -663,25 +668,57 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 if preview is None or not recipients:
                     messages.error(request, "No recipients to send to.")
                 else:
+                    try:
+                        staged_html_content, staged_files = stage_inline_images_for_sending(html_content)
+                    except ValueError as exc:
+                        messages.error(request, f"Template error: {exc}")
+                        staged_html_content = ""
+                        staged_files = []
+
+                    template_engine = engines["post_office"]
+                    subject_template = template_engine.from_string(subject)
+                    # inline_image tags are HTML-only; avoid rendering them in text.
+                    text_template = template_engine.from_string(preview_drop_inline_image_tags(text_content))
+                    html_template = template_engine.from_string(staged_html_content)
+
                     sent = 0
                     failures = 0
-                    for recipient in recipients:
-                        to_email = str(recipient.get("email") or "").strip()
-                        if not to_email:
-                            continue
-                        try:
-                            mail.send(
-                                recipients=[to_email],
-                                subject=render_template_string(subject, recipient),
-                                message=render_template_string(text_content, recipient),
-                                html_message=render_template_string(html_content, recipient),
-                                cc=cc,
-                                bcc=bcc,
-                            )
-                            sent += 1
-                        except Exception:
-                            failures += 1
-                            logger.exception("Send mail failed email=%s", to_email)
+                    try:
+                        for recipient in recipients:
+                            to_email = str(recipient.get("email") or "").strip()
+                            if not to_email:
+                                continue
+                            try:
+                                rendered_subject = subject_template.render(recipient)
+                                rendered_text = text_template.render(recipient)
+                                rendered_html = html_template.render(recipient)
+
+                                email_message = EmailMultiAlternatives(
+                                    rendered_subject,
+                                    rendered_text,
+                                    settings.DEFAULT_FROM_EMAIL,
+                                    [to_email],
+                                    cc=cc,
+                                    bcc=bcc,
+                                )
+                                if rendered_html.strip():
+                                    email_message.attach_alternative(rendered_html, "text/html")
+                                    # Required for django-post-office inline images.
+                                    html_template.attach_related(email_message)
+
+                                email_message.send()
+                                sent += 1
+                            except Exception:
+                                failures += 1
+                                logger.exception("Send mail failed email=%s", to_email)
+                    finally:
+                        for path in staged_files:
+                            try:
+                                os.unlink(path)
+                            except FileNotFoundError:
+                                pass
+                            except Exception:
+                                logger.exception("Send mail failed to delete temp inline image path=%s", path)
 
                     if sent:
                         raw_request_id = str(posted_extra_context.get("membership_request_id") or "").strip()
@@ -792,8 +829,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             rendered_preview.update(
                 render_templated_email_preview(
                     subject=str(form.cleaned_data.get("subject") or ""),
-                    html_content=str(form.cleaned_data.get("html_content") or ""),
-                    text_content=str(form.cleaned_data.get("text_content") or ""),
+                    html_content=preview_rewrite_inline_image_tags_to_urls(
+                        str(form.cleaned_data.get("html_content") or "")
+                    ),
+                    text_content=preview_drop_inline_image_tags(str(form.cleaned_data.get("text_content") or "")),
                     context=first_context,
                 )
             )
@@ -831,7 +870,18 @@ def send_mail_render_preview(request: HttpRequest) -> JsonResponse:
     if not isinstance(context, dict):
         return JsonResponse({"error": "Preview context is invalid."}, status=400)
 
-    return render_templated_email_preview_response(
-        request=request,
-        context={str(k): str(v) for k, v in context.items()},
-    )
+    subject = str(request.POST.get("subject") or "")
+    html_content = preview_rewrite_inline_image_tags_to_urls(str(request.POST.get("html_content") or ""))
+    text_content = preview_drop_inline_image_tags(str(request.POST.get("text_content") or ""))
+
+    try:
+        return JsonResponse(
+            render_templated_email_preview(
+                subject=subject,
+                html_content=html_content,
+                text_content=text_content,
+                context={str(k): str(v) for k, v in context.items()},
+            )
+        )
+    except ValueError as exc:
+        return JsonResponse({"error": f"Template error: {exc}"}, status=400)

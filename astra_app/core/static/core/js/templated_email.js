@@ -82,6 +82,11 @@
       /<p>\s*<em>\s*The AlmaLinux Team\s*<\/em>\s*<\/p>/gi,
       '\n<p>-- The AlmaLinux Team</p>'
     );
+
+    // Drop Django template tags from the HTML->text conversion.
+    // These directives are not meaningful in plain text and can leak confusing
+    // artifacts like "{% load ... %}" into the generated text.
+    rawHtml = rawHtml.replace(/{%[\s\S]*?%}/g, '');
     var doc = null;
     try {
       doc = new window.DOMParser().parseFromString(rawHtml, 'text/html');
@@ -133,6 +138,7 @@
 
       var tag = String(node.tagName || '').toUpperCase();
       if (tag === 'BR') return '\n';
+      if (tag === 'IMG') return '';
 
       var children = [];
       for (var i = 0; i < node.childNodes.length; i++) {

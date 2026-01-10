@@ -45,8 +45,9 @@ class SendMailMembershipContactedNoteTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_send_mail.mail.send", autospec=True) as send,
+            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
         ):
+            email_cls.return_value.send.return_value = 1
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -64,7 +65,7 @@ class SendMailMembershipContactedNoteTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        send.assert_called()
+        email_cls.assert_called()
         self.assertTrue(
             Note.objects.filter(
                 membership_request=req,

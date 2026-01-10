@@ -210,6 +210,25 @@ TEMPLATES = [
             ],
         },
     },
+    {
+        # django-post-office inline images require the PostOfficeTemplates engine.
+        # See: https://github.com/ui/django-post_office#inlined-images
+        'NAME': 'post_office',
+        'BACKEND': 'post_office.template.backends.post_office.PostOfficeTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.contrib.auth.context_processors.auth',
+                'django.template.context_processors.debug',
+                'django.template.context_processors.i18n',
+                'django.template.context_processors.media',
+                'django.template.context_processors.static',
+                'django.template.context_processors.tz',
+                'django.template.context_processors.request',
+            ],
+        },
+    },
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
@@ -330,6 +349,7 @@ POST_OFFICE = {
     'MESSAGE_ID_ENABLED': True,
     'MAX_RETRIES': 4,
     'RETRY_INTERVAL': datetime.timedelta(minutes=5),
+    'TEMPLATE_ENGINE': 'post_office',
     'BACKENDS': {
         'default': 'django.core.mail.backends.smtp.EmailBackend' if DEBUG else 'django_ses.SESBackend',
         'smtp': 'django.core.mail.backends.smtp.EmailBackend',

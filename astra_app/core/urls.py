@@ -3,6 +3,7 @@ from django.urls import path
 from core import (
     views_elections,
     views_groups,
+    views_mail_images,
     views_membership,
     views_organizations,
     views_search,
@@ -153,6 +154,8 @@ urlpatterns = [
         views_templated_email.email_template_delete,
         name="email-template-delete",
     ),
+
+    path("email-tools/images/", views_mail_images.email_images, name="email-images"),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),

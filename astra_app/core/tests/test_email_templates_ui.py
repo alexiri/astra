@@ -126,6 +126,32 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(payload["html"], "<p>-name-</p>")
         self.assertEqual(payload["text"], "-name-")
 
+    def test_template_render_preview_endpoint_rewrites_inline_image_tag_to_url(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        image_url = "http://localhost:9000/astra-media/mail-images/logo.png"
+        html = (
+            "{% load post_office %}\n"
+            "<p><em>The AlmaLinux Team</em></p>\n"
+            f"<img src=\"{{% inline_image '{image_url}' %}}\" />\n"
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-render-preview"),
+                data={
+                    "subject": "Hello",
+                    "html_content": html,
+                    "text_content": "Plain text",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn(image_url, payload.get("html", ""))
+        self.assertNotIn("{% inline_image", payload.get("html", ""))
+
     def test_edit_page_uses_local_codemirror_assets(self) -> None:
         from post_office.models import EmailTemplate
 
