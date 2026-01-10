@@ -180,63 +180,67 @@
         </div>
       </div>
 
-      {% if can_post %}
-        <div class="card-footer">
-          <div
-            id="membership-notes-error-{{ membership_request.pk }}"
-            class="alert alert-danger py-2 px-3 mb-2 d-none"
-            role="alert"
-            aria-live="polite"
-          >
-            <div class="d-flex align-items-start justify-content-between" style="gap: .75rem;">
-              <div id="membership-notes-error-text-{{ membership_request.pk }}"></div>
-              <button
-                type="button"
-                class="close"
-                aria-label="Dismiss"
-                data-membership-notes-error-close="{{ membership_request.pk }}"
-              >
-                <span aria-hidden="true">&times;</span>
-              </button>
-            </div>
+      <div class="card-footer">
+        <div
+          id="membership-notes-error-{{ membership_request.pk }}"
+          class="alert alert-danger py-2 px-3 mb-2 d-none"
+          role="alert"
+          aria-live="polite"
+        >
+          <div class="d-flex align-items-start justify-content-between" style="gap: .75rem;">
+            <div id="membership-notes-error-text-{{ membership_request.pk }}"></div>
+            <button
+              type="button"
+              class="close"
+              aria-label="Dismiss"
+              data-membership-notes-error-close="{{ membership_request.pk }}"
+            >
+              <span aria-hidden="true">&times;</span>
+            </button>
           </div>
-          <form
-            id="membership-notes-form-{{ membership_request.pk }}"
-            method="post"
-            action="{% url 'membership-request-note-add' membership_request.pk %}"
-            data-membership-notes-form="{{ membership_request.pk }}"
-          >
-            {% csrf_token %}
-            <input type="hidden" name="next" value="{{ next_url }}">
-            <input type="hidden" name="note_action" value="message">
-            <div class="input-group">
-              <textarea
-                id="membership-notes-message-{{ membership_request.pk }}"
-                name="message"
-                placeholder="Type a note..."
-                class="form-control"
-                rows="2"
-              ></textarea>
-              <div class="input-group-append">
-                {% if compact %}
+        </div>
+        <form
+          id="membership-notes-form-{{ membership_request.pk }}"
+          method="post"
+          action="{{ post_url }}"
+          data-membership-notes-form="{{ membership_request.pk }}"
+        >
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ next_url }}">
+          {% if aggregate_target_type and aggregate_target %}
+            <input type="hidden" name="aggregate_target_type" value="{{ aggregate_target_type }}">
+            <input type="hidden" name="aggregate_target" value="{{ aggregate_target }}">
+          {% endif %}
+          <input type="hidden" name="note_action" value="message">
+          <div class="input-group">
+            <textarea
+              id="membership-notes-message-{{ membership_request.pk }}"
+              name="message"
+              placeholder="Type a note..."
+              class="form-control"
+              rows="2"
+            ></textarea>
+            <div class="input-group-append">
+              {% if compact %}
+                <button
+                  type="submit"
+                  class="btn btn-light border"
+                  title="Send (Ctrl+Enter)"
+                  aria-label="Send note"
+                >
+                  <i class="fas fa-paper-plane"></i>
+                </button>
+              {% else %}
+                <div class="btn-group" role="group" aria-label="Note actions">
                   <button
                     type="submit"
                     class="btn btn-light border"
                     title="Send (Ctrl+Enter)"
                     aria-label="Send note"
                   >
-                    <i class="fas fa-paper-plane"></i>
+                    <i class="fas fa-paper-plane mr-1"></i> Send
                   </button>
-                {% else %}
-                  <div class="btn-group" role="group" aria-label="Note actions">
-                    <button
-                      type="submit"
-                      class="btn btn-light border"
-                      title="Send (Ctrl+Enter)"
-                      aria-label="Send note"
-                    >
-                      <i class="fas fa-paper-plane mr-1"></i> Send
-                    </button>
+                  {% if can_vote %}
                     <button
                       type="button"
                       class="btn btn-light border"
@@ -255,12 +259,13 @@
                     >
                       <i class="fas fa-thumbs-down text-danger"></i>
                     </button>
-                  </div>
-                {% endif %}
-              </div>
+                  {% endif %}
+                </div>
+              {% endif %}
             </div>
+          </div>
 
-            {% if compact %}
+            {% if compact and can_vote %}
               <div class="d-flex w-100 mt-1" role="group" aria-label="Vote actions">
                 <button
                   type="button"
@@ -282,9 +287,8 @@
                 </button>
               </div>
             {% endif %}
-          </form>
-        </div>
-      {% endif %}
+        </form>
+      </div>
     </div>
 
     <script>

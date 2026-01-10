@@ -154,6 +154,7 @@ def membership_notes_aggregate_for_user(
     username: str,
     *,
     compact: bool = True,
+    next_url: str | None = None,
 ) -> SafeString | str:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
@@ -174,7 +175,11 @@ def membership_notes_aggregate_for_user(
     dom_id = _timeline_dom_id(f"user:{normalized_username}")
     dummy_request = SimpleNamespace(pk=dom_id)
 
-    resolved_next_url = http_request.get_full_path() if http_request is not None else ""
+    resolved_next_url = next_url
+    if resolved_next_url is None:
+        resolved_next_url = http_request.get_full_path() if http_request is not None else ""
+
+    post_url = reverse("membership-notes-aggregate-note-add")
 
     html = render_to_string(
         "core/_membership_notes.html",
@@ -188,7 +193,10 @@ def membership_notes_aggregate_for_user(
             "note_count": len(notes),
             "approvals": approvals,
             "disapprovals": disapprovals,
-            "can_post": False,
+            "can_vote": False,
+            "post_url": post_url,
+            "aggregate_target_type": "user",
+            "aggregate_target": normalized_username,
             "next_url": resolved_next_url,
         },
         request=http_request,
@@ -202,6 +210,7 @@ def membership_notes_aggregate_for_organization(
     organization_id: int,
     *,
     compact: bool = True,
+    next_url: str | None = None,
 ) -> SafeString | str:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
@@ -223,7 +232,11 @@ def membership_notes_aggregate_for_organization(
     dom_id = _timeline_dom_id(f"org:{organization_id}")
     dummy_request = SimpleNamespace(pk=dom_id)
 
-    resolved_next_url = http_request.get_full_path() if http_request is not None else ""
+    resolved_next_url = next_url
+    if resolved_next_url is None:
+        resolved_next_url = http_request.get_full_path() if http_request is not None else ""
+
+    post_url = reverse("membership-notes-aggregate-note-add")
 
     html = render_to_string(
         "core/_membership_notes.html",
@@ -237,7 +250,10 @@ def membership_notes_aggregate_for_organization(
             "note_count": len(notes),
             "approvals": approvals,
             "disapprovals": disapprovals,
-            "can_post": False,
+            "can_vote": False,
+            "post_url": post_url,
+            "aggregate_target_type": "org",
+            "aggregate_target": str(organization_id),
             "next_url": resolved_next_url,
         },
         request=http_request,
@@ -278,7 +294,9 @@ def membership_notes(
     membership_can_add = bool(context.get("membership_can_add", False))
     membership_can_change = bool(context.get("membership_can_change", False))
     membership_can_delete = bool(context.get("membership_can_delete", False))
-    can_post = membership_can_add or membership_can_change or membership_can_delete
+    can_vote = membership_can_add or membership_can_change or membership_can_delete
+
+    post_url = reverse("membership-request-note-add", args=[mr.pk])
 
     entries: list[dict[str, Any]] = []
     for n in notes:
@@ -324,7 +342,8 @@ def membership_notes(
             "note_count": len(notes),
             "approvals": approvals,
             "disapprovals": disapprovals,
-            "can_post": can_post,
+            "can_vote": can_vote,
+            "post_url": post_url,
             "next_url": resolved_next_url,
         },
         request=http_request,

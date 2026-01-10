@@ -17,13 +17,10 @@
         <form id="bulk-action-form" method="post" action="{% url 'membership-requests-bulk' %}" class="form-inline">
           {% csrf_token %}
           <div class="input-group input-group-sm">
-                      <div>{{ row.full_name }}</div>
+            <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
               <option value="">Bulk action…</option>
-                      <div>{{ r.requested_username }}</div>
+              <option value="accept">Accept</option>
               <option value="reject">Reject</option>
-                    {% if row.user_deleted %}
-                      <div class="text-muted small">(deleted)</div>
-                    {% endif %}
               <option value="ignore">Ignore</option>
             </select>
             <div class="input-group-append">
@@ -88,10 +85,26 @@
                   </a>
                 {% endif %}
 
+                {% if row.requested_by_username %}
+                  <div class="text-muted small">
+                    Requested by:
+                    <a href="{% url 'user-profile' row.requested_by_username %}">
+                      {% if row.requested_by_full_name %}
+                        {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                      {% else %}
+                        {{ row.requested_by_username }}
+                      {% endif %}
+                    </a>
+                    {% if row.requested_by_deleted %}
+                      <span class="text-muted">(deleted)</span>
+                    {% endif %}
+                  </div>
+                {% endif %}
+
                 <div class="mt-2">
                   {% membership_notes r compact=True %}
                 </div>
-                
+
               </td>
               <td>
                 {{ r.membership_type.name }}

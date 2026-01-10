@@ -1697,7 +1697,6 @@ class OrganizationAdmin(admin.ModelAdmin):
             )
             self.fields["logo"].label = "Logo upload for AlmaLinux Accounts"
             self.fields["additional_information"].label = "Please provide any additional information the Membership Committee should take into account"
-            self.fields["notes"].label = "Committee notes (private)"
 
             users = FreeIPAUser.all()
             users_by_username = {u.username: u for u in users if u.username}
@@ -1764,12 +1763,6 @@ class OrganizationAdmin(admin.ModelAdmin):
             "Additional Information",
             {
                 "fields": ("additional_information",),
-            },
-        ),
-        (
-            "Committee Notes",
-            {
-                "fields": ("notes",),
             },
         ),
         (

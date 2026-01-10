@@ -126,25 +126,6 @@
                 <div class="small text-muted">Membership Committee Notes</div>
                 <div class="mt-2">
                   {% membership_notes_aggregate_for_organization organization.pk compact=True %}
-
-                  {% if not pending_membership_level_request %}
-                    {% if organization.notes %}
-                      <div class="mt-3 mb-2">{{ organization.notes|linebreaksbr }}</div>
-                    {% else %}
-                      <div class="text-muted mt-3">No committee notes.</div>
-                    {% endif %}
-
-                    {% if membership_can_add or membership_can_change or membership_can_delete %}
-                      <form method="post" action="{% url 'organization-committee-notes-update' organization.pk %}">
-                        {% csrf_token %}
-                        <div class="form-group mb-2">
-                          <textarea class="form-control" name="notes" rows="4" placeholder="Add committee notes...">{{ organization.notes }}</textarea>
-                        </div>
-                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                      </form>
-                    {% endif %}
-                  {% endif %}
                 </div>
               </li>
             {% endif %}

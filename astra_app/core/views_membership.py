@@ -9,10 +9,9 @@ from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -360,12 +359,31 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
 def membership_requests(request: HttpRequest) -> HttpResponse:
     requests = (
         MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .prefetch_related(
+            Prefetch(
+                "logs",
+                queryset=MembershipLog.objects.filter(action=MembershipLog.Action.requested)
+                .only("actor_username", "membership_request_id", "created_at")
+                .order_by("created_at", "pk"),
+                to_attr="requested_logs",
+            )
+        )
         .filter(status=MembershipRequest.Status.pending)
         .order_by("requested_at")
     )
 
     request_rows: list[dict[str, object]] = []
     for r in requests:
+        requested_log = r.requested_logs[0] if r.requested_logs else None
+        requested_by_username = requested_log.actor_username if requested_log is not None else ""
+        requested_by_full_name = ""
+        requested_by_deleted = False
+        if requested_by_username:
+            requested_by_user = FreeIPAUser.get(requested_by_username)
+            requested_by_deleted = requested_by_user is None
+            if requested_by_user is not None:
+                requested_by_full_name = requested_by_user.full_name
+
         if r.requested_username == "":
             org = r.requested_organization
             request_rows.append(
@@ -374,6 +392,9 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                     "organization": org,
                     "organization_code": r.requested_organization_code,
                     "organization_name": r.requested_organization_name,
+                    "requested_by_username": requested_by_username,
+                    "requested_by_full_name": requested_by_full_name,
+                    "requested_by_deleted": requested_by_deleted,
                 }
             )
         else:
@@ -383,6 +404,9 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                     "r": r,
                     "full_name": fu.full_name if fu is not None else "",
                     "user_deleted": fu is None,
+                    "requested_by_username": requested_by_username,
+                    "requested_by_full_name": requested_by_full_name,
+                    "requested_by_deleted": requested_by_deleted,
                 }
             )
 
@@ -409,6 +433,21 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if target_user is not None:
             target_full_name = target_user.full_name
 
+    requested_log = (
+        req.logs.filter(action=MembershipLog.Action.requested)
+        .only("actor_username", "created_at")
+        .order_by("created_at", "pk")
+        .first()
+    )
+    requested_by_username = requested_log.actor_username if requested_log is not None else ""
+    requested_by_full_name = ""
+    requested_by_deleted = False
+    if requested_by_username:
+        requested_by_user = FreeIPAUser.get(requested_by_username)
+        requested_by_deleted = requested_by_user is None
+        if requested_by_user is not None:
+            requested_by_full_name = requested_by_user.full_name
+
     return render(
         request,
         "core/membership_request_detail.html",
@@ -417,6 +456,9 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "target_user": target_user,
             "target_full_name": target_full_name,
             "target_deleted": target_deleted,
+            "requested_by_username": requested_by_username,
+            "requested_by_full_name": requested_by_full_name,
+            "requested_by_deleted": requested_by_deleted,
         },
     )
 
@@ -426,7 +468,7 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
-    can_edit = any(
+    can_vote = any(
         request.user.has_perm(p)
         for p in (
             ASTRA_ADD_MEMBERSHIP,
@@ -434,8 +476,6 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
             ASTRA_DELETE_MEMBERSHIP,
         )
     )
-    if not can_edit:
-        raise PermissionDenied
 
     req = get_object_or_404(
         MembershipRequest.objects.select_related("membership_type", "requested_organization"),
@@ -461,6 +501,8 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
     try:
         user_message = ""
         if note_action == "vote_approve":
+            if not can_vote:
+                raise PermissionDenied
             add_note(
                 membership_request=req,
                 username=actor_username,
@@ -469,6 +511,8 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
             )
             user_message = "Recorded approve vote."
         elif note_action == "vote_disapprove":
+            if not can_vote:
+                raise PermissionDenied
             add_note(
                 membership_request=req,
                 username=actor_username,
@@ -508,6 +552,125 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
         if is_ajax:
             return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
 
+        messages.error(request, "Failed to add note.")
+        return redirect(redirect_to)
+
+
+@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
+    else:
+        redirect_to = reverse("users")
+
+    actor_username = str(request.user.get_username() or "").strip()
+    note_action = _normalize_str(request.POST.get("note_action")).lower()
+    message = str(request.POST.get("message") or "")
+    compact = _normalize_str(request.POST.get("compact")) in {"1", "true", "yes"}
+
+    is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
+
+    if note_action not in {"", "message"}:
+        raise PermissionDenied
+
+    target_type = _normalize_str(request.POST.get("aggregate_target_type")).lower()
+    target = _normalize_str(request.POST.get("aggregate_target"))
+    if not target_type or not target:
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Missing target."}, status=400)
+        messages.error(request, "Missing target.")
+        return redirect(redirect_to)
+
+    try:
+        latest: MembershipRequest | None
+        if target_type == "user":
+            latest = (
+                MembershipRequest.objects.filter(requested_username=target)
+                .filter(status=MembershipRequest.Status.pending)
+                .order_by("-requested_at", "-pk")
+                .first()
+            )
+            if latest is None:
+                latest = MembershipRequest.objects.filter(requested_username=target).order_by(
+                    "-requested_at", "-pk"
+                ).first()
+
+        elif target_type == "org":
+            org_id = int(target)
+            latest = (
+                MembershipRequest.objects.filter(requested_organization_id=org_id)
+                .filter(status=MembershipRequest.Status.pending)
+                .order_by("-requested_at", "-pk")
+                .first()
+            )
+            if latest is None:
+                latest = MembershipRequest.objects.filter(requested_organization_id=org_id).order_by(
+                    "-requested_at", "-pk"
+                ).first()
+        else:
+            if is_ajax:
+                return JsonResponse({"ok": False, "error": "Invalid target type."}, status=400)
+            messages.error(request, "Invalid target type.")
+            return redirect(redirect_to)
+
+        if latest is None:
+            if is_ajax:
+                return JsonResponse({"ok": False, "error": "No matching membership request."}, status=404)
+            messages.error(request, "No matching membership request.")
+            return redirect(redirect_to)
+
+        add_note(
+            membership_request=latest,
+            username=actor_username,
+            content=message,
+            action=None,
+        )
+
+        if is_ajax:
+            from core.templatetags.core_membership_notes import (
+                membership_notes_aggregate_for_organization,
+                membership_notes_aggregate_for_user,
+            )
+
+            tag_context = {"request": request, "membership_can_view": True}
+            if target_type == "user":
+                html = membership_notes_aggregate_for_user(
+                    tag_context,
+                    target,
+                    compact=compact,
+                    next_url=redirect_to,
+                )
+            else:
+                html = membership_notes_aggregate_for_organization(
+                    tag_context,
+                    int(target),
+                    compact=compact,
+                    next_url=redirect_to,
+                )
+
+            return JsonResponse({"ok": True, "html": str(html), "message": "Note added."})
+
+        messages.success(request, "Note added.")
+        return redirect(redirect_to)
+    except PermissionDenied:
+        raise
+    except Exception:
+        logger.exception(
+            "Failed to add aggregate membership note target_type=%s target=%s actor=%s",
+            target_type,
+            target,
+            actor_username,
+        )
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
         messages.error(request, "Failed to add note.")
         return redirect(redirect_to)
 

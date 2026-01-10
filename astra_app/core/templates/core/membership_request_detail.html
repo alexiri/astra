@@ -21,6 +21,22 @@
         <dt class="col-sm-3">Requested at</dt>
         <dd class="col-sm-9">{{ req.requested_at|date:"r" }}</dd>
 
+        {% if requested_by_username %}
+          <dt class="col-sm-3">Requested by</dt>
+          <dd class="col-sm-9">
+            <a href="{% url 'user-profile' requested_by_username %}">
+              {% if requested_by_full_name %}
+                {{ requested_by_full_name }} <span class="text-muted">({{ requested_by_username }})</span>
+              {% else %}
+                {{ requested_by_username }}
+              {% endif %}
+            </a>
+            {% if requested_by_deleted %}
+              <span class="text-muted">(deleted)</span>
+            {% endif %}
+          </dd>
+        {% endif %}
+
         <dt class="col-sm-3">Target</dt>
         <dd class="col-sm-9">
           {% if req.requested_username == '' %}

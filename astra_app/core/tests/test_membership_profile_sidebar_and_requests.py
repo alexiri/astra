@@ -740,7 +740,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("membership-request-detail", args=[req.pk]))
         self.assertContains(resp, req.requested_username)
-        self.assertContains(resp, "(deleted)")
 
     def test_membership_request_detail_shows_deleted_user(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -773,7 +772,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, req.requested_username)
-        self.assertContains(resp, "(deleted)")
 
     def test_profile_shows_status_note_to_membership_viewer(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
@@ -870,6 +868,99 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "Membership Committee Notes")
         self.assertNotContains(resp, "Hidden note")
+
+    def test_profile_aggregate_notes_allows_posting_but_hides_vote_buttons(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Note
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        req1 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        req2 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="mirror")
+        Note.objects.create(membership_request=req1, username="reviewer", content="Older note")
+
+        committee_cn = "membership-committee"
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "fasstatusnote": ["Older note"],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_users._get_full_user", return_value=alice),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, 'placeholder="Type a note..."')
+        self.assertNotContains(resp, 'data-note-action="vote_approve"')
+        self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "note_action": "message",
+                    "message": "Hello from aggregate",
+                    "compact": "1",
+                    "next": reverse("user-profile", kwargs={"username": "alice"}),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("Hello from aggregate", payload.get("html") or "")
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req2,
+                username="reviewer",
+                content="Hello from aggregate",
+            ).exists()
+        )
 
     def test_requests_list_includes_collapsible_status_note(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note

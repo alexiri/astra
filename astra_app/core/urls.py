@@ -46,11 +46,6 @@ urlpatterns = [
         name="organization-sponsorship-terminate",
     ),
     path("organization/<int:organization_id>/edit/", views_organizations.organization_edit, name="organization-edit"),
-    path(
-        "organization/<int:organization_id>/committee-notes/",
-        views_organizations.organization_committee_notes_update,
-        name="organization-committee-notes-update",
-    ),
 
     path("search/", views_search.global_search, name="global-search"),
 
@@ -170,6 +165,11 @@ urlpatterns = [
         "membership/requests/<int:pk>/notes/add/",
         views_membership.membership_request_note_add,
         name="membership-request-note-add",
+    ),
+    path(
+        "membership/notes/aggregate/add/",
+        views_membership.membership_notes_aggregate_note_add,
+        name="membership-notes-aggregate-note-add",
     ),
     path(
         "membership/requests/bulk/",

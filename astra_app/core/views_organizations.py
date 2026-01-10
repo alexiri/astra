@@ -13,7 +13,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
-from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+from core.membership_request_workflow import record_membership_request_created
+from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -190,16 +191,6 @@ class OrganizationEditForm(forms.ModelForm):
         return username
 
 
-class OrganizationCommitteeNotesForm(forms.ModelForm):
-    class Meta:
-        model = Organization
-        fields = ("notes",)
-
-    @override
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["notes"].required = False
-        self.fields["notes"].widget.attrs.setdefault("class", "form-control")
 
 
 def organizations(request: HttpRequest) -> HttpResponse:
@@ -424,38 +415,12 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
         status=MembershipRequest.Status.pending,
         responses=responses,
     )
-    MembershipLog.create_for_org_request(
-        actor_username=request.user.get_username(),
-        target_organization=organization,
-        membership_type=membership_type,
+    record_membership_request_created(
         membership_request=mr,
+        actor_username=str(request.user.get_username() or "").strip(),
+        send_submitted_email=False,
     )
     messages.success(request, "Sponsorship renewal request submitted for review.")
-    return redirect("organization-detail", organization_id=organization.pk)
-
-
-def organization_committee_notes_update(request: HttpRequest, organization_id: int) -> HttpResponse:
-    organization = get_object_or_404(Organization, pk=organization_id)
-
-    if not request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
-        raise Http404
-
-    can_edit = any(
-        request.user.has_perm(p)
-        for p in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP)
-    )
-    if not can_edit:
-        raise Http404
-
-    form = OrganizationCommitteeNotesForm(request.POST or None, instance=organization)
-    if request.method == "POST" and form.is_valid():
-        form.save()
-
-        redirect_to = str(request.POST.get("next") or "").strip()
-        if redirect_to and redirect_to.startswith("/"):
-            return redirect(redirect_to)
-        return redirect("organization-detail", organization_id=organization.pk)
-
     return redirect("organization-detail", organization_id=organization.pk)
 
 
@@ -533,11 +498,10 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                     responses=responses,
                 )
 
-                MembershipLog.create_for_org_request(
-                    actor_username=request.user.get_username(),
-                    target_organization=organization,
-                    membership_type=requested_membership_level,
+                record_membership_request_created(
                     membership_request=mr,
+                    actor_username=str(request.user.get_username() or "").strip(),
+                    send_submitted_email=False,
                 )
 
                 messages.success(request, "Sponsorship level change submitted for review.")

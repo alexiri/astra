@@ -180,7 +180,6 @@ class Organization(models.Model):
     )
 
     additional_information = models.TextField(blank=True, default="")
-    notes = models.TextField(blank=True, default="")
     representative = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:

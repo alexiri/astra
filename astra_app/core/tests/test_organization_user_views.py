@@ -51,7 +51,6 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            notes="secret internal",
             representative="bob",
         )
 
@@ -67,7 +66,6 @@ class OrganizationUserViewsTests(TestCase):
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "AlmaLinux")
             self.assertContains(resp, "Annual dues: $2,500 USD")
-            self.assertNotContains(resp, "secret internal")
 
             # Navbar should include Organizations link for authenticated users.
             self.assertContains(resp, reverse("organizations"))
@@ -233,7 +231,6 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            notes="secret internal",
             representative="bob",
         )
 
@@ -248,7 +245,6 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, "Annual dues: $2,500 USD")
             self.assertContains(resp, 'id="id_website_logo"')
             self.assertNotContains(resp, 'textarea name="website_logo"')
-            self.assertNotContains(resp, "secret internal")
 
             resp = self.client.post(
                 reverse("organization-edit", args=[org.pk]),
@@ -277,7 +273,6 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(org.business_contact_email, "hello@almalinux.org")
         self.assertEqual(org.website, "https://example.com/")
         self.assertEqual(org.additional_information, "Some extra info")
-        self.assertEqual(org.notes, "secret internal")
 
     @override_settings(
         STORAGES={
@@ -376,7 +371,7 @@ class OrganizationUserViewsTests(TestCase):
             org.logo.close()
 
     def test_membership_level_change_creates_request_until_approved(self) -> None:
-        from core.models import MembershipLog, MembershipRequest, MembershipType, Organization
+        from core.models import MembershipLog, MembershipRequest, MembershipType, Note, Organization
 
         MembershipType.objects.update_or_create(
             code="silver",
@@ -413,7 +408,6 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            notes="Committee note for AlmaLinux",
             representative="bob",
         )
 
@@ -450,6 +444,14 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(req.membership_type_id, "gold")
         self.assertEqual(req.requested_organization_id, org.pk)
         self.assertEqual(req.responses, [{"Additional Information": "Please consider our updated sponsorship level."}])
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="bob",
+                action={"type": "request_created"},
+            ).exists()
+        )
 
         req_log = MembershipLog.objects.get(action=MembershipLog.Action.requested, target_organization=org)
         self.assertEqual(req_log.membership_type_id, "gold")
@@ -549,6 +551,96 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Org note")
         self.assertContains(resp, f"(req. #{req.pk})")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+
+    def test_organization_aggregate_notes_allows_posting_but_hides_vote_buttons(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Note, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 3,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        req1 = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
+        req2 = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+            status=MembershipRequest.Status.pending,
+        )
+        Note.objects.create(membership_request=req1, username="reviewer", content="Older org note")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, 'placeholder="Type a note..."')
+        self.assertNotContains(resp, 'data-note-action="vote_approve"')
+        self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "org",
+                    "aggregate_target": str(org.pk),
+                    "note_action": "message",
+                    "message": "Hello org aggregate",
+                    "compact": "1",
+                    "next": reverse("organization-detail", args=[org.pk]),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("Hello org aggregate", payload.get("html") or "")
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req2,
+                username="reviewer",
+                content="Hello org aggregate",
+            ).exists()
+        )
 
 
     def test_sponsorship_expiration_display_and_extend_request(self) -> None:
@@ -915,7 +1007,6 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            notes="secret internal",
             representative="bob",
         )
 
@@ -952,76 +1043,8 @@ class OrganizationUserViewsTests(TestCase):
             membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            notes="secret internal",
             representative="bob",
         )
-
-    def test_membership_committee_can_view_and_edit_committee_notes(self) -> None:
-        from core.models import MembershipType, Organization
-
-        MembershipType.objects.update_or_create(
-            code="silver",
-            defaults={
-                "name": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-
-        org = Organization.objects.create(
-            name="AlmaLinux",
-            business_contact_name="Business Person",
-            business_contact_email="contact@almalinux.org",
-            pr_marketing_contact_name="PR Person",
-            pr_marketing_contact_email="pr@almalinux.org",
-            technical_contact_name="Tech Person",
-            technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
-            website_logo="https://example.com/logo-options",
-            website="https://almalinux.org/",
-            notes="secret internal",
-            representative="bob",
-        )
-
-        # Grant membership view+change to reviewer.
-        FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
-        FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_CHANGE_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
-
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
-            self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Committee Notes")
-            self.assertContains(resp, "secret internal")
-
-            resp = self.client.post(
-                reverse("organization-committee-notes-update", args=[org.pk]),
-                data={"notes": "updated notes", "next": reverse("organization-detail", args=[org.pk])},
-                follow=False,
-            )
-            self.assertEqual(resp.status_code, 302)
-
-        org.refresh_from_db()
-        self.assertEqual(org.notes, "updated notes")
-
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
-        self._login_as_freeipa_user("alice")
-
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            resp = self.client.get(reverse("organization-edit", args=[org.pk]))
-        self.assertEqual(resp.status_code, 404)
 
     def test_committee_with_change_membership_can_edit_org_and_manage_representatives(self) -> None:
         from core.models import MembershipType, Organization

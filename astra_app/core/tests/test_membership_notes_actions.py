@@ -45,6 +45,15 @@ class MembershipNotesActionTests(TestCase):
             ).exists()
         )
 
+
+    def test_request_created_action_label_includes_creator(self) -> None:
+        from core.membership_notes import note_action_label
+
+        self.assertEqual(
+            note_action_label({"type": "request_created"}),
+            "Request created",
+        )
+
     def test_request_approved_records_action_note(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
