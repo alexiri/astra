@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.email_context import organization_sponsor_email_context, user_email_context_from_user
+from core.membership_notes import add_note
 from core.models import (
     Membership,
     MembershipLog,
@@ -134,6 +135,20 @@ def record_membership_request_created(
         membership_request.requested_organization_id,
         send_submitted_email,
     )
+
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "request_created"},
+        )
+    except Exception:
+        # Notes are an additional durable timeline for committee review. Avoid
+        # failing the entire request flow if note persistence fails.
+        logger.exception(
+            "record_membership_request_created: failed to record action note request_id=%s",
+            membership_request.pk,
+        )
 
     if membership_request.requested_username:
         email_error: Exception | None = None
@@ -291,7 +306,6 @@ def approve_membership_request(
     actor_username: str,
     send_approved_email: bool,
     approved_email_template_name: str | None = None,
-    status_note: str = "",
     decided_at: datetime.datetime | None = None,
 ) -> MembershipLog:
     """Approve a membership request using the same code path as the UI.
@@ -304,7 +318,7 @@ def approve_membership_request(
     decided = decided_at or timezone.now()
 
     logger.debug(
-        "approve_membership_request: start request_id=%s actor=%r membership_type=%s requested_username=%r requested_org_id=%s decided_at=%s send_approved_email=%s status_note_present=%s",
+        "approve_membership_request: start request_id=%s actor=%r membership_type=%s requested_username=%r requested_org_id=%s decided_at=%s send_approved_email=%s",
         membership_request.pk,
         actor_username,
         membership_type.code,
@@ -312,7 +326,6 @@ def approve_membership_request(
         membership_request.requested_organization_id,
         decided,
         send_approved_email,
-        bool(str(status_note or "").strip()),
     )
 
     if membership_request.requested_username == "":
@@ -480,6 +493,18 @@ def approve_membership_request(
             membership_request.pk,
             log.pk,
         )
+
+        try:
+            add_note(
+                membership_request=membership_request,
+                username=actor_username,
+                action={"type": "request_approved"},
+            )
+        except Exception:
+            logger.exception(
+                "approve_membership_request: failed to record action note (org) request_id=%s",
+                membership_request.pk,
+            )
         return log
 
     if not membership_type.group_cn:
@@ -544,34 +569,6 @@ def approve_membership_request(
         target.username,
         membership_type.group_cn,
     )
-
-    note = str(status_note or "").strip()
-    if note:
-        # Note updates should only happen if the group membership succeeded.
-        logger.debug(
-            "approve_membership_request: set_status_note start request_id=%s target=%r",
-            membership_request.pk,
-            target.username,
-        )
-        try:
-            FreeIPAUser.set_status_note(target.username, note)
-        except Exception:
-            logger.exception(
-                "approve_membership_request: set_status_note failed request_id=%s target=%r",
-                membership_request.pk,
-                target.username,
-            )
-            raise
-        logger.debug(
-            "approve_membership_request: set_status_note success request_id=%s target=%r",
-            membership_request.pk,
-            target.username,
-        )
-    else:
-        logger.debug(
-            "approve_membership_request: no status note request_id=%s",
-            membership_request.pk,
-        )
 
     membership_request.status = MembershipRequest.Status.approved
     membership_request.decided_at = decided
@@ -659,6 +656,18 @@ def approve_membership_request(
         log.pk,
     )
 
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "request_approved"},
+        )
+    except Exception:
+        logger.exception(
+            "approve_membership_request: failed to record action note (user) request_id=%s",
+            membership_request.pk,
+        )
+
     return log
 
 
@@ -733,6 +742,18 @@ def reject_membership_request(
                 expires_at=None,
             )
 
+        try:
+            add_note(
+                membership_request=membership_request,
+                username=actor_username,
+                action={"type": "request_rejected"},
+            )
+        except Exception:
+            logger.exception(
+                "reject_membership_request: failed to record action note (org) request_id=%s",
+                membership_request.pk,
+            )
+
         return log, email_error
 
     target = FreeIPAUser.get(membership_request.requested_username)
@@ -770,6 +791,18 @@ def reject_membership_request(
         rejection_reason=reason,
         membership_request=membership_request,
     )
+
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "request_rejected"},
+        )
+    except Exception:
+        logger.exception(
+            "reject_membership_request: failed to record action note (user) request_id=%s",
+            membership_request.pk,
+        )
     return log, email_error
 
 
@@ -790,14 +823,28 @@ def ignore_membership_request(
     if membership_request.requested_username == "":
         org = membership_request.requested_organization
         if org is not None:
-            return MembershipLog.create_for_org_ignore(
+            log = MembershipLog.create_for_org_ignore(
                 actor_username=actor_username,
                 target_organization=org,
                 membership_type=membership_type,
                 membership_request=membership_request,
             )
 
-        return MembershipLog.objects.create(
+            try:
+                add_note(
+                    membership_request=membership_request,
+                    username=actor_username,
+                    action={"type": "request_ignored"},
+                )
+            except Exception:
+                logger.exception(
+                    "ignore_membership_request: failed to record action note (org) request_id=%s",
+                    membership_request.pk,
+                )
+
+            return log
+
+        log = MembershipLog.objects.create(
             actor_username=actor_username,
             target_username="",
             target_organization=None,
@@ -810,9 +857,37 @@ def ignore_membership_request(
             expires_at=None,
         )
 
-    return MembershipLog.create_for_ignore(
+        try:
+            add_note(
+                membership_request=membership_request,
+                username=actor_username,
+                action={"type": "request_ignored"},
+            )
+        except Exception:
+            logger.exception(
+                "ignore_membership_request: failed to record action note (org code) request_id=%s",
+                membership_request.pk,
+            )
+
+        return log
+
+    log = MembershipLog.create_for_ignore(
         actor_username=actor_username,
         target_username=membership_request.requested_username,
         membership_type=membership_type,
         membership_request=membership_request,
     )
+
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "request_ignored"},
+        )
+    except Exception:
+        logger.exception(
+            "ignore_membership_request: failed to record action note (user) request_id=%s",
+            membership_request.pk,
+        )
+
+    return log

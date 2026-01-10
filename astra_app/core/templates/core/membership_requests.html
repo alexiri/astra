@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load core_membership_notes %}
+
 {% block title %}Membership Requests{% endblock %}
 
 {% block header %}
@@ -71,29 +73,8 @@
                     {% endif %}
                   </div>
 
-                  {% if row.organization and row.organization.notes %}
-                    <details class="mt-1">
-                      <summary class="small text-muted">Membership Committee Notes</summary>
-                      <div class="mt-2">
-                        {% if membership_can_add or membership_can_change or membership_can_delete %}
-                          <form method="post" action="{% url 'organization-committee-notes-update' row.organization.pk %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                            <div class="form-group mb-2">
-                              <textarea
-                                name="notes"
-                                class="form-control form-control-sm"
-                                rows="3"
-                                placeholder="Enter a note for this organization"
-                              >{{ row.organization.notes }}</textarea>
-                            </div>
-                            <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
-                          </form>
-                        {% else %}
-                          <div class="text-muted small" style="white-space: pre-wrap;">{{ row.organization.notes }}</div>
-                        {% endif %}
-                      </div>
-                    </details>
+                  {% if membership_can_view %}
+                    {% membership_notes r compact=True %}
                   {% endif %}
                 {% elif r.requested_username %}
                   <div>
@@ -106,29 +87,8 @@
                     <div class="text-muted small">{{ row.full_name }}</div>
                   {% endif %}
 
-                  {% if row.status_note %}
-                    <details class="mt-1">
-                      <summary class="small text-muted">Membership Committee Notes</summary>
-                      <div class="mt-2">
-                        {% if membership_can_add or membership_can_change or membership_can_delete %}
-                          <form method="post" action="{% url 'membership-status-note-update' r.requested_username %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                            <div class="form-group mb-2">
-                              <textarea
-                                name="fasstatusnote"
-                                class="form-control form-control-sm"
-                                rows="3"
-                                placeholder="Enter a note for this user"
-                              >{{ row.status_note }}</textarea>
-                            </div>
-                            <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
-                          </form>
-                        {% else %}
-                          <div class="text-muted small" style="white-space: pre-wrap;">{{ row.status_note }}</div>
-                        {% endif %}
-                      </div>
-                    </details>
+                  {% if membership_can_view %}
+                    {% membership_notes r compact=True %}
                   {% endif %}
                 {% endif %}
 

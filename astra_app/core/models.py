@@ -9,6 +9,7 @@ from io import BytesIO
 from typing import override
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -332,6 +333,54 @@ class MembershipRequest(models.Model):
             code = self.requested_organization_code or (self.requested_organization_id or "")
             return f"org:{code} → {self.membership_type_id}"
         return f"{self.requested_username} → {self.membership_type_id}"
+
+
+class Note(models.Model):
+    """Membership committee notes and actions tied to a specific membership request."""
+
+    membership_request = models.ForeignKey(
+        MembershipRequest,
+        on_delete=models.CASCADE,
+        related_name="notes",
+    )
+    username = models.CharField(max_length=255)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    content = models.TextField(blank=True, null=True)
+    action = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["membership_request", "timestamp"], name="note_req_at"),
+            models.Index(fields=["membership_request", "username", "timestamp"], name="note_req_user_at"),
+        ]
+        ordering = ("timestamp", "pk")
+
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(content__isnull=False) | Q(action__isnull=False),
+                name="chk_note_content_or_action",
+            ),
+        ]
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        # Treat empty/whitespace-only content as absent.
+        if self.content is not None and str(self.content).strip() == "":
+            self.content = None
+        # Treat an empty dict/list as absent action.
+        if self.action in ({}, []):
+            self.action = None
+
+        super().save(*args, **kwargs)
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+
+        content_present = self.content is not None and str(self.content).strip() != ""
+        action_present = self.action is not None
+        if not content_present and not action_present:
+            raise ValidationError("A note must have content and/or an action.")
 
 
 class Membership(models.Model):

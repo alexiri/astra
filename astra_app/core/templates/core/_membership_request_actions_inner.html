@@ -44,13 +44,13 @@ Expected context:
     {% url 'send-mail' as send_mail_url %}
     <a
       class="btn btn-sm btn-outline-primary"
-      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_username|urlencode }}"
+      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_username|urlencode }}&membership_request_id={{ membership_request.pk }}"
     >Contact</a>
   {% elif membership_request.requested_organization and membership_request.requested_organization.representative %}
     {% url 'send-mail' as send_mail_url %}
     <a
       class="btn btn-sm btn-outline-primary"
-      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_organization.representative|urlencode }}"
+      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_organization.representative|urlencode }}&membership_request_id={{ membership_request.pk }}"
     >Contact</a>
   {% endif %}
 {% endif %}

@@ -21,6 +21,8 @@ from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import user_email_context_from_user
+from core.membership_notes import add_note
+from core.models import MembershipRequest
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.templated_email import (
     create_email_template_unique,
@@ -680,6 +682,23 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                         except Exception:
                             failures += 1
                             logger.exception("Send mail failed email=%s", to_email)
+
+                    if sent:
+                        raw_request_id = str(posted_extra_context.get("membership_request_id") or "").strip()
+                        if raw_request_id.isdigit():
+                            mr = MembershipRequest.objects.filter(pk=int(raw_request_id)).first()
+                            if mr is not None:
+                                try:
+                                    add_note(
+                                        membership_request=mr,
+                                        username=str(request.user.get_username() or "").strip(),
+                                        action={"type": "contacted"},
+                                    )
+                                except Exception:
+                                    logger.exception(
+                                        "Send mail contacted-note failed membership_request_id=%s",
+                                        raw_request_id,
+                                    )
 
                     if sent:
                         messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")

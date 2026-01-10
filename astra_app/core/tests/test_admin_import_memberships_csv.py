@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.membership import get_valid_memberships_for_username
-from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
+from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
 
 
 class AdminImportMembershipsCSVTests(TestCase):
@@ -70,7 +70,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True) as set_note,
         ):
             url = reverse("admin:core_membershipcsvimportlink_import")
             resp = self.client.post(
@@ -88,7 +87,7 @@ class AdminImportMembershipsCSVTests(TestCase):
         self.assertEqual(MembershipLog.objects.count(), 0)
         self.assertEqual(Membership.objects.count(), 0)
         self.assertEqual(MembershipRequest.objects.count(), 0)
-        set_note.assert_not_called()
+        self.assertEqual(Note.objects.count(), 0)
 
     def test_import_page_loads_on_get(self) -> None:
         self._login_as_freeipa_admin("alex")
@@ -158,7 +157,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True) as set_note,
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -200,8 +198,14 @@ class AdminImportMembershipsCSVTests(TestCase):
         req = MembershipRequest.objects.get(requested_username="alice", membership_type_id="individual")
         self.assertEqual(req.responses, [{"Contributions": "Because"}])
 
-        # Committee note applied.
-        set_note.assert_any_call("alice", "Imported note")
+        # Committee note stored on the membership request.
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="alex",
+                content="[Import] Imported note",
+            ).exists()
+        )
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             download_resp = self.client.get(download_url)
@@ -285,7 +289,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -373,7 +376,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -452,7 +454,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -534,7 +535,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -625,7 +625,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -723,7 +722,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
             patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
@@ -804,7 +802,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True, side_effect=RuntimeError("boom")),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True) as set_note,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")
             preview_resp = self.client.post(
@@ -828,7 +825,15 @@ class AdminImportMembershipsCSVTests(TestCase):
             resp = self.client.post(process_url, data=confirm_data, follow=False)
 
         self.assertEqual(resp.status_code, 302)
-        set_note.assert_not_called()
+        req = MembershipRequest.objects.filter(requested_username="alice", membership_type_id="individual").first()
+        if req is not None:
+            self.assertFalse(
+                Note.objects.filter(
+                    membership_request=req,
+                    username="alex",
+                    content="[Import] Imported note",
+                ).exists()
+            )
         self.assertFalse(
             Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
         )
@@ -890,7 +895,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
-            patch("core.membership_request_workflow.FreeIPAUser.set_status_note", autospec=True),
             patch("post_office.mail.send", autospec=True) as send_mail,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")

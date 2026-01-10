@@ -10,8 +10,9 @@ from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -20,6 +21,7 @@ from core.backends import FreeIPAUser
 from core.email_context import organization_sponsor_email_context
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username
+from core.membership_notes import add_note
 from core.membership_request_workflow import (
     approve_membership_request,
     ignore_membership_request,
@@ -105,12 +107,14 @@ def _custom_email_redirect(
         return redirect(redirect_to)
 
     to_type, to = recipient
+    merged_context = dict(extra_context)
+    merged_context.setdefault("membership_request_id", str(membership_request.pk))
     return redirect(
         _send_mail_url(
             to_type=to_type,
             to=to,
             template_name=template_name,
-            extra_context=extra_context,
+            extra_context=merged_context,
         )
     )
 
@@ -375,12 +379,10 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
         else:
             fu = FreeIPAUser.get(r.requested_username)
             full_name = fu.full_name if fu is not None else ""
-            status_note = fu.fasstatusnote if fu is not None else ""
             request_rows.append(
                 {
                     "r": r,
                     "full_name": full_name,
-                    "status_note": status_note,
                     "user_deleted": fu is None,
                 }
             )
@@ -421,7 +423,8 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
-def membership_status_note_update(request: HttpRequest, username: str) -> HttpResponse:
+@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
@@ -436,9 +439,10 @@ def membership_status_note_update(request: HttpRequest, username: str) -> HttpRe
     if not can_edit:
         raise PermissionDenied
 
-    target_username = _normalize_str(username)
-    if not target_username:
-        raise Http404("User not found")
+    req = get_object_or_404(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
+        pk=pk,
+    )
 
     next_url = str(request.POST.get("next") or "").strip()
     if next_url and url_has_allowed_host_and_scheme(
@@ -448,27 +452,67 @@ def membership_status_note_update(request: HttpRequest, username: str) -> HttpRe
     ):
         redirect_to = next_url
     else:
-        referer = str(request.META.get("HTTP_REFERER") or "").strip()
-        redirect_to = referer or reverse("user-profile", kwargs={"username": target_username})
+        redirect_to = reverse("membership-request-detail", args=[req.pk])
 
-        if redirect_to and not url_has_allowed_host_and_scheme(
-            url=redirect_to,
-            allowed_hosts={request.get_host()},
-            require_https=request.is_secure(),
-        ):
-            redirect_to = reverse("user-profile", kwargs={"username": target_username})
+    actor_username = str(request.user.get_username() or "").strip()
+    note_action = _normalize_str(request.POST.get("note_action")).lower()
+    message = str(request.POST.get("message") or "")
 
-    note = str(request.POST.get("fasstatusnote") or "")
+    is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
+
     try:
-        FreeIPAUser.set_status_note(target_username, note)
-    except Exception:
-        logger.exception("Failed to update fasstatusnote username=%s", target_username)
-        messages.error(request, "Failed to update note.")
+        user_message = ""
+        if note_action == "vote_approve":
+            add_note(
+                membership_request=req,
+                username=actor_username,
+                content=message,
+                action={"type": "vote", "value": "approve"},
+            )
+            user_message = "Recorded approve vote."
+        elif note_action == "vote_disapprove":
+            add_note(
+                membership_request=req,
+                username=actor_username,
+                content=message,
+                action={"type": "vote", "value": "disapprove"},
+            )
+            user_message = "Recorded disapprove vote."
+        else:
+            add_note(
+                membership_request=req,
+                username=actor_username,
+                content=message,
+                action=None,
+            )
+            user_message = "Note added."
+
+        if is_ajax:
+            from core.templatetags.core_membership_notes import membership_notes
+
+            notes_context = membership_notes(
+                {
+                    "request": request,
+                    "membership_can_add": request.user.has_perm(ASTRA_ADD_MEMBERSHIP),
+                    "membership_can_change": request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP),
+                    "membership_can_delete": request.user.has_perm(ASTRA_DELETE_MEMBERSHIP),
+                },
+                req,
+                compact=False,
+                next_url=redirect_to,
+            )
+            html = render_to_string("core/_membership_notes.html", notes_context, request=request)
+            return JsonResponse({"ok": True, "html": html, "message": user_message})
+
+        messages.success(request, user_message)
         return redirect(redirect_to)
+    except Exception:
+        logger.exception("Failed to add membership note request_pk=%s actor=%s", req.pk, actor_username)
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
 
-    messages.success(request, "Note updated.")
-    return redirect(redirect_to)
-
+        messages.error(request, "Failed to add note.")
+        return redirect(redirect_to)
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests_bulk(request: HttpRequest) -> HttpResponse:

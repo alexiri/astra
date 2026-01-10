@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 import json
-from urllib.parse import quote
 from unittest.mock import patch
+from urllib.parse import quote
 
 from django.test import TestCase
 from django.urls import reverse

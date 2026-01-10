@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load core_membership_notes %}
+
 {% block title %}Membership Request #{{ req.pk }}{% endblock %}
 
 {% block header %}
@@ -58,6 +60,11 @@
             <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
           {% endfor %}
         {% endfor %}
+      {% endif %}
+
+      {% if membership_can_view %}
+        <hr>
+        {% membership_notes req %}
       {% endif %}
 
       {% if req.status == 'pending' %}

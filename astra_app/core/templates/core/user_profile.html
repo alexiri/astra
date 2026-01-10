@@ -2,6 +2,7 @@
 
 {% load avatar_tags %}
 {% load core_chatnickname %}
+{% load core_membership_notes %}
 {% load tz %}
 
 {% block title %}Profile{% endblock %}
@@ -242,30 +243,15 @@
           </li>
         {% endfor %}
 
-        {% if fu.fasstatusnote and membership_can_view %}
+        {% if membership_can_view and membership_pending_requests %}
           <li class="list-group-item">
-            <details class="mt-1">
-              <summary class="small text-muted">Membership Committee Notes</summary>
-              <div class="mt-2">
-                {% if membership_can_add or membership_can_change or membership_can_delete %}
-                  <form method="post" action="{% url 'membership-status-note-update' fu.username %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                    <div class="form-group mb-2">
-                      <textarea
-                        name="fasstatusnote"
-                        class="form-control"
-                        rows="3"
-                        placeholder="Enter a note for this user"
-                      >{{ fu.fasstatusnote }}</textarea>
-                    </div>
-                    <button type="submit" class="btn btn-sm btn-outline-primary">Save note</button>
-                  </form>
-                {% else %}
-                  <div class="text-muted" style="white-space: pre-wrap;">{{ fu.fasstatusnote }}</div>
-                {% endif %}
-            </div>
-            </details>          
+            <div class="small text-muted mb-2">Membership Committee Notes</div>
+            {% for req in membership_pending_requests %}
+              <div class="mb-3">
+                <div class="small text-muted mb-1">Request #{{ req.request_id }} — {{ req.membership_type.name }}</div>
+                {% membership_notes req.request_id compact=True %}
+              </div>
+            {% endfor %}
           </li>
         {% endif %}
       </ul>

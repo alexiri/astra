@@ -167,6 +167,11 @@ urlpatterns = [
         name="membership-request-detail",
     ),
     path(
+        "membership/requests/<int:pk>/notes/add/",
+        views_membership.membership_request_note_add,
+        name="membership-request-note-add",
+    ),
+    path(
         "membership/requests/bulk/",
         views_membership.membership_requests_bulk,
         name="membership-requests-bulk",
@@ -208,12 +213,6 @@ urlpatterns = [
         "membership/manage/<str:username>/<str:membership_type_code>/terminate/",
         views_membership.membership_terminate,
         name="membership-terminate",
-    ),
-
-    path(
-        "membership/manage/<str:username>/status-note/",
-        views_membership.membership_status_note_update,
-        name="membership-status-note-update",
     ),
 
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),

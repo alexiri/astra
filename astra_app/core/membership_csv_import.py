@@ -19,6 +19,7 @@ from tablib import Dataset
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.backends import FreeIPAUser
 from core.forms_membership import MembershipRequestForm
+from core.membership_notes import add_note
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
 from core.views_utils import _normalize_str
@@ -816,9 +817,16 @@ class MembershipCSVImportResource(resources.ModelResource):
                 membership_request=instance,
                 actor_username=self._actor_username,
                 send_approved_email=False,
-                status_note=self._row_note(row),
                 decided_at=decided_at,
             )
+
+            csv_note = self._row_note(row)
+            if csv_note:
+                add_note(
+                    membership_request=instance,
+                    username=self._actor_username,
+                    content=f"[Import] {csv_note}",
+                )
 
             # requested_at is auto_now_add, so Django overwrites it on create.
             # For CSV imports we want request time to reflect the CSV start date

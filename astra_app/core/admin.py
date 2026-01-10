@@ -525,7 +525,7 @@ class IPAUserBaseForm(forms.ModelForm):
 
     class Meta:
         model = IPAUser
-        fields = ("username", "first_name", "last_name", "email", "fasstatusnote", "is_active")
+        fields = ("username", "first_name", "last_name", "email", "is_active")
 
     @override
     def __init__(self, *args, **kwargs):
@@ -548,7 +548,6 @@ class IPAUserBaseForm(forms.ModelForm):
                 self.initial.setdefault("first_name", freeipa.first_name or "")
                 self.initial.setdefault("last_name", freeipa.last_name or "")
                 self.initial.setdefault("email", freeipa.email or "")
-                self.initial.setdefault("fasstatusnote", freeipa.fasstatusnote or "")
                 self.initial.setdefault("is_active", freeipa.is_active)
                 current = sorted(freeipa.direct_groups_list)
                 # If the server returns groups outside our enumerated list,
@@ -1019,7 +1018,6 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             return
 
         desired_groups = set(form.cleaned_data.get("groups") or [])
-        status_note = form.cleaned_data.get("fasstatusnote") or ""
         password = form.cleaned_data.get("password")
 
         if not change:
@@ -1039,14 +1037,6 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             freeipa.email = form.cleaned_data.get("email") or ""
             freeipa.is_active = bool(form.cleaned_data.get("is_active"))
             freeipa.save()
-
-        # Persist membership-status note separately to avoid mixing it into the
-        # name/email update logic and to keep the FreeIPA call minimal.
-        try:
-            FreeIPAUser.set_status_note(username, status_note)
-        except Exception as e:
-            logger.exception("Failed to update fasstatusnote username=%s", username)
-            raise FreeIPAOperationFailed(str(e))
 
         current_groups = set(freeipa.direct_groups_list)
         for g in sorted(desired_groups - current_groups):

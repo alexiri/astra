@@ -61,7 +61,7 @@ class MembershipRequestContactButtonTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Contact")
-        expected = reverse("send-mail") + "?type=users&to=alice"
+        expected = reverse("send-mail") + f"?type=users&to=alice&membership_request_id={req.pk}"
         self.assertContains(resp, f'href="{expected}')
 
     def test_contact_button_links_to_send_mail_for_org_representative(self) -> None:
@@ -91,5 +91,5 @@ class MembershipRequestContactButtonTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Contact")
-        expected = reverse("send-mail") + "?type=users&to=orgrep"
+        expected = reverse("send-mail") + f"?type=users&to=orgrep&membership_request_id={req.pk}"
         self.assertContains(resp, f'href="{expected}')

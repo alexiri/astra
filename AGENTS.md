@@ -74,6 +74,11 @@
   variable aliases or comments about backward compatibility) UNLESS the user has
   confirmed that it is necessary.
 
+## Template Coding Guidelines
+
+- Use `{% empty %}` in templates, instead of `{% if %}{% for _ in _ %}{% endfor %}{% else %}`
+- Don't use javascript confirmations, there are modals defined in `_modal_*.html`
+
 ## DRY + Single Source of Truth (required)
 
 Before introducing new helpers/constants:
