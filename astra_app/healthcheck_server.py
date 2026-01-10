@@ -9,7 +9,6 @@ import logging
 import os
 import socketserver
 import sys
-import traceback
 from pathlib import Path
 
 # Add parent directory to path for Django imports
@@ -20,7 +19,8 @@ import django
 
 django.setup()
 
-from django.db import connection
+# Must run after django.setup() so settings are loaded.
+from django.db import connection  # noqa: E402
 
 logger = logging.getLogger('healthcheck_server')
 
