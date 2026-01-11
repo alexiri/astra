@@ -53,7 +53,7 @@ groups = {
 # Connect to IPA
 print(f"Connecting to IPA at {IPA_HOST}...")
 ipa = python_freeipa.ClientLegacy(
-    host=IPA_HOST, 
+    host=IPA_HOST,
     verify_ssl=CA_CERT_PATH
 )
 ipa.login(IPA_ADMIN_USER, IPA_ADMIN_PASSWORD)
@@ -101,7 +101,7 @@ for x in range(num_users):
     last_name = fake.last_name()
     username = first_name + last_name
     fullname = first_name + " " + last_name
-    
+
     print(f"Adding user {username} - {fullname}")
     with suppress(python_freeipa.exceptions.DuplicateEntry):
         ipa.user_add(
@@ -114,14 +114,16 @@ for x in range(num_users):
             fasircnick=[username, username + "_"],
             faslocale="en-US",
             fastimezone="UTC",
-            fasstatusnote="active",
+            # In dev, SELF_SERVICE_ADDRESS_COUNTRY_ATTR defaults to fasstatusnote.
+            # Use a valid ISO 3166-1 alpha-2 code so the app isn't blocked by compliance gating.
+            fasstatusnote="US",
             fasgpgkeyid=[],
         )
 
         # Set password (required for initial setup)
         untouched_ipa.change_password(
-            username, 
-            new_password=USER_PASSWORD, 
+            username,
+            new_password=USER_PASSWORD,
             old_password=USER_PASSWORD
         )
 
@@ -145,8 +147,8 @@ for x in range(num_users):
                 # Add member manager (sponsor) 30% of the time
                 if rando(30):
                     ipa._request(
-                        "group_add_member_manager", 
-                        groupname, 
+                        "group_add_member_manager",
+                        groupname,
                         {"user": username}
                     )
 
