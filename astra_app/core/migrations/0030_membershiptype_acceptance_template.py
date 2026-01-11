@@ -2,124 +2,10 @@
 
 from __future__ import annotations
 
-import re
-from html.parser import HTMLParser
-from typing import override
-
 import django.db.models.deletion
 from django.db import migrations, models
 
-
-class _TextFromHTMLParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self._parts: list[str] = []
-        self._ignore_depth = 0
-        self._anchor_stack: list[tuple[str | None, list[str]]] = []
-
-    def _append_text(self, text: str) -> None:
-        if not text:
-            return
-        # Normalize whitespace but keep intentional newlines added by tags.
-        cleaned = re.sub(r"\s+", " ", text)
-        if not cleaned.strip():
-            return
-        self._parts.append(cleaned)
-
-    def _ensure_newline(self) -> None:
-        if not self._parts:
-            return
-        last = self._parts[-1]
-        if last.endswith("\n"):
-            return
-        self._parts.append("\n")
-
-    @property
-    def text(self) -> str:
-        raw = "".join(self._parts)
-        raw = raw.replace("\xa0", " ")
-        # Clean up spaces around newlines.
-        raw = re.sub(r"[ \t]+\n", "\n", raw)
-        raw = re.sub(r"\n[ \t]+", "\n", raw)
-        # Collapse excessive blank lines.
-        raw = re.sub(r"\n{3,}", "\n\n", raw)
-        return raw.strip()
-
-    @override
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in {"script", "style"}:
-            self._ignore_depth += 1
-            return
-        if self._ignore_depth:
-            return
-
-        if tag == "br":
-            self._ensure_newline()
-            return
-        if tag in {"p", "div", "section", "header", "footer", "tr", "li", "ul", "ol", "h1", "h2", "h3"}:
-            self._ensure_newline()
-            return
-        if tag in {'b', 'strong'}:
-            self._append_text("**")
-            return
-        if tag == 'em':
-            self._append_text("-- ")
-            return
-        if tag == "a":
-            href: str | None = None
-            for k, v in attrs:
-                if k == "href" and v:
-                    href = v
-                    break
-            self._anchor_stack.append((href, []))
-
-    @override
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"script", "style"}:
-            if self._ignore_depth:
-                self._ignore_depth -= 1
-            return
-        if tag in {'b', 'strong'}:
-            self._append_text("**")
-            return
-        if self._ignore_depth:
-            return
-
-        if tag in {"p", "div", "section", "header", "footer", "tr", "li", "ul", "ol", "h1", "h2", "h3"}:
-            self._ensure_newline()
-            return
-
-        if tag == "a" and self._anchor_stack:
-            href, chunks = self._anchor_stack.pop()
-            link_text = re.sub(r"\s+", " ", "".join(chunks)).strip()
-
-            if link_text and href:
-                self._append_text(f"{link_text} ({href})")
-                return
-            if link_text:
-                self._append_text(link_text)
-                return
-            if href:
-                self._append_text(href)
-
-    @override
-    def handle_data(self, data: str) -> None:
-        if self._ignore_depth:
-            return
-
-        if self._anchor_stack:
-            _href, chunks = self._anchor_stack[-1]
-            chunks.append(data)
-            return
-
-        self._append_text(data)
-
-
-def _text_from_html(html_content: str) -> str:
-    parser = _TextFromHTMLParser()
-    parser.feed(html_content or "")
-    parser.close()
-    return parser.text
+from core.migration_helpers.email_template_text import text_from_html
 
 
 def create_membership_approval_templates(apps, schema_editor) -> None:
@@ -237,7 +123,7 @@ def create_membership_approval_templates(apps, schema_editor) -> None:
         name = str(spec["name"])
         subject = str(spec["subject"])
         html_content = str(spec["html_content"])
-        content = _text_from_html(html_content)
+        content = text_from_html(html_content)
 
         tpl, _created = EmailTemplate.objects.update_or_create(
             name=name,
