@@ -1,0 +1,91 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Your Membership Request #{{ req.pk }}{% endblock %}
+
+{% block header %}
+  <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
+    <h1 class="m-0">Your Membership Request #{{ req.pk }}</h1>
+    <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-sm btn-outline-secondary">Back to profile</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <dl class="row mb-0">
+        <dt class="col-sm-3">Status</dt>
+        <dd class="col-sm-9">{{ req.get_status_display }}</dd>
+
+        <dt class="col-sm-3">Requested at</dt>
+        <dd class="col-sm-9">{{ req.requested_at|date:"r" }}</dd>
+
+        <dt class="col-sm-3">Type</dt>
+        <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
+
+        {% if req.on_hold_at %}
+          <dt class="col-sm-3">On hold since</dt>
+          <dd class="col-sm-9">{{ req.on_hold_at|date:"r" }}</dd>
+        {% endif %}
+      </dl>
+
+      {% if req.status == 'on_hold' %}
+        <hr>
+        <div class="callout callout-danger">
+          We sent you an email{% if user_email %} to <strong>{{ user_email }}</strong>{% endif %} asking for clarifications.
+          Please update your request below and submit it to resume review.
+        </div>
+
+        <form method="post" novalidate>
+          {% csrf_token %}
+
+          {% if form.non_field_errors %}
+            <div class="alert alert-danger" role="alert">
+              {{ form.non_field_errors }}
+            </div>
+          {% endif %}
+
+          {% for field in form %}
+            <div class="mb-3">
+              {{ field.label_tag }}
+              <div class="mt-1">{{ field }}</div>
+              {% if field.errors %}
+                <div class="text-danger small">{{ field.errors }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+
+          <div class="d-flex justify-content-between">
+            <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-secondary">Cancel</a>
+            <button
+              type="submit"
+              class="btn btn-outline-danger"
+              formaction="{% url 'membership-request-rescind' req.pk %}"
+              formnovalidate
+              title="Cancel your membership request"
+            >Rescind request</button>
+            <button type="submit" class="btn btn-primary">Submit request</button>
+          </div>
+        </form>
+      {% else %}
+        {% if req.responses %}
+          <hr>
+          <h6 class="text-muted">Request responses</h6>
+          {% for item in req.responses %}
+            {% for k,v in item.items %}
+              <div class="small text-muted font-weight-bold">{{ k }}</div>
+              <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+            {% endfor %}
+          {% endfor %}
+        {% endif %}
+
+        {% if req.status == 'pending' %}
+          <hr>
+          <form method="post" action="{% url 'membership-request-rescind' req.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-danger" title="Cancel your membership request">Rescind request</button>
+          </form>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

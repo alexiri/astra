@@ -9,7 +9,11 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.email_context import organization_sponsor_email_context, user_email_context_from_user
+from core.email_context import (
+    freeform_message_email_context,
+    organization_sponsor_email_context,
+    user_email_context_from_user,
+)
 from core.membership_notes import add_note
 from core.models import (
     Membership,
@@ -327,6 +331,9 @@ def approve_membership_request(
         decided,
         send_approved_email,
     )
+
+    if membership_request.status != MembershipRequest.Status.pending:
+        raise ValidationError("Only pending requests can be approved")
 
     if membership_request.requested_username == "":
         org = membership_request.requested_organization
@@ -682,6 +689,9 @@ def reject_membership_request(
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
 
+    if membership_request.status not in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}:
+        raise ValidationError("Only pending or on-hold requests can be rejected")
+
     reason = str(rejection_reason or "").strip()
     if reason:
         membership_request.responses = [{"Rejection reason": reason}]
@@ -708,7 +718,7 @@ def reject_membership_request(
                         **(organization_sponsor_email_context(organization=org) if org is not None else {}),
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
-                        "rejection_reason": reason,
+                        **freeform_message_email_context(key="rejection_reason", value=reason),
                     },
                 )
             except Exception as e:
@@ -773,7 +783,7 @@ def reject_membership_request(
                     **user_email_context_from_user(user=target),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
-                    "rejection_reason": reason,
+                    **freeform_message_email_context(key="rejection_reason", value=reason),
                 },
             )
         except Exception as e:
@@ -814,6 +824,9 @@ def ignore_membership_request(
 ) -> MembershipLog:
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
+
+    if membership_request.status not in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}:
+        raise ValidationError("Only pending or on-hold requests can be ignored")
 
     membership_request.status = MembershipRequest.Status.ignored
     membership_request.decided_at = decided
@@ -887,6 +900,273 @@ def ignore_membership_request(
     except Exception:
         logger.exception(
             "ignore_membership_request: failed to record action note (user) request_id=%s",
+            membership_request.pk,
+        )
+
+    return log
+
+
+def put_membership_request_on_hold(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+    rfi_message: str,
+    send_rfi_email: bool,
+    application_url: str,
+    held_at: datetime.datetime | None = None,
+) -> tuple[MembershipLog, Exception | None]:
+    """Move a pending request to on-hold and (optionally) email an RFI.
+
+    Valid transitions:
+    - pending -> on_hold
+    """
+
+    membership_type = membership_request.membership_type
+    now = held_at or timezone.now()
+
+    if membership_request.status != MembershipRequest.Status.pending:
+        raise ValidationError("Only pending requests can be put on hold")
+
+    message = str(rfi_message or "").strip()
+
+    membership_request.status = MembershipRequest.Status.on_hold
+    membership_request.on_hold_at = now
+    membership_request.save(update_fields=["status", "on_hold_at"])
+
+    email_error: Exception | None = None
+
+    if membership_request.requested_username == "":
+        org = membership_request.requested_organization
+        representative_username = org.representative if org is not None else ""
+        representative = FreeIPAUser.get(representative_username) if representative_username else None
+
+        recipient_email = ""
+        user_context: dict[str, str] = {}
+        if representative is not None and representative.email:
+            recipient_email = representative.email
+            user_context = user_email_context_from_user(user=representative)
+        elif org is not None:
+            recipient_email = org.primary_contact_email()
+
+        if send_rfi_email and recipient_email:
+            try:
+                post_office.mail.send(
+                    recipients=[recipient_email],
+                    sender=settings.DEFAULT_FROM_EMAIL,
+                    template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+                    context={
+                        **user_context,
+                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
+                        **(organization_sponsor_email_context(organization=org) if org is not None else {}),
+                        "membership_type": membership_type.name,
+                        "membership_type_code": membership_type.code,
+                        **freeform_message_email_context(key="rfi_message", value=message),
+                        "application_url": application_url,
+                    },
+                )
+            except Exception as e:
+                logger.exception(
+                    "put_membership_request_on_hold: sending RFI email failed (org) request_id=%s org_id=%s rep=%r",
+                    membership_request.pk,
+                    org.pk if org is not None else None,
+                    representative_username,
+                )
+                email_error = e
+
+        log = MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=org,
+            target_organization_code=str(org.pk) if org is not None else (membership_request.requested_organization_code or ""),
+            target_organization_name=org.name if org is not None else (membership_request.requested_organization_name or ""),
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=MembershipLog.Action.on_hold,
+            expires_at=None,
+        )
+    else:
+        target = FreeIPAUser.get(membership_request.requested_username)
+        if send_rfi_email and target is not None and target.email:
+            try:
+                post_office.mail.send(
+                    recipients=[target.email],
+                    sender=settings.DEFAULT_FROM_EMAIL,
+                    template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+                    context={
+                        **user_email_context_from_user(user=target),
+                        "membership_type": membership_type.name,
+                        "membership_type_code": membership_type.code,
+                        **freeform_message_email_context(key="rfi_message", value=message),
+                        "application_url": application_url,
+                    },
+                )
+            except Exception as e:
+                logger.exception(
+                    "put_membership_request_on_hold: sending RFI email failed (user) request_id=%s target=%r",
+                    membership_request.pk,
+                    membership_request.requested_username,
+                )
+                email_error = e
+
+        log = MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_username=membership_request.requested_username,
+            target_organization=None,
+            target_organization_code="",
+            target_organization_name="",
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=MembershipLog.Action.on_hold,
+        )
+
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            content=message,
+            action={"type": "request_on_hold"},
+        )
+    except Exception:
+        logger.exception(
+            "put_membership_request_on_hold: failed to record action note request_id=%s",
+            membership_request.pk,
+        )
+
+    return log, email_error
+
+
+def resubmit_membership_request(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+    updated_responses: list[dict[str, str]],
+    resubmitted_at: datetime.datetime | None = None,
+) -> MembershipLog:
+    """Update a request's answers and move it from on-hold back to pending."""
+
+    if membership_request.status != MembershipRequest.Status.on_hold:
+        raise ValidationError("Only on-hold requests can be resubmitted")
+
+    def _normalized_responses(responses: list[dict[str, str]] | None) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        for item in responses or []:
+            if not isinstance(item, dict):
+                continue
+            for question, answer in item.items():
+                question_s = str(question or "").strip()
+                answer_s = str(answer or "").strip()
+                if question_s and answer_s:
+                    out.append({question_s: answer_s})
+        return out
+
+    if _normalized_responses(membership_request.responses) == _normalized_responses(updated_responses):
+        raise ValidationError("Please update your request before resubmitting it")
+
+    membership_request.responses = updated_responses
+    membership_request.status = MembershipRequest.Status.pending
+    membership_request.on_hold_at = None
+    membership_request.save(update_fields=["responses", "status", "on_hold_at"])
+
+    membership_type = membership_request.membership_type
+    if membership_request.requested_username == "":
+        org = membership_request.requested_organization
+        log = MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=org,
+            target_organization_code=str(org.pk) if org is not None else (membership_request.requested_organization_code or ""),
+            target_organization_name=org.name if org is not None else (membership_request.requested_organization_name or ""),
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=MembershipLog.Action.resubmitted,
+            expires_at=None,
+        )
+    else:
+        log = MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_username=membership_request.requested_username,
+            target_organization=None,
+            target_organization_code="",
+            target_organization_name="",
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=MembershipLog.Action.resubmitted,
+        )
+
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "request_resubmitted"},
+        )
+    except Exception:
+        logger.exception(
+            "resubmit_membership_request: failed to record action note request_id=%s",
+            membership_request.pk,
+        )
+
+    return log
+
+
+def rescind_membership_request(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+    rescinded_at: datetime.datetime | None = None,
+) -> MembershipLog:
+    """Allow the requester to rescind a pending request."""
+
+    now = rescinded_at or timezone.now()
+
+    if membership_request.status not in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}:
+        raise ValidationError("Only pending or on-hold requests can be rescinded")
+
+    membership_request.status = MembershipRequest.Status.rescinded
+    membership_request.decided_at = now
+    membership_request.decided_by_username = actor_username
+    membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
+
+    membership_type = membership_request.membership_type
+    if membership_request.requested_username == "":
+        org = membership_request.requested_organization
+        log = MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_username="",
+            target_organization=org,
+            target_organization_code=str(org.pk) if org is not None else (membership_request.requested_organization_code or ""),
+            target_organization_name=org.name if org is not None else (membership_request.requested_organization_name or ""),
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=MembershipLog.Action.rescinded,
+            expires_at=None,
+        )
+    else:
+        log = MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_username=membership_request.requested_username,
+            target_organization=None,
+            target_organization_code="",
+            target_organization_name="",
+            membership_type=membership_type,
+            membership_request=membership_request,
+            requested_group_cn=membership_type.group_cn,
+            action=MembershipLog.Action.rescinded,
+        )
+
+    try:
+        add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "request_rescinded"},
+        )
+    except Exception:
+        logger.exception(
+            "rescind_membership_request: failed to record action note request_id=%s",
             membership_request.pk,
         )
 

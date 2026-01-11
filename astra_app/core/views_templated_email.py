@@ -3,6 +3,7 @@ from __future__ import annotations
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
+from django.core.exceptions import ValidationError
 from django.db.models.deletion import ProtectedError
 from django.http import HttpRequest, JsonResponse
 from django.http.response import Http404
@@ -19,6 +20,7 @@ from core.templated_email import (
     render_templated_email_preview,
     render_templated_email_preview_response,
     update_email_template,
+    validate_email_subject_no_folding,
 )
 
 _MANAGE_TEMPLATE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL})
@@ -45,6 +47,11 @@ class EmailTemplateManageForm(forms.Form):
 
     def clean_description(self) -> str:
         return str(self.cleaned_data.get("description") or "").strip()
+
+    def clean_subject(self) -> str:
+        subject = str(self.cleaned_data.get("subject") or "").strip()
+        validate_email_subject_no_folding(subject)
+        return subject
 
 
 @require_safe
@@ -245,12 +252,16 @@ def email_template_save(request: HttpRequest) -> JsonResponse:
     if template is None:
         return JsonResponse({"ok": False, "error": "Template not found"}, status=404)
 
-    update_email_template(
-        template=template,
-        subject=str(request.POST.get("subject") or ""),
-        html_content=str(request.POST.get("html_content") or ""),
-        text_content=str(request.POST.get("text_content") or ""),
-    )
+    try:
+        update_email_template(
+            template=template,
+            subject=str(request.POST.get("subject") or ""),
+            html_content=str(request.POST.get("html_content") or ""),
+            text_content=str(request.POST.get("text_content") or ""),
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        return JsonResponse({"ok": False, "error": message}, status=400)
 
     return JsonResponse({"ok": True, "id": template.pk, "name": template.name})
 
@@ -262,11 +273,15 @@ def email_template_save_as(request: HttpRequest) -> JsonResponse:
     if not raw_name:
         return JsonResponse({"ok": False, "error": "name is required"}, status=400)
 
-    template = create_email_template_unique(
-        raw_name=raw_name,
-        subject=str(request.POST.get("subject") or ""),
-        html_content=str(request.POST.get("html_content") or ""),
-        text_content=str(request.POST.get("text_content") or ""),
-    )
+    try:
+        template = create_email_template_unique(
+            raw_name=raw_name,
+            subject=str(request.POST.get("subject") or ""),
+            html_content=str(request.POST.get("html_content") or ""),
+            text_content=str(request.POST.get("text_content") or ""),
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        return JsonResponse({"ok": False, "error": message}, status=400)
 
     return JsonResponse({"ok": True, "id": template.pk, "name": template.name})

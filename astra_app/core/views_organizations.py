@@ -337,7 +337,10 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
 
     pending_membership_level_request = (
         MembershipRequest.objects.select_related("membership_type")
-        .filter(requested_organization=organization, status=MembershipRequest.Status.pending)
+        .filter(
+            requested_organization=organization,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
         .order_by("-requested_at")
         .first()
     )

@@ -7,7 +7,12 @@
 {% block header %}
   <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
     <h1 class="m-0">Membership Request #{{ req.pk }}</h1>
-    <a href="{% url 'membership-requests' %}" class="btn btn-sm btn-outline-secondary">Back to requests</a>
+    <div class="d-flex align-items-center" style="gap: .5rem;">
+      {% if contact_url %}
+        <a href="{{ contact_url }}" class="btn btn-sm btn-outline-primary">Contact</a>
+      {% endif %}
+      <a href="{% url 'membership-requests' %}" class="btn btn-sm btn-outline-secondary">Back to requests</a>
+    </div>
   </div>
 {% endblock %}
 
@@ -44,24 +49,30 @@
           </dd>
         {% endif %}
 
-        <dt class="col-sm-3">Target</dt>
-        <dd class="col-sm-9">
-          {% if req.requested_username == '' %}
-            {% if req.requested_organization %}
-              <a href="{% url 'organization-detail' req.requested_organization.pk %}">{{ req.requested_organization.name }}</a>
+        {% if req.requested_username == '' or not requested_by_username or req.requested_username != requested_by_username %}
+          <dt class="col-sm-3">Requested for</dt>
+          <dd class="col-sm-9">
+            {% if req.requested_username == '' %}
+              {% if req.requested_organization %}
+                <a href="{% url 'organization-detail' req.requested_organization.pk %}">{{ req.requested_organization.name }}</a>
+              {% else %}
+                <span>{{ req.requested_organization_name }}</span>
+                <span class="text-muted">(deleted)</span>
+              {% endif %}
             {% else %}
-              <span>{{ req.requested_organization_name }}</span>
-              <span class="text-muted">(deleted)</span>
+              <a href="{% url 'user-profile' req.requested_username %}">
+                {% if target_full_name %}
+                  {{ target_full_name }} <span class="text-muted">({{ req.requested_username }})</span>
+                {% else %}
+                  {{ req.requested_username }}
+                {% endif %}
+              </a>
+              {% if target_deleted %}
+                <span class="text-muted">(deleted)</span>
+              {% endif %}
             {% endif %}
-          {% else %}
-            <a href="{% url 'user-profile' req.requested_username %}">{{ req.requested_username }}</a>
-            {% if target_full_name %}
-              <span class="text-muted">({{ target_full_name }})</span>
-            {% elif target_deleted %}
-              <span class="text-muted">(deleted)</span>
-            {% endif %}
-          {% endif %}
-        </dd>
+          </dd>
+        {% endif %}
 
         <dt class="col-sm-3">Type</dt>
         <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
@@ -93,7 +104,7 @@
         {% membership_notes req %}
       {% endif %}
 
-      {% if req.status == 'pending' %}
+      {% if req.status == 'pending' or req.status == 'on_hold' %}
         <hr>
         <div class="membership-request-actions membership-request-actions--detail">
           {% include 'core/_membership_request_actions.html' with request=req %}

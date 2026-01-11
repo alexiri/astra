@@ -106,6 +106,53 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(delete_resp.status_code, 200)
         self.assertFalse(EmailTemplate.objects.filter(pk=tpl.pk).exists())
 
+    def test_create_rejects_subject_that_would_be_header_folded(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        too_long_subject = "Action required: more information needed for your membership application"
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-create"),
+                data={
+                    "name": "created-long-subject",
+                    "description": "Created",
+                    "subject": too_long_subject,
+                    "html_content": "<p>Hello</p>",
+                    "text_content": "Hello",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Subject is too long")
+        self.assertFalse(EmailTemplate.objects.filter(name="created-long-subject").exists())
+
+    def test_save_as_rejects_subject_that_would_be_header_folded(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        too_long_subject = "Action required: more information needed for your membership application"
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-save-as"),
+                data={
+                    "name": "saved-as-long-subject",
+                    "subject": too_long_subject,
+                    "html_content": "<p>Hello</p>",
+                    "text_content": "Hello",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 400)
+        payload = resp.json()
+        self.assertEqual(payload.get("ok"), False)
+        self.assertIn("Subject is too long", str(payload.get("error", "")))
+
     def test_template_render_preview_endpoint(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})

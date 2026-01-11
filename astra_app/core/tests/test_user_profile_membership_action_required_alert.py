@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from django.test import TestCase
+from django.urls import reverse
+
+from core.backends import FreeIPAUser
+from core.models import MembershipRequest, MembershipType
+
+
+class UserProfileMembershipActionRequiredAlertTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_self_profile_shows_action_required_alert_for_on_hold_request(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+            },
+        )
+
+        self._login_as_freeipa_user("alice")
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "complete your membership request")
+        self.assertContains(resp, "provide the requested information")
+        self.assertContains(resp, reverse("membership-request-self", args=[req.pk]))
+        self.assertContains(resp, "alert alert-danger")
+        self.assertContains(resp, ">Awaiting action<")
+
+    def test_other_profile_keeps_on_hold_badge_label(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+            },
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+                "givenname": ["Bob"],
+                "sn": ["Viewer"],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"alice": alice, "bob": bob}.get(username)
+
+        self._login_as_freeipa_user("bob")
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, ">On hold<")
+        self.assertNotContains(resp, ">Awaiting action<")

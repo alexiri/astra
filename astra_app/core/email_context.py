@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import html
 from typing import TYPE_CHECKING
+
+from django.utils.safestring import SafeString, mark_safe
 
 from core.backends import FreeIPAUser
 
@@ -88,3 +91,25 @@ def organization_sponsor_email_context(*, organization: Organization) -> dict[st
         representative_context = user_email_context(username="")
 
     return organization_email_context_from_organization(organization=organization) | representative_context
+
+
+def freeform_message_email_context(*, key: str, value: str) -> dict[str, str | SafeString]:
+        """Return email context values for freeform user-provided text.
+
+        We need two variants:
+        - `<key>_text`: rendered into text/plain without HTML entity escaping.
+        - `<key>_html`: rendered into text/html safely, without showing HTML entities
+            for common punctuation like apostrophes.
+
+        The base `<key>` is retained for backwards compatibility with existing
+        templates.
+        """
+
+        normalized = html.unescape(str(value or "").strip())
+        html_escaped = html.escape(normalized, quote=False)
+
+        return {
+                key: normalized,
+                f"{key}_text": mark_safe(normalized),
+                f"{key}_html": mark_safe(html_escaped),
+        }

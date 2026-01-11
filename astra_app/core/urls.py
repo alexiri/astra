@@ -158,6 +158,16 @@ urlpatterns = [
     path("email-tools/images/", views_mail_images.email_images, name="email-images"),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
+    path(
+        "membership/request/<int:pk>/",
+        views_membership.membership_request_self,
+        name="membership-request-self",
+    ),
+    path(
+        "membership/request/<int:pk>/rescind/",
+        views_membership.membership_request_rescind,
+        name="membership-request-rescind",
+    ),
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),
     path(
         "membership/requests/<int:pk>/",
@@ -188,6 +198,11 @@ urlpatterns = [
         "membership/requests/<int:pk>/reject/",
         views_membership.membership_request_reject,
         name="membership-request-reject",
+    ),
+    path(
+        "membership/requests/<int:pk>/rfi/",
+        views_membership.membership_request_rfi,
+        name="membership-request-rfi",
     ),
     path(
         "membership/requests/<int:pk>/ignore/",

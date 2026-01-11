@@ -29,7 +29,7 @@
           </div>
         </form>
 
-        <div class="text-muted">Pending: {{ requests|length }}</div>
+          <div class="text-muted">Pending: {{ pending_requests|length }}</div>
       </div>
     </div>
 
@@ -41,14 +41,14 @@
               <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
             </th>
             <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Request</th>
-            <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Target</th>
+            <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Requested for</th>
             <th>Type</th>
             <th class="text-right" style="width: 15%; white-space: nowrap;">Actions</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in request_rows %}
-            {% with r=row.r %}
+            {% for row in pending_request_rows %}
+              {% with r=row.r %}
             <tr>
               <td class="text-center align-top">
                 <input
@@ -80,19 +80,55 @@
                 {% endif %}
 
                 {% if row.requested_by_username %}
-                  <div class="text-muted small">
-                    Requested by:
-                    <a href="{% url 'user-profile' row.requested_by_username %}">
-                      {% if row.requested_by_full_name %}
-                        {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                      {% else %}
-                        {{ row.requested_by_username }}
-                      {% endif %}
-                    </a>
-                    {% if row.requested_by_deleted %}
-                      <span class="text-muted">(deleted)</span>
+                  {% if r.requested_username %}
+                    {% if row.requested_by_username != r.requested_username %}
+                      <div class="text-muted small">
+                        Requested by:
+                        <a href="{% url 'user-profile' row.requested_by_username %}">
+                          {% if row.requested_by_full_name %}
+                            {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                          {% else %}
+                            {{ row.requested_by_username }}
+                          {% endif %}
+                        </a>
+                        {% if row.requested_by_deleted %}
+                          <span class="text-muted">(deleted)</span>
+                        {% endif %}
+                      </div>
                     {% endif %}
-                  </div>
+                  {% elif row.organization %}
+                    {% if row.organization.representative %}
+                      {% if row.requested_by_username != row.organization.representative %}
+                        <div class="text-muted small">
+                          Requested by:
+                          <a href="{% url 'user-profile' row.requested_by_username %}">
+                            {% if row.requested_by_full_name %}
+                              {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                            {% else %}
+                              {{ row.requested_by_username }}
+                            {% endif %}
+                          </a>
+                          {% if row.requested_by_deleted %}
+                            <span class="text-muted">(deleted)</span>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% else %}
+                      <div class="text-muted small">
+                        Requested by:
+                        <a href="{% url 'user-profile' row.requested_by_username %}">
+                          {% if row.requested_by_full_name %}
+                            {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                          {% else %}
+                            {{ row.requested_by_username }}
+                          {% endif %}
+                        </a>
+                        {% if row.requested_by_deleted %}
+                          <span class="text-muted">(deleted)</span>
+                        {% endif %}
+                      </div>
+                    {% endif %}
+                  {% endif %}
                 {% endif %}
 
                 <div class="mt-2">
@@ -149,45 +185,205 @@
     </div>
   </div>
 
+  <h3 class="mt-4 mb-2">Waiting for requester response</h3>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
+          <form id="bulk-action-form-on-hold" method="post" action="{% url 'membership-requests-bulk' %}" class="form-inline">
+            {% csrf_token %}
+            <input type="hidden" name="bulk_scope" value="on_hold" />
+            <div class="input-group input-group-sm">
+              <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
+                <option value="">Bulk action…</option>
+                <option value="reject">Reject</option>
+                <option value="ignore">Ignore</option>
+              </select>
+              <div class="input-group-append">
+                <button type="submit" class="btn btn-default" id="bulk-apply-on-hold" disabled>Apply</button>
+              </div>
+            </div>
+          </form>
+
+          <div class="text-muted">On hold: {{ on_hold_requests|length }}</div>
+        </div>
+      </div>
+
+      <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+          <thead>
+            <tr>
+              <th style="width: 40px;" class="text-center">
+                <input type="checkbox" id="select-all-requests-on-hold" aria-label="Select all on-hold requests">
+              </th>
+              <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Request</th>
+              <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Requested for</th>
+              <th>Type</th>
+              <th class="text-nowrap" style="width: 1%; white-space: nowrap;">On hold since</th>
+              <th class="text-right" style="width: 15%; white-space: nowrap;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in on_hold_request_rows %}
+              {% with r=row.r %}
+                <tr>
+                  <td class="text-center align-top">
+                  <input
+                    type="checkbox"
+                    class="request-checkbox"
+                    name="selected"
+                    value="{{ r.pk }}"
+                    form="bulk-action-form"
+                    aria-label="Select request"
+                  >
+                </td>
+                <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">
+                  <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
+                  {{ r.requested_at }}
+                </td>
+                <td>
+                  {% if row.organization %}
+                    <div>
+                      <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
+                    </div>
+                  {% elif r.requested_username %}
+                    <a href="{% url 'user-profile' r.requested_username %}">
+                      {% if row.full_name %}
+                        <div>{{ row.full_name }} <span class="text-muted small">({{ r.requested_username }})</span></div>
+                      {% else %}
+                        <div>{{ r.requested_username }}</div>
+                      {% endif %}
+                    </a>
+                  {% endif %}
+
+                  {% if row.requested_by_username %}
+                    {% if r.requested_username %}
+                      {% if row.requested_by_username != r.requested_username %}
+                        <div class="text-muted small">
+                          Requested by:
+                          <a href="{% url 'user-profile' row.requested_by_username %}">
+                            {% if row.requested_by_full_name %}
+                              {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                            {% else %}
+                              {{ row.requested_by_username }}
+                            {% endif %}
+                          </a>
+                          {% if row.requested_by_deleted %}
+                            <span class="text-muted">(deleted)</span>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% elif row.organization %}
+                      {% if row.organization.representative %}
+                        {% if row.requested_by_username != row.organization.representative %}
+                          <div class="text-muted small">
+                            Requested by:
+                            <a href="{% url 'user-profile' row.requested_by_username %}">
+                              {% if row.requested_by_full_name %}
+                                {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                              {% else %}
+                                {{ row.requested_by_username }}
+                              {% endif %}
+                            </a>
+                            {% if row.requested_by_deleted %}
+                              <span class="text-muted">(deleted)</span>
+                            {% endif %}
+                          </div>
+                        {% endif %}
+                      {% else %}
+                        <div class="text-muted small">
+                          Requested by:
+                          <a href="{% url 'user-profile' row.requested_by_username %}">
+                            {% if row.requested_by_full_name %}
+                              {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                            {% else %}
+                              {{ row.requested_by_username }}
+                            {% endif %}
+                          </a>
+                          {% if row.requested_by_deleted %}
+                            <span class="text-muted">(deleted)</span>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+
+                  <div class="mt-2">
+                    {% membership_notes r compact=True %}
+                  </div>
+
+                </td>
+
+                <td>{{ r.membership_type.name }}</td>
+                <td class="text-nowrap">
+                  {% if r.on_hold_at %}
+                    {{ r.on_hold_at|date:"r" }}
+                    <div class="text-muted small">{{ r.on_hold_at|timesince }} ago</div>
+                  {% else %}
+                    <span class="text-muted">(unknown)</span>
+                  {% endif %}
+                </td>
+                <td class="text-right">
+                  <div class="membership-request-actions membership-request-actions--list">
+                    {% include 'core/_membership_request_actions.html' with request=r %}
+                  </div>
+                </td>
+              </tr>
+              {% endwith %}
+            {% empty %}
+              <tr>
+                <td colspan="6" class="p-3 text-muted">No on-hold requests.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   <script>
     (function () {
-      const selectAll = document.getElementById('select-all-requests');
-      const applyBtn = document.getElementById('bulk-apply');
-      const form = document.getElementById('bulk-action-form');
-      if (!selectAll || !applyBtn || !form) return;
+      function setupBulk(formId, selectAllId, checkboxSelector, applyBtnId) {
+        const selectAll = document.getElementById(selectAllId);
+        const applyBtn = document.getElementById(applyBtnId);
+        const form = document.getElementById(formId);
+        if (!selectAll || !applyBtn || !form) return;
 
-      function getCheckboxes() {
-        return Array.from(document.querySelectorAll('.request-checkbox'));
-      }
-
-      function updateApply() {
-        const anyChecked = getCheckboxes().some(cb => cb.checked);
-        const action = (form.querySelector('select[name="bulk_action"]') || {}).value || '';
-        applyBtn.disabled = !(anyChecked && action);
-      }
-
-      selectAll.addEventListener('change', function () {
-        for (const cb of getCheckboxes()) {
-          cb.checked = selectAll.checked;
+        function getCheckboxes() {
+          return Array.from(document.querySelectorAll(checkboxSelector));
         }
+
+        function updateApply() {
+          const anyChecked = getCheckboxes().some(cb => cb.checked);
+          const action = (form.querySelector('select[name="bulk_action"]') || {}).value || '';
+          applyBtn.disabled = !(anyChecked && action);
+        }
+
+        selectAll.addEventListener('change', function () {
+          for (const cb of getCheckboxes()) {
+            cb.checked = selectAll.checked;
+          }
+          updateApply();
+        });
+
+        document.addEventListener('change', function (evt) {
+          const target = evt.target;
+          if (!target) return;
+          if (target.matches && target.matches(checkboxSelector)) {
+            const boxes = getCheckboxes();
+            selectAll.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
+            updateApply();
+            return;
+          }
+          if (target.name === 'bulk_action' && form.contains(target)) {
+            updateApply();
+          }
+        });
+
         updateApply();
-      });
+      }
 
-      document.addEventListener('change', function (evt) {
-        const target = evt.target;
-        if (!target) return;
-        if (target.classList && target.classList.contains('request-checkbox')) {
-          const boxes = getCheckboxes();
-          selectAll.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
-          updateApply();
-          return;
-        }
-        if (target.name === 'bulk_action') {
-          updateApply();
-        }
-      });
-
-      updateApply();
+      setupBulk('bulk-action-form', 'select-all-requests', '.request-checkbox:not(.request-checkbox--on-hold)', 'bulk-apply');
+      setupBulk('bulk-action-form-on-hold', 'select-all-requests-on-hold', '.request-checkbox--on-hold', 'bulk-apply-on-hold');
     })();
   </script>
 {% endblock %}

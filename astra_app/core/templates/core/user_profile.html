@@ -25,6 +25,17 @@
     </div>
   {% endif %}
 
+  {% if is_self and membership_action_required_requests %}
+    <div class="alert alert-danger" id="membership-action-required-alert" role="alert">
+      <strong>Action required:</strong>
+      To complete your membership request, please
+      <a
+        href="{% url 'membership-request-self' membership_action_required_requests.0.request_id %}"
+        class="alert-link"
+      >provide the requested information</a>.
+    </div>
+  {% endif %}
+
   <div class="row">
     <div class="col-md-4">
       <div class="card">
@@ -241,12 +252,32 @@
         {% for req in membership_pending_requests %}
           <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
             <div>
-              <div class="font-weight-bold">{{ req.membership_type.name }}</div>
+              {% if is_self %}
+                <div class="font-weight-bold">
+                  <a href="{% url 'membership-request-self' req.request_id %}">{{ req.membership_type.name }}</a>
+                </div>
+              {% elif membership_can_view %}
+                <div class="font-weight-bold">
+                  <a href="{% url 'membership-request-detail' req.request_id %}">{{ req.membership_type.name }}</a>
+                </div>
+              {% else %}
+                <div class="font-weight-bold">{{ req.membership_type.name }}</div>
+              {% endif %}
             </div>
-            {% if membership_can_view %}
-              <a class="badge badge-secondary" href="{% url 'membership-request-detail' req.request_id %}">In Review</a>
+            {% if req.status == 'on_hold' %}
+              {% if is_self %}
+                <a class="badge badge-danger" href="{% url 'membership-request-self' req.request_id %}">Awaiting action</a>
+              {% elif membership_can_view %}
+                <a class="badge badge-danger" href="{% url 'membership-request-detail' req.request_id %}">On hold</a>
+              {% else %}
+                <span class="badge badge-danger">On hold</span>
+              {% endif %}
             {% else %}
-              <span class="badge badge-secondary">In Review</span>
+              {% if membership_can_view %}
+                <a class="badge badge-secondary" href="{% url 'membership-request-detail' req.request_id %}">In Review</a>
+              {% else %}
+                <span class="badge badge-secondary">In Review</span>
+              {% endif %}
             {% endif %}
           </li>
         {% endfor %}

@@ -99,6 +99,12 @@ def note_action_label(action: dict[str, Any]) -> str:
         return "Request rejected"
     if action_type == "request_ignored":
         return "Request ignored"
+    if action_type == "request_on_hold":
+        return "Request on hold"
+    if action_type == "request_resubmitted":
+        return "Request resubmitted"
+    if action_type == "request_rescinded":
+        return "Request rescinded"
     if action_type == "contacted":
         return "User contacted"
 
@@ -128,5 +134,11 @@ def note_action_icon(action: dict[str, Any]) -> str:
         return "fa-ghost"
     if action_type == "request_created":
         return "fa-hand"
+    if action_type == "request_on_hold":
+        return "fa-circle-pause"
+    if action_type == "request_resubmitted":
+        return "fa-rotate-right"
+    if action_type == "request_rescinded":
+        return "fa-ban"
 
     return "fa-bolt"

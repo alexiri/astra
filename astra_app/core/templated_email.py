@@ -3,10 +3,13 @@ from __future__ import annotations
 import re
 import tempfile
 from collections.abc import Iterable, Mapping
+from email import policy
+from email.message import EmailMessage
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.http import HttpRequest, JsonResponse
 from django.template import Context, Template, engines
@@ -29,6 +32,37 @@ _INLINE_IMAGE_TAG_REWRITE_PATTERN = re.compile(
 )
 
 _MAX_INLINE_IMAGE_BYTES: int = 10 * 1024 * 1024
+
+
+def validate_email_subject_no_folding(subject: str) -> None:
+    """Reject subjects that would be serialized as folded headers.
+
+    RFC header folding is valid, but some downstream tooling mishandles it.
+    We validate at template-save time so users can't create templates that
+    will later generate folded Subject headers.
+    """
+
+    value = str(subject or "")
+    if not value.strip():
+        return
+
+    if "\n" in value or "\r" in value:
+        raise ValidationError("Subject must be a single line.")
+
+    msg = EmailMessage(policy=policy.SMTP)
+    msg["Subject"] = value
+    raw = msg.as_bytes()
+    lines = raw.splitlines()
+
+    for idx, line in enumerate(lines):
+        if line.lower().startswith(b"subject:"):
+            next_idx = idx + 1
+            if next_idx < len(lines) and lines[next_idx].startswith((b" ", b"\t")):
+                raise ValidationError(
+                    "Subject is too long and will be split across multiple header lines. "
+                    "Please keep it shorter."
+                )
+            return
 
 
 def _storage_key_from_inline_image_arg(raw: str) -> str:
@@ -357,6 +391,7 @@ def email_template_to_dict(template: EmailTemplate) -> dict[str, object]:
 
 
 def update_email_template(*, template: EmailTemplate, subject: str, html_content: str, text_content: str) -> None:
+    validate_email_subject_no_folding(subject)
     template.subject = subject
     template.html_content = html_content
     template.content = text_content
@@ -373,6 +408,7 @@ def unique_email_template_name(raw_name: str) -> str:
 
 
 def create_email_template_unique(*, raw_name: str, subject: str, html_content: str, text_content: str) -> EmailTemplate:
+    validate_email_subject_no_folding(subject)
     name = unique_email_template_name(raw_name)
     return EmailTemplate.objects.create(
         name=name,

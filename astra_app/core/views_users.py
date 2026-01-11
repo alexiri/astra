@@ -177,7 +177,7 @@ def _profile_context_for_user(
 
     pending_requests_qs = list(
         MembershipRequest.objects.select_related("membership_type")
-        .filter(requested_username=fu.username, status=MembershipRequest.Status.pending)
+        .filter(requested_username=fu.username, status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
         .order_by("requested_at")
     )
 
@@ -186,8 +186,14 @@ def _profile_context_for_user(
             "membership_type": r.membership_type,
             "requested_at": r.requested_at,
             "request_id": r.pk,
+            "status": r.status,
+            "on_hold_at": r.on_hold_at,
         }
         for r in pending_requests_qs
+    ]
+
+    membership_action_required_requests: list[dict[str, object]] = [
+        r for r in pending_requests if r.get("status") == MembershipRequest.Status.on_hold
     ]
 
     membership_can_request_any = MembershipType.objects.filter(enabled=True, isIndividual=True).exclude(
@@ -214,6 +220,7 @@ def _profile_context_for_user(
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,
         "membership_pending_requests": pending_requests,
+        "membership_action_required_requests": membership_action_required_requests,
         "groups": groups,
         "agreements": agreements,
         "missing_agreements": missing_agreements,

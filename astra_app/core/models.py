@@ -263,9 +263,11 @@ class OrganizationSponsorship(models.Model):
 class MembershipRequest(models.Model):
     class Status(models.TextChoices):
         pending = "pending", "Pending"
+        on_hold = "on_hold", "On Hold"
         approved = "approved", "Approved"
         rejected = "rejected", "Rejected"
         ignored = "ignored", "Ignored"
+        rescinded = "rescinded", "Rescinded"
 
     requested_username = models.CharField(max_length=255, blank=True, default="")
     requested_organization = models.ForeignKey(
@@ -280,6 +282,7 @@ class MembershipRequest(models.Model):
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     requested_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.pending, db_index=True)
+    on_hold_at = models.DateTimeField(blank=True, null=True)
     decided_at = models.DateTimeField(blank=True, null=True)
     decided_by_username = models.CharField(max_length=255, blank=True, default="")
     responses = models.JSONField(blank=True, default=list)
@@ -288,12 +291,13 @@ class MembershipRequest(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["requested_username", "membership_type"],
-                condition=Q(status="pending", requested_organization__isnull=True) & ~Q(requested_username=""),
+                condition=Q(status__in=["pending", "on_hold"], requested_organization__isnull=True)
+                & ~Q(requested_username=""),
                 name="uniq_membershiprequest_open_user_type",
             ),
             models.UniqueConstraint(
                 fields=["requested_organization", "membership_type"],
-                condition=Q(status="pending", requested_organization__isnull=False),
+                condition=Q(status__in=["pending", "on_hold"], requested_organization__isnull=False),
                 name="uniq_membershiprequest_open_org_type",
             ),
             models.CheckConstraint(
@@ -409,9 +413,12 @@ class Membership(models.Model):
 class MembershipLog(models.Model):
     class Action(models.TextChoices):
         requested = "requested", "Requested"
+        on_hold = "on_hold", "On Hold"
+        resubmitted = "resubmitted", "Resubmitted"
         approved = "approved", "Approved"
         rejected = "rejected", "Rejected"
         ignored = "ignored", "Ignored"
+        rescinded = "rescinded", "Rescinded"
         expiry_changed = "expiry_changed", "Expiry changed"
         terminated = "terminated", "Terminated"
 

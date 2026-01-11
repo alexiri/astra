@@ -8,64 +8,70 @@ Expected context:
 - requester_display: str
 {% endcomment %}
 
-<button
-  type="button"
-  class="btn btn-sm btn-success"
-  data-toggle="modal"
-  data-target="#approve-modal-{{ pk_str }}"
->Approve</button>
-
 {% url 'membership-request-approve' membership_request.pk as approve_url %}
 {% with requester=requester_display|default:"(unknown)" %}
-{% with approve_modal_id="approve-modal-"|add:pk_str approve_title="Approve "|add:membership_type_name|add:" request" %}
-  {% with approve_prefix="Approve "|add:membership_type_name|add:" request from" approve_suffix="?" %}
-    {% include 'core/_modal_confirm.html' with modal_id=approve_modal_id title=approve_title body_prefix=approve_prefix body_emphasis=requester body_suffix=approve_suffix action_url=approve_url submit_label="Approve" submit_class="btn-success" dialog_style="text-align: left;" show_custom_email_button=True custom_submit_label="Approve with Custom Email" custom_submit_class="btn-outline-success" %}
+{% if membership_request.status == 'pending' %}
+  <button
+    type="button"
+    class="btn btn-sm btn-success"
+    data-toggle="modal"
+    data-target="#approve-modal-{{ pk_str }}"
+  >Approve</button>
+
+  {% with approve_modal_id="approve-modal-"|add:pk_str approve_title="Approve "|add:membership_type_name|add:" request" %}
+    {% with approve_prefix="Approve "|add:membership_type_name|add:" request from" approve_suffix="?" %}
+      {% include 'core/_modal_confirm.html' with modal_id=approve_modal_id title=approve_title body_prefix=approve_prefix body_emphasis=requester body_suffix=approve_suffix action_url=approve_url submit_label="Approve" submit_class="btn-success" dialog_style="text-align: left;" show_custom_email_button=True custom_submit_label="Approve with Custom Email" custom_submit_class="btn-outline-success" %}
+    {% endwith %}
   {% endwith %}
-{% endwith %}
-
-<button
-  type="button"
-  class="btn btn-sm btn-danger"
-  data-toggle="modal"
-  data-target="#reject-modal-{{ pk_str }}"
->Reject</button>
-
-{% url 'membership-request-reject' membership_request.pk as reject_url %}
-{% with reject_modal_id="reject-modal-"|add:pk_str reject_title="Reject "|add:membership_type_name|add:" request" reject_reason_id="reject-reason-"|add:pk_str %}
-  {% if membership_request.requested_username %}
-    {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" show_custom_email_button=True %}
-  {% else %}
-    {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" show_custom_email_button=True %}
-  {% endif %}
-{% endwith %}
-
-{% if send_mail_can_add %}
-  {% if membership_request.requested_username %}
-    {% url 'send-mail' as send_mail_url %}
-    <a
-      class="btn btn-sm btn-outline-primary"
-      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_username|urlencode }}&membership_request_id={{ membership_request.pk }}"
-    >Contact</a>
-  {% elif membership_request.requested_organization and membership_request.requested_organization.representative %}
-    {% url 'send-mail' as send_mail_url %}
-    <a
-      class="btn btn-sm btn-outline-primary"
-      href="{{ send_mail_url }}?type=users&to={{ membership_request.requested_organization.representative|urlencode }}&membership_request_id={{ membership_request.pk }}"
-    >Contact</a>
-  {% endif %}
 {% endif %}
 
-<button
-  type="button"
-  class="btn btn-sm btn-outline-secondary"
-  data-toggle="modal"
-  data-target="#ignore-modal-{{ pk_str }}"
->Ignore</button>
+{% if membership_request.status == 'pending' or membership_request.status == 'on_hold' %}
+  <button
+    type="button"
+    class="btn btn-sm btn-danger"
+    data-toggle="modal"
+    data-target="#reject-modal-{{ pk_str }}"
+  >Reject</button>
 
-{% url 'membership-request-ignore' membership_request.pk as ignore_url %}
-{% with ignore_modal_id="ignore-modal-"|add:pk_str ignore_title="Ignore "|add:membership_type_name|add:" request" %}
-  {% with ignore_prefix="Ignore "|add:membership_type_name|add:" request from" ignore_suffix="? This does not approve the membership, nor does it notify the user." %}
-    {% include 'core/_modal_confirm.html' with modal_id=ignore_modal_id title=ignore_title body_prefix=ignore_prefix body_emphasis=requester body_suffix=ignore_suffix action_url=ignore_url submit_label="Ignore" submit_class="btn-outline-secondary" dialog_style="text-align: left;" %}
+  {% url 'membership-request-reject' membership_request.pk as reject_url %}
+  {% with reject_modal_id="reject-modal-"|add:pk_str reject_title="Reject "|add:membership_type_name|add:" request" reject_reason_id="reject-reason-"|add:pk_str %}
+    {% if membership_request.requested_username %}
+      {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" show_custom_email_button=True %}
+    {% else %}
+      {% include 'core/_modal_reject.html' with modal_id=reject_modal_id title=reject_title action_url=reject_url reason_id=reject_reason_id help_text="If filled in, this text will be included in the rejection email." dialog_style="text-align: left;" show_custom_email_button=True %}
+    {% endif %}
   {% endwith %}
-{% endwith %}
+{% endif %}
+
+{% if send_mail_can_add and membership_request.status == 'pending' %}
+  <button
+    type="button"
+    class="btn btn-sm btn-outline-primary"
+    title="Request for Information"
+    aria-label="Request for Information"
+    data-toggle="modal"
+    data-target="#rfi-modal-{{ pk_str }}"
+  >RFI</button>
+
+  {% url 'membership-request-rfi' membership_request.pk as rfi_url %}
+  {% with rfi_modal_id="rfi-modal-"|add:pk_str rfi_title="Request information for "|add:membership_type_name|add:" request" rfi_message_id="rfi-message-"|add:pk_str %}
+    {% include 'core/_modal_rfi.html' with modal_id=rfi_modal_id title=rfi_title action_url=rfi_url message_id=rfi_message_id help_text="This will email the requester and put the request on hold." dialog_style="text-align: left;" %}
+  {% endwith %}
+{% endif %}
+
+{% if membership_request.status == 'pending' or membership_request.status == 'on_hold' %}
+  <button
+    type="button"
+    class="btn btn-sm btn-outline-secondary"
+    data-toggle="modal"
+    data-target="#ignore-modal-{{ pk_str }}"
+  >Ignore</button>
+
+  {% url 'membership-request-ignore' membership_request.pk as ignore_url %}
+  {% with ignore_modal_id="ignore-modal-"|add:pk_str ignore_title="Ignore "|add:membership_type_name|add:" request" %}
+    {% with ignore_prefix="Ignore "|add:membership_type_name|add:" request from" ignore_suffix="? This does not approve the membership, nor does it notify the user." %}
+      {% include 'core/_modal_confirm.html' with modal_id=ignore_modal_id title=ignore_title body_prefix=ignore_prefix body_emphasis=requester body_suffix=ignore_suffix action_url=ignore_url submit_label="Ignore" submit_class="btn-outline-secondary" dialog_style="text-align: left;" %}
+    {% endwith %}
+  {% endwith %}
+{% endif %}
 {% endwith %}

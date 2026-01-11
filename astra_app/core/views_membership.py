@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -18,15 +18,23 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.backends import FreeIPAUser
 from core.country_codes import country_code_status_from_user_data, is_valid_country_alpha2
-from core.email_context import organization_sponsor_email_context
-from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
+from core.email_context import freeform_message_email_context, organization_sponsor_email_context
+from core.forms_membership import (
+    MembershipRejectForm,
+    MembershipRequestForm,
+    MembershipRequestUpdateResponsesForm,
+    MembershipUpdateExpiryForm,
+)
 from core.membership import get_valid_memberships_for_username
 from core.membership_notes import CUSTOS, add_note
 from core.membership_request_workflow import (
     approve_membership_request,
     ignore_membership_request,
+    put_membership_request_on_hold,
     record_membership_request_created,
     reject_membership_request,
+    rescind_membership_request,
+    resubmit_membership_request,
 )
 from core.models import (
     MembershipLog,
@@ -37,6 +45,7 @@ from core.models import (
 )
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
+    ASTRA_ADD_SEND_MAIL,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
@@ -188,7 +197,7 @@ def membership_request(request: HttpRequest) -> HttpResponse:
                     MembershipRequest.objects.filter(
                         requested_username=username,
                         membership_type=membership_type,
-                        status=MembershipRequest.Status.pending,
+                        status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
                     )
                     .order_by("-requested_at")
                     .first()
@@ -239,6 +248,111 @@ def membership_request(request: HttpRequest) -> HttpResponse:
             "form": form,
         },
     )
+
+
+def _user_can_access_membership_request(*, username: str, membership_request: MembershipRequest) -> bool:
+    normalized_username = str(username or "").strip().lower()
+    if not normalized_username:
+        return False
+
+    if membership_request.requested_username:
+        return membership_request.requested_username.strip().lower() == normalized_username
+
+    org = membership_request.requested_organization
+    if org is None:
+        return False
+
+    return str(org.representative or "").strip().lower() == normalized_username
+
+
+def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
+    username = request.user.get_username()
+    if not username:
+        raise Http404("User not found")
+
+    req = get_object_or_404(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
+        pk=pk,
+    )
+    if not _user_can_access_membership_request(username=username, membership_request=req):
+        # Avoid leaking that the request exists.
+        raise Http404("Not found")
+
+    fu = FreeIPAUser.get(username)
+    user_email = fu.email if fu is not None else ""
+
+    if request.method == "POST":
+        if req.status != MembershipRequest.Status.on_hold:
+            raise PermissionDenied
+
+        form = MembershipRequestUpdateResponsesForm(request.POST, membership_request=req)
+        if not form.is_valid():
+            messages.error(request, "Invalid request update.")
+            return render(
+                request,
+                "core/membership_request_self.html",
+                {
+                    "req": req,
+                    "form": form,
+                    "user_email": user_email,
+                },
+            )
+
+        try:
+            resubmit_membership_request(
+                membership_request=req,
+                actor_username=username,
+                updated_responses=form.responses(),
+            )
+        except ValidationError as e:
+            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            form.add_error(None, msg)
+            return render(
+                request,
+                "core/membership_request_self.html",
+                {
+                    "req": req,
+                    "form": form,
+                    "user_email": user_email,
+                },
+            )
+
+        messages.success(request, "Your request has been resubmitted for review.")
+        return redirect("membership-request-self", pk=req.pk)
+
+    form: MembershipRequestUpdateResponsesForm | None = None
+    if req.status == MembershipRequest.Status.on_hold:
+        form = MembershipRequestUpdateResponsesForm(membership_request=req)
+
+    return render(
+        request,
+        "core/membership_request_self.html",
+        {
+            "req": req,
+            "form": form,
+            "user_email": user_email,
+        },
+    )
+
+
+def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    username = request.user.get_username()
+    if not username:
+        raise Http404("User not found")
+
+    req = get_object_or_404(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
+        pk=pk,
+    )
+    if not _user_can_access_membership_request(username=username, membership_request=req):
+        raise Http404("Not found")
+
+    rescind_membership_request(membership_request=req, actor_username=username)
+    messages.success(request, "Your request has been rescinded.")
+    return redirect("user-profile", username=username)
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
@@ -391,73 +505,78 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
-    requests = (
-        MembershipRequest.objects.select_related("membership_type", "requested_organization")
-        .prefetch_related(
-            Prefetch(
-                "logs",
-                queryset=MembershipLog.objects.filter(action=MembershipLog.Action.requested)
-                .only("actor_username", "membership_request_id", "created_at")
-                .order_by("created_at", "pk"),
-                to_attr="requested_logs",
-            )
+    def _build_rows(reqs: list[MembershipRequest]) -> tuple[list[MembershipRequest], list[dict[str, object]]]:
+        rows: list[dict[str, object]] = []
+        visible: list[MembershipRequest] = []
+        for r in reqs:
+            requested_log = r.requested_logs[0] if r.requested_logs else None
+            requested_by_username = requested_log.actor_username if requested_log is not None else ""
+            requested_by_full_name = ""
+            requested_by_deleted = False
+            if requested_by_username:
+                requested_by_user = FreeIPAUser.get(requested_by_username)
+                requested_by_deleted = requested_by_user is None
+                if requested_by_user is not None:
+                    requested_by_full_name = requested_by_user.full_name
+
+            if r.requested_username == "":
+                org = r.requested_organization
+                if org is None:
+                    # If the org is gone, the committee can't take action on it.
+                    continue
+
+                visible.append(r)
+                rows.append(
+                    {
+                        "r": r,
+                        "organization": org,
+                        "requested_by_username": requested_by_username,
+                        "requested_by_full_name": requested_by_full_name,
+                        "requested_by_deleted": requested_by_deleted,
+                    }
+                )
+            else:
+                fu = FreeIPAUser.get(r.requested_username)
+                if fu is None:
+                    # If the user is gone, the committee can't take action on them.
+                    continue
+
+                visible.append(r)
+                rows.append(
+                    {
+                        "r": r,
+                        "full_name": fu.full_name,
+                        "requested_by_username": requested_by_username,
+                        "requested_by_full_name": requested_by_full_name,
+                        "requested_by_deleted": requested_by_deleted,
+                    }
+                )
+        return visible, rows
+
+    base = MembershipRequest.objects.select_related("membership_type", "requested_organization").prefetch_related(
+        Prefetch(
+            "logs",
+            queryset=MembershipLog.objects.filter(action=MembershipLog.Action.requested)
+            .only("actor_username", "membership_request_id", "created_at")
+            .order_by("created_at", "pk"),
+            to_attr="requested_logs",
         )
-        .filter(status=MembershipRequest.Status.pending)
-        .order_by("requested_at")
     )
 
-    request_rows: list[dict[str, object]] = []
-    visible_requests: list[MembershipRequest] = []
-    for r in requests:
-        requested_log = r.requested_logs[0] if r.requested_logs else None
-        requested_by_username = requested_log.actor_username if requested_log is not None else ""
-        requested_by_full_name = ""
-        requested_by_deleted = False
-        if requested_by_username:
-            requested_by_user = FreeIPAUser.get(requested_by_username)
-            requested_by_deleted = requested_by_user is None
-            if requested_by_user is not None:
-                requested_by_full_name = requested_by_user.full_name
+    pending_requests_all = list(base.filter(status=MembershipRequest.Status.pending).order_by("requested_at"))
+    on_hold_requests_all = list(base.filter(status=MembershipRequest.Status.on_hold).order_by("on_hold_at", "requested_at"))
 
-        if r.requested_username == "":
-            org = r.requested_organization
-            if org is None:
-                # If the org is gone, the committee can't take action on it.
-                continue
-
-            visible_requests.append(r)
-            request_rows.append(
-                {
-                    "r": r,
-                    "organization": org,
-                    "requested_by_username": requested_by_username,
-                    "requested_by_full_name": requested_by_full_name,
-                    "requested_by_deleted": requested_by_deleted,
-                }
-            )
-        else:
-            fu = FreeIPAUser.get(r.requested_username)
-            if fu is None:
-                # If the user is gone, the committee can't take action on them.
-                continue
-
-            visible_requests.append(r)
-            request_rows.append(
-                {
-                    "r": r,
-                    "full_name": fu.full_name,
-                    "requested_by_username": requested_by_username,
-                    "requested_by_full_name": requested_by_full_name,
-                    "requested_by_deleted": requested_by_deleted,
-                }
-            )
+    pending_requests, pending_rows = _build_rows(pending_requests_all)
+    on_hold_requests, on_hold_rows = _build_rows(on_hold_requests_all)
 
     return render(
         request,
         "core/membership_requests.html",
         {
-            "requests": visible_requests,
-            "request_rows": request_rows,
+            "pending_requests": pending_requests,
+            "pending_request_rows": pending_rows,
+            "on_hold_requests": on_hold_requests,
+            "on_hold_request_rows": on_hold_rows,
         },
     )
 
@@ -465,6 +584,20 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+
+    contact_url = ""
+    if request.user.has_perm(ASTRA_ADD_SEND_MAIL):
+        recipient = _custom_email_recipient_for_request(req)
+        if recipient is not None:
+            to_type, to = recipient
+            contact_url = _send_mail_url(
+                to_type=to_type,
+                to=to,
+                template_name="",
+                extra_context={
+                    "membership_request_id": str(req.pk),
+                },
+            )
 
     target_user = None
     target_full_name = ""
@@ -507,6 +640,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "requested_by_username": requested_by_username,
             "requested_by_full_name": requested_by_full_name,
             "requested_by_deleted": requested_by_deleted,
+            "contact_url": contact_url,
         },
     )
 
@@ -642,7 +776,7 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
         if target_type == "user":
             latest = (
                 MembershipRequest.objects.filter(requested_username=target)
-                .filter(status=MembershipRequest.Status.pending)
+                .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
                 .order_by("-requested_at", "-pk")
                 .first()
             )
@@ -655,7 +789,7 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
             org_id = int(target)
             latest = (
                 MembershipRequest.objects.filter(requested_organization_id=org_id)
-                .filter(status=MembershipRequest.Status.pending)
+                .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
                 .order_by("-requested_at", "-pk")
                 .first()
             )
@@ -727,6 +861,19 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
+    bulk_scope = _normalize_str(request.POST.get("bulk_scope")).lower() or "pending"
+
+    allowed_statuses: set[str]
+    allowed_actions: set[str]
+    if bulk_scope == "on_hold":
+        allowed_statuses = {MembershipRequest.Status.on_hold}
+        allowed_actions = {"reject", "ignore"}
+    else:
+        # Default behavior matches the existing pending-requests bulk UI.
+        bulk_scope = "pending"
+        allowed_statuses = {MembershipRequest.Status.pending}
+        allowed_actions = {"approve", "reject", "ignore"}
+
     raw_action = _normalize_str(request.POST.get("bulk_action"))
     action = raw_action
     if action == "accept":
@@ -744,18 +891,24 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Select one or more requests first.")
         return redirect("membership-requests")
 
-    if action not in {"approve", "reject", "ignore"}:
-        messages.error(request, "Choose a valid bulk action.")
+    if action not in allowed_actions:
+        if bulk_scope == "on_hold":
+            messages.error(request, "Choose a valid bulk action for on-hold requests.")
+        else:
+            messages.error(request, "Choose a valid bulk action.")
         return redirect("membership-requests")
 
     actor_username = request.user.get_username()
     reqs = list(
         MembershipRequest.objects.select_related("membership_type", "requested_organization")
-        .filter(pk__in=selected_ids)
+        .filter(pk__in=selected_ids, status__in=allowed_statuses)
         .order_by("pk")
     )
     if not reqs:
-        messages.error(request, "No matching pending requests were found.")
+        if bulk_scope == "on_hold":
+            messages.error(request, "No matching on-hold requests were found.")
+        else:
+            messages.error(request, "No matching pending requests were found.")
         return redirect("membership-requests")
 
     approved = 0
@@ -960,7 +1113,7 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
                     **(organization_sponsor_email_context(organization=org) if org is not None else {}),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
-                    "rejection_reason": reason,
+                    **freeform_message_email_context(key="rejection_reason", value=reason),
                 },
                 redirect_to=redirect_to,
             )
@@ -974,10 +1127,76 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
             extra_context={
                 "membership_type": membership_type.name,
                 "membership_type_code": membership_type.code,
-                "rejection_reason": reason,
+                **freeform_message_email_context(key="rejection_reason", value=reason),
             },
             redirect_to=redirect_to,
         )
+    return redirect(redirect_to)
+
+
+@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+    membership_type = req.membership_type
+
+    custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+    rfi_message = str(request.POST.get("rfi_message") or "").strip()
+
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        redirect_to = next_url
+    else:
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        redirect_to = referer or reverse("membership-requests")
+        if redirect_to and not url_has_allowed_host_and_scheme(
+            url=redirect_to,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            redirect_to = reverse("membership-requests")
+
+    application_url = request.build_absolute_uri(reverse("membership-request-self", args=[req.pk]))
+
+    _log, email_error = put_membership_request_on_hold(
+        membership_request=req,
+        actor_username=request.user.get_username(),
+        rfi_message=rfi_message,
+        send_rfi_email=not custom_email,
+        application_url=application_url,
+    )
+
+    if custom_email:
+        extra_context: dict[str, str] = {
+            "membership_type": membership_type.name,
+            "membership_type_code": membership_type.code,
+            "rfi_message": rfi_message,
+            "application_url": application_url,
+        }
+        extra_context.update(freeform_message_email_context(key="rfi_message", value=rfi_message))
+        if req.requested_username == "":
+            org = req.requested_organization
+            extra_context["organization_name"] = org.name if org is not None else (req.requested_organization_name or "")
+            extra_context.update(organization_sponsor_email_context(organization=org) if org is not None else {})
+
+        return _custom_email_redirect(
+            request=request,
+            membership_request=req,
+            template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+            extra_context=extra_context,
+            redirect_to=redirect_to,
+        )
+
+    target_label = _membership_request_target_label(req)
+    messages.success(request, f"Sent RFI for {target_label}.")
+    if email_error is not None:
+        messages.error(request, "Request was put on hold, but the email could not be sent.")
     return redirect(redirect_to)
 
 

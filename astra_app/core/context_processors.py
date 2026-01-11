@@ -22,6 +22,7 @@ def membership_review(request) -> dict[str, object]:
             "membership_can_view": False,
             "send_mail_can_add": False,
             "membership_requests_pending_count": 0,
+            "membership_requests_on_hold_count": 0,
         }
 
     user = request.user
@@ -40,9 +41,11 @@ def membership_review(request) -> dict[str, object]:
         send_mail_can_add = False
 
     # Requests UI + approve/reject/ignore is guarded by "add".
-    pending_count = (
-        MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count() if membership_can_add else 0
-    )
+    pending_count = 0
+    on_hold_count = 0
+    if membership_can_add:
+        pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
+        on_hold_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.on_hold).count()
 
     return {
         "membership_can_add": membership_can_add,
@@ -51,6 +54,7 @@ def membership_review(request) -> dict[str, object]:
         "membership_can_view": membership_can_view,
         "send_mail_can_add": send_mail_can_add,
         "membership_requests_pending_count": pending_count,
+        "membership_requests_on_hold_count": on_hold_count,
     }
 
 

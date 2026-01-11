@@ -324,6 +324,11 @@ MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME = _env_str(
     default="membership-request-rejected",
 ) or "membership-request-rejected"
 
+MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME = _env_str(
+    "MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME",
+    default="membership-request-rfi",
+) or "membership-request-rfi"
+
 MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME",
     default="membership-committee-pending-requests",

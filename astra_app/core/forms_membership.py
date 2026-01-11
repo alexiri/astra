@@ -91,7 +91,7 @@ class MembershipRequestForm(forms.Form):
         self._pending_membership_type_codes = set(
             MembershipRequest.objects.filter(
                 requested_username=username,
-                status=MembershipRequest.Status.pending,
+                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
             ).values_list("membership_type_id", flat=True)
         )
         self.fields["membership_type"].queryset = (
@@ -139,6 +139,47 @@ class MembershipRequestForm(forms.Form):
 
 class MembershipRejectForm(forms.Form):
     reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+
+
+class MembershipRequestUpdateResponsesForm(forms.Form):
+    def __init__(self, *args, membership_request: MembershipRequest, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self._question_specs: list[_QuestionSpec] = []
+
+        for item in membership_request.responses or []:
+            if not isinstance(item, dict):
+                continue
+            for question, answer in item.items():
+                spec = _QuestionSpec(name=str(question), title=str(question), required=False)
+                if spec.field_name in self.fields:
+                    continue
+
+                self.fields[spec.field_name] = forms.CharField(
+                    required=False,
+                    label=spec.title,
+                    widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100"}),
+                    initial=str(answer or ""),
+                )
+                self._question_specs.append(spec)
+
+        # Always provide a place for the user to add clarifications.
+        extra_spec = _QuestionSpec(name="Additional information", title="Additional information", required=False)
+        if extra_spec.field_name not in self.fields:
+            self.fields[extra_spec.field_name] = forms.CharField(
+                required=False,
+                label=extra_spec.title,
+                widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100"}),
+            )
+        self._question_specs.append(extra_spec)
+
+    def responses(self) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        for spec in self._question_specs:
+            value = str(self.cleaned_data.get(spec.field_name) or "").strip()
+            if value:
+                out.append({spec.name: value})
+        return out
 
 
 class MembershipUpdateExpiryForm(forms.Form):
