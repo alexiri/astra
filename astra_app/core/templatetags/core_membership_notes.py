@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -168,6 +169,69 @@ def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> 
     return entries
 
 
+def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group consecutive entries by the same author within a short time window.
+
+    This is purely a presentation concern: it reduces repeated avatars + headers
+    when someone performs several actions in quick succession.
+
+    Grouping rules:
+    - Only consecutive entries are eligible.
+    - Same author (note.username, case-insensitive) and same alignment (is_self).
+    - If membership_request_id is present (aggregate views), it must match.
+    - Timestamps must be within 60 seconds of the previous entry.
+    """
+
+    max_gap = timedelta(seconds=60)
+    groups: list[dict[str, Any]] = []
+
+    current: dict[str, Any] | None = None
+    last_ts = None
+
+    for entry in entries:
+        note: Note = entry["note"]
+        username = str(note.username or "").strip().lower()
+        is_self = bool(entry.get("is_self", False))
+        mr_id = entry.get("membership_request_id")
+
+        ts = note.timestamp
+
+        if current is None:
+            current = {
+                "username": username,
+                "is_self": is_self,
+                "membership_request_id": mr_id,
+                "header_entry": entry,
+                "entries": [entry],
+            }
+            last_ts = ts
+            continue
+
+        same_author = current["username"] == username
+        same_side = current["is_self"] == is_self
+        same_request = current.get("membership_request_id") == mr_id
+        within_gap = (ts - last_ts) <= max_gap if last_ts is not None else False
+
+        if same_author and same_side and same_request and within_gap:
+            current["entries"].append(entry)
+            last_ts = ts
+        else:
+            groups.append(current)
+            current = {
+                "username": username,
+                "is_self": is_self,
+                "membership_request_id": mr_id,
+                "header_entry": entry,
+                "entries": [entry],
+            }
+            last_ts = ts
+
+    if current is not None:
+        groups.append(current)
+
+    return groups
+
+
 @register.simple_tag(takes_context=True)
 def membership_notes_aggregate_for_user(
     context: dict[str, Any],
@@ -206,9 +270,11 @@ def membership_notes_aggregate_for_user(
         {
             "compact": compact,
             "membership_request": dummy_request,
-            "entries": _timeline_entries_for_notes(
-                notes,
-                current_username=_current_username_from_request(http_request),
+            "groups": _group_timeline_entries(
+                _timeline_entries_for_notes(
+                    notes,
+                    current_username=_current_username_from_request(http_request),
+                )
             ),
             "note_count": len(notes),
             "approvals": approvals,
@@ -263,9 +329,11 @@ def membership_notes_aggregate_for_organization(
         {
             "compact": compact,
             "membership_request": dummy_request,
-            "entries": _timeline_entries_for_notes(
-                notes,
-                current_username=_current_username_from_request(http_request),
+            "groups": _group_timeline_entries(
+                _timeline_entries_for_notes(
+                    notes,
+                    current_username=_current_username_from_request(http_request),
+                )
             ),
             "note_count": len(notes),
             "approvals": approvals,
@@ -367,7 +435,7 @@ def membership_notes(
         {
             "compact": compact,
             "membership_request": mr,
-            "entries": entries,
+            "groups": _group_timeline_entries(entries),
             "note_count": len(notes),
             "approvals": approvals,
             "disapprovals": disapprovals,

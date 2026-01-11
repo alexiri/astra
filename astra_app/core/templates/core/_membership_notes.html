@@ -66,15 +66,37 @@
         text-align: right;
       }
 
-      #membership-notes-container-{{ membership_request.pk }} .direct-chat-msg.right .direct-chat-text {
-        margin-left: auto;
-        margin-right: 10px;
+      /*
+       * When a single note row contains multiple bubbles (grouped events),
+       * stack them neatly and keep their edges aligned.
+       */
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-bubbles {
+        display: flex;
+        flex-direction: column;
+        gap: .25rem;
+      }
+
+      /* Ensure self-authored *message* bubbles keep a distinct background. */
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-self-bubble {
+        background-color: #007bff;
+        border-color: #007bff;
+        color: #ffffff;
+      }
+
+      #membership-notes-container-{{ membership_request.pk }} .membership-notes-bubbles .direct-chat-text {
+        margin: 0;
+      }
+
+      #membership-notes-container-{{ membership_request.pk }} .direct-chat-msg.right .membership-notes-bubbles {
+        align-items: flex-end;
+        padding-right: 10px;
         text-align: right;
       }
 
-      #membership-notes-container-{{ membership_request.pk }} .direct-chat-msg:not(.right) .direct-chat-text {
-        margin-left: 10px;
-        margin-right: auto;
+      #membership-notes-container-{{ membership_request.pk }} .direct-chat-msg:not(.right) .membership-notes-bubbles {
+        align-items: flex-start;
+        padding-left: 10px;
+        text-align: left;
       }
     </style>
 
@@ -125,65 +147,74 @@
         <div
           class="direct-chat-messages"
           data-membership-notes-messages="{{ membership_request.pk }}"
-          {% if compact %} style="max-height: 260px;"{% endif %}
+          {% if compact %} style="max-height: 260px;"{% else %} style="height: 400px;"{% endif %}
         >
-          {% for entry in entries %}
-            <div class="direct-chat-msg {% if not forloop.last %}mb-3{% endif %} {% if entry.is_self %} right{% endif %}">
-              <div class="direct-chat-infos clearfix">
-                {% if entry.is_self %}
-                  <span class="direct-chat-name float-right">{{ entry.display_username|default:entry.note.username }}</span>
-                  <span class="direct-chat-timestamp float-left">
-                    {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
-                    {% if entry.membership_request_id and entry.membership_request_url %}
-                      <a href="{{ entry.membership_request_url }}" class="text-muted ml-1">(req. #{{ entry.membership_request_id }})</a>
-                    {% endif %}
-                  </span>
-                {% else %}
-                  <span class="direct-chat-name float-left">{{ entry.display_username|default:entry.note.username }}</span>
-                  <span class="direct-chat-timestamp float-right">
-                    {% if entry.membership_request_id and entry.membership_request_url %}
-                      <a href="{{ entry.membership_request_url }}" class="text-muted mr-1">(req. #{{ entry.membership_request_id }})</a>
-                    {% endif %}
-                    {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
-                  </span>
-                {% endif %}
-              </div>
-
-              {% if entry.is_custos %}
-                <img
-                  class="direct-chat-img img-circle"
-                  src="{% static 'core/images/almalinux-logo.svg' %}"
-                  alt="Astra Custodia"
-                  style="object-fit: cover; background: #fff;"
-                >
-              {% elif entry.avatar_user %}
-                {% avatar entry.avatar_user 40 class="direct-chat-img img-circle" style="object-fit:cover;" alt="Avatar" %}
-              {% else %}
-                <img class="direct-chat-img" src="{% static 'core/images/almalinux-logo.svg' %}" alt="user image">
-              {% endif %}
-
-              {% if entry.kind == 'action' %}
-                <div
-                  class="direct-chat-text bg-light membership-notes-bubble"
-                  style="{{ entry.bubble_style }} border: 1px dashed rgba(0,0,0,0.15);"
-                >
-                  <i class="fas {{ entry.icon|default:"fa-bolt" }} mr-1"></i> {{ entry.label }}
+          {% for group in groups %}
+            {% with entry=group.header_entry %}
+              <div
+                class="direct-chat-msg {% if not forloop.last %}mb-3{% endif %} {% if group.is_self %} right{% endif %}"
+                data-membership-notes-group-username="{{ entry.note.username }}"
+              >
+                <div class="direct-chat-infos clearfix">
+                  {% if group.is_self %}
+                    <span class="direct-chat-name float-right">{{ entry.display_username|default:entry.note.username }}</span>
+                    <span class="direct-chat-timestamp float-left">
+                      {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
+                      {% if entry.membership_request_id and entry.membership_request_url %}
+                        <a href="{{ entry.membership_request_url }}" class="text-muted ml-1">(req. #{{ entry.membership_request_id }})</a>
+                      {% endif %}
+                    </span>
+                  {% else %}
+                    <span class="direct-chat-name float-left">{{ entry.display_username|default:entry.note.username }}</span>
+                    <span class="direct-chat-timestamp float-right">
+                      {% if entry.membership_request_id and entry.membership_request_url %}
+                        <a href="{{ entry.membership_request_url }}" class="text-muted mr-1">(req. #{{ entry.membership_request_id }})</a>
+                      {% endif %}
+                      {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
+                    </span>
+                  {% endif %}
                 </div>
-              {% else %}
-                {% if not entry.is_self and entry.bubble_style %}
-                  <div
-                    class="direct-chat-text membership-notes-bubble"
-                    style="{{ entry.bubble_style }}{% if entry.is_custos %} border: 1px dashed rgba(0,0,0,0.15);{% endif %}"
+
+                {% if entry.is_custos %}
+                  <img
+                    class="direct-chat-img img-circle"
+                    src="{% static 'core/images/almalinux-logo.svg' %}"
+                    alt="Astra Custodia"
+                    style="object-fit: cover; background: #fff;"
                   >
-                    {{ entry.note.content }}
-                  </div>
+                {% elif entry.avatar_user %}
+                  {% avatar entry.avatar_user 40 class="direct-chat-img img-circle" style="object-fit:cover;" alt="Avatar" %}
                 {% else %}
-                  <div class="direct-chat-text">
-                    {{ entry.note.content }}
-                  </div>
+                  <img class="direct-chat-img" src="{% static 'core/images/almalinux-logo.svg' %}" alt="user image">
                 {% endif %}
-              {% endif %}
-            </div>
+
+                <div class="membership-notes-bubbles">
+                  {% for entry in group.entries %}
+                    {% if entry.kind == 'action' %}
+                      <div
+                        class="direct-chat-text bg-light membership-notes-bubble"
+                        style="{{ entry.bubble_style }} border: 1px dashed rgba(0,0,0,0.15);"
+                      >
+                        <i class="fas {{ entry.icon|default:"fa-bolt" }} mr-1"></i> {{ entry.label }}
+                      </div>
+                    {% else %}
+                      {% if not entry.is_self and entry.bubble_style %}
+                        <div
+                          class="direct-chat-text membership-notes-bubble"
+                          style="{{ entry.bubble_style }}{% if entry.is_custos %} border: 1px dashed rgba(0,0,0,0.15);{% endif %}"
+                        >
+                          {{ entry.note.content }}
+                        </div>
+                      {% else %}
+                        <div class="direct-chat-text{% if entry.is_self %} membership-notes-self-bubble{% endif %}">
+                          {{ entry.note.content }}
+                        </div>
+                      {% endif %}
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+            {% endwith %}
           {% empty %}
             <div class="text-muted small">No notes yet.</div>
           {% endfor %}

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 from unittest.mock import patch
+
+from django.utils import timezone
 
 from django.test import TestCase
 from django.urls import reverse
@@ -184,3 +187,63 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("Astra Custodia", html)
         self.assertIn("core/images/almalinux-logo.svg", html)
         self.assertIn("--bubble-bg: #e9ecef", html)
+
+    def test_consecutive_actions_by_same_user_within_minute_are_grouped(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        now = timezone.now()
+        base = now - timedelta(minutes=5)
+        n1 = Note.objects.create(
+            membership_request=req,
+            username="alex",
+            content=None,
+            action={"type": "request_on_hold"},
+        )
+        n2 = Note.objects.create(
+            membership_request=req,
+            username="alex",
+            content=None,
+            action={"type": "contacted"},
+        )
+        Note.objects.filter(pk=n1.pk).update(timestamp=base)
+        Note.objects.filter(pk=n2.pk).update(timestamp=base + timedelta(seconds=30))
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": ["membership-committee"],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "Hello via ajax",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload.get("ok"))
+        html = payload.get("html", "")
+
+        # The two consecutive alex actions should render as one grouped row
+        # (one username header + two bubbles).
+        marker = 'data-membership-notes-group-username="alex"'
+        start = html.find(marker)
+        self.assertNotEqual(start, -1, "Expected a grouped row marker for alex")
+        end = html.find('data-membership-notes-group-username="', start + len(marker))
+        group_html = html[start:] if end == -1 else html[start:end]
+
+        self.assertEqual(group_html.count("direct-chat-infos"), 1)
+        self.assertIn("Request on hold", group_html)
+        self.assertIn("User contacted", group_html)
+        bubble_class_hits = re.findall(r'\bmembership-notes-bubble\b', group_html)
+        self.assertEqual(len(bubble_class_hits), 2)
