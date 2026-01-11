@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
+from core.membership_notes import CUSTOS
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Note
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 
@@ -139,7 +140,47 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(resp2.status_code, 200)
         payload2 = json.loads(resp2.content)
         self.assertTrue(payload2.get("ok"))
-        self.assertIn(
-            'class="direct-chat-text membership-notes-bubble" style="--bubble-bg:',
-            payload2.get("html", ""),
+        html2 = payload2.get("html", "")
+        self.assertIn('class="direct-chat-text membership-notes-bubble"', html2)
+        self.assertIn("--bubble-bg:", html2)
+
+    def test_custos_notes_render_with_distinct_style_and_avatar(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        # Pre-seed a system note so the rendered widget includes it.
+        Note.objects.create(
+            membership_request=req,
+            username=CUSTOS,
+            content="system note",
+            action={},
         )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": ["membership-committee"],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "Hello via ajax",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        html = payload.get("html", "")
+        self.assertTrue(payload.get("ok"))
+
+        self.assertIn("Astra Custodia", html)
+        self.assertIn("core/images/almalinux-logo.svg", html)
+        self.assertIn("--bubble-bg: #e9ecef", html)

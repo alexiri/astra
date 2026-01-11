@@ -55,6 +55,8 @@ class MembershipRequestsFlowTests(TestCase):
                 "givenname": ["Alice"],
                 "sn": ["User"],
                 "mail": ["alice@example.com"],
+                # Membership requests are gated by having a valid country.
+                "fasstatusnote": ["US"],
                 "memberof_group": [],
             },
         )
@@ -128,6 +130,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "givenname": ["Alice"],
                 "sn": ["User"],
                 "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
                 "memberof_group": [],
             },
         )

@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils.safestring import SafeString, mark_safe
 
 from core.backends import FreeIPAUser
-from core.membership_notes import note_action_icon, note_action_label, tally_last_votes
+from core.membership_notes import CUSTOS, note_action_icon, note_action_label, tally_last_votes
 from core.models import MembershipRequest, Note
 
 register = template.Library()
@@ -94,11 +94,22 @@ def _current_username_from_request(http_request: HttpRequest | None) -> str:
 
 def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
     avatar_users_by_username: dict[str, object] = {}
-    for username in {n.username for n in notes if n.username}:
+    for username in {n.username for n in notes if n.username and n.username != CUSTOS}:
         user_obj = FreeIPAUser.get(username)
         if user_obj is not None:
             avatar_users_by_username[username] = user_obj
     return avatar_users_by_username
+
+
+def _note_display_username(note: Note) -> str:
+    if note.username == CUSTOS:
+        return "Astra Custodia"
+    return note.username
+
+
+def _custos_bubble_style() -> str:
+    # Similar to action grey, but slightly darker.
+    return "--bubble-bg: #e9ecef; --bubble-fg: #212529;"
 
 
 def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> list[dict[str, Any]]:
@@ -107,6 +118,8 @@ def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> 
     for n in notes:
         is_self = current_username and n.username.lower() == current_username.lower()
         avatar_user = avatar_users_by_username.get(n.username)
+        is_custos = n.username == CUSTOS
+        display_username = _note_display_username(n)
 
         membership_request_id = n.membership_request_id
         membership_request_url = reverse("membership-request-detail", args=[membership_request_id])
@@ -123,6 +136,8 @@ def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> 
                     "is_self": is_self,
                     "avatar_user": avatar_user,
                     "bubble_style": "--bubble-bg: #f8f9fa; --bubble-fg: #212529;",
+                    "is_custos": is_custos,
+                    "display_username": display_username,
                     "membership_request_id": membership_request_id,
                     "membership_request_url": membership_request_url,
                 }
@@ -131,7 +146,10 @@ def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> 
         if n.content is not None and str(n.content).strip() != "":
             bubble_style: str | None = None
             if not is_self and n.username:
-                bubble_style = _bubble_style_for_username(n.username.strip().lower())
+                if is_custos:
+                    bubble_style = _custos_bubble_style()
+                else:
+                    bubble_style = _bubble_style_for_username(n.username.strip().lower())
 
             entries.append(
                 {
@@ -140,6 +158,8 @@ def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> 
                     "is_self": is_self,
                     "avatar_user": avatar_user,
                     "bubble_style": bubble_style,
+                    "is_custos": is_custos,
+                    "display_username": display_username,
                     "membership_request_id": membership_request_id,
                     "membership_request_url": membership_request_url,
                 }
@@ -302,6 +322,8 @@ def membership_notes(
     for n in notes:
         is_self = current_username and n.username.lower() == current_username.lower()
         avatar_user = avatar_users_by_username.get(n.username)
+        is_custos = n.username == CUSTOS
+        display_username = _note_display_username(n)
 
         if isinstance(n.action, dict) and n.action:
             label = note_action_label(n.action)
@@ -315,13 +337,18 @@ def membership_notes(
                     "is_self": is_self,
                     "avatar_user": avatar_user,
                     "bubble_style": "--bubble-bg: #f8f9fa; --bubble-fg: #212529;",
+                    "is_custos": is_custos,
+                    "display_username": display_username,
                 }
             )
 
         if n.content is not None and str(n.content).strip() != "":
             bubble_style: str | None = None
             if not is_self and n.username:
-                bubble_style = _bubble_style_for_username(n.username.strip().lower())
+                if is_custos:
+                    bubble_style = _custos_bubble_style()
+                else:
+                    bubble_style = _bubble_style_for_username(n.username.strip().lower())
 
             entries.append(
                 {
@@ -330,6 +357,8 @@ def membership_notes(
                     "is_self": is_self,
                     "avatar_user": avatar_user,
                     "bubble_style": bubble_style,
+                    "is_custos": is_custos,
+                    "display_username": display_username,
                 }
             )
 

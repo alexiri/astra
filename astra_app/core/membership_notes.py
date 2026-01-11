@@ -5,6 +5,9 @@ from typing import Any
 
 from core.models import MembershipRequest, Note
 
+# Internal username used for system-authored membership-request notes.
+CUSTOS: str = "-"
+
 
 def add_note(
     *,

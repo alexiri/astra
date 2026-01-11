@@ -41,6 +41,8 @@ class EmailChangeValidationFlowTests(TestCase):
                 "sn": ["User"],
                 "mail": ["old@example.org"],
                 "fasRHBZEmail": [""],
+                # Settings changes are gated by having a valid country.
+                "fasstatusnote": ["US"],
             },
         )
 
@@ -84,6 +86,7 @@ class EmailChangeValidationFlowTests(TestCase):
                 "sn": ["User"],
                 "mail": ["verified@example.org"],
                 "fasRHBZEmail": [""],
+                "fasstatusnote": ["US"],
             },
         )
 
@@ -117,6 +120,7 @@ class EmailChangeValidationFlowTests(TestCase):
                 "sn": ["User"],
                 "mail": ["old@example.org"],
                 "fasRHBZEmail": ["verified-bz@example.org"],
+                "fasstatusnote": ["US"],
             },
         )
 
@@ -152,7 +156,7 @@ class EmailChangeValidationFlowTests(TestCase):
             username="alice",
             email="old@example.org",
             is_authenticated=True,
-            _user_data={"mail": ["old@example.org"]},
+            _user_data={"mail": ["old@example.org"], "fasstatusnote": ["US"]},
         )
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):

@@ -299,6 +299,10 @@ ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = _env_int(
 # Membership workflow
 MEMBERSHIP_EXPIRING_SOON_DAYS = _env_int("MEMBERSHIP_EXPIRING_SOON_DAYS", default=60)
 MEMBERSHIP_VALIDITY_DAYS = _env_int("MEMBERSHIP_VALIDITY_DAYS", default=365)
+MEMBERSHIP_EMBARGOED_COUNTRY_CODES = _env_list(
+    "MEMBERSHIP_EMBARGOED_COUNTRY_CODES",
+    default=["CU", "IR", "KP", "MM", "RU", "SY", "VE"],
+)
 MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
     default="membership-expiring-soon",
@@ -488,7 +492,7 @@ else:
 _aws_s3_domain = urlsplit(_aws_s3_domain_raw)
 AWS_S3_URL_PROTOCOL = f"{_aws_s3_domain.scheme}:"
 _aws_s3_base_domain = (_aws_s3_domain.netloc + _aws_s3_domain.path.rstrip("/")).strip("/")
-AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}" 
+AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}"
 
 # MinIO compatibility and predictable URLs.
 AWS_S3_ADDRESSING_STYLE = _env_str("AWS_S3_ADDRESSING_STYLE", default="path") or "path"

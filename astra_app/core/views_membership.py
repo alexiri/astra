@@ -17,10 +17,11 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.backends import FreeIPAUser
+from core.country_codes import country_code_status_from_user_data, is_valid_country_alpha2
 from core.email_context import organization_sponsor_email_context
 from core.forms_membership import MembershipRejectForm, MembershipRequestForm, MembershipUpdateExpiryForm
 from core.membership import get_valid_memberships_for_username
-from core.membership_notes import add_note
+from core.membership_notes import CUSTOS, add_note
 from core.membership_request_workflow import (
     approve_membership_request,
     ignore_membership_request,
@@ -40,9 +41,18 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, block_action_without_country_code
 
 logger = logging.getLogger(__name__)
+
+
+def _embargoed_country_codes() -> set[str]:
+    codes: set[str] = set()
+    for raw in settings.MEMBERSHIP_EMBARGOED_COUNTRY_CODES or []:
+        code = str(raw or "").strip().upper()
+        if code and is_valid_country_alpha2(code):
+            codes.add(code)
+    return codes
 
 
 def _membership_request_target_label(membership_request: MembershipRequest) -> str:
@@ -155,6 +165,14 @@ def membership_request(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("user-profile", username=username)
 
+    blocked = block_action_without_country_code(
+        request,
+        user_data=fu._user_data,
+        action_label="request or renew memberships",
+    )
+    if blocked is not None:
+        return blocked
+
     if request.method == "POST":
         form = MembershipRequestForm(request.POST, username=username)
         if form.is_valid():
@@ -187,11 +205,27 @@ def membership_request(request: HttpRequest) -> HttpResponse:
                     status=MembershipRequest.Status.pending,
                     responses=responses,
                 )
+
                 record_membership_request_created(
                     membership_request=mr,
                     actor_username=username,
                     send_submitted_email=True,
                 )
+
+                try:
+                    status = country_code_status_from_user_data(fu._user_data)
+                    if status.is_valid and status.code in _embargoed_country_codes():
+                        add_note(
+                            membership_request=mr,
+                            username=CUSTOS,
+                            content=f"{username} is from {status.code}, which is on the embargoed list.",
+                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to record embargoed-country system note request_id=%s username=%s",
+                        mr.pk,
+                        username,
+                    )
 
                 messages.success(request, "Membership request submitted.")
                 return redirect("user-profile", username=username)
@@ -435,11 +469,16 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     target_user = None
     target_full_name = ""
     target_deleted = False
+    embargoed_country_code: str | None = None
     if req.requested_username:
         target_user = FreeIPAUser.get(req.requested_username)
         target_deleted = target_user is None
         if target_user is not None:
             target_full_name = target_user.full_name
+            status = country_code_status_from_user_data(target_user._user_data)
+            embargoed_country_codes = _embargoed_country_codes()
+            if status.is_valid and status.code in embargoed_country_codes:
+                embargoed_country_code = status.code
 
     requested_log = (
         req.logs.filter(action=MembershipLog.Action.requested)
@@ -464,6 +503,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "target_user": target_user,
             "target_full_name": target_full_name,
             "target_deleted": target_deleted,
+            "embargoed_country_code": embargoed_country_code,
             "requested_by_username": requested_by_username,
             "requested_by_full_name": requested_by_full_name,
             "requested_by_deleted": requested_by_deleted,

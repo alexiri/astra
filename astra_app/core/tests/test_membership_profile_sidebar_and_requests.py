@@ -39,6 +39,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         sn = ""
         if full_name and " " in full_name:
             givenname, sn = full_name.split(" ", 1)
+
+        # Membership requests/renewals and settings changes are gated by a valid country.
+        # Use the configured attribute name so tests stay aligned with settings.
+        country_attr = settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR
         return FreeIPAUser(
             username,
             {
@@ -49,6 +53,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 "displayname": [full_name] if full_name else [],
                 "mail": [f"{username}@example.com"],
                 "memberof_group": list(groups or []),
+                country_attr: ["US"],
             },
         )
 

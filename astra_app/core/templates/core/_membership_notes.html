@@ -131,7 +131,7 @@
             <div class="direct-chat-msg {% if not forloop.last %}mb-3{% endif %} {% if entry.is_self %} right{% endif %}">
               <div class="direct-chat-infos clearfix">
                 {% if entry.is_self %}
-                  <span class="direct-chat-name float-right">{{ entry.note.username }}</span>
+                  <span class="direct-chat-name float-right">{{ entry.display_username|default:entry.note.username }}</span>
                   <span class="direct-chat-timestamp float-left">
                     {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
                     {% if entry.membership_request_id and entry.membership_request_url %}
@@ -139,7 +139,7 @@
                     {% endif %}
                   </span>
                 {% else %}
-                  <span class="direct-chat-name float-left">{{ entry.note.username }}</span>
+                  <span class="direct-chat-name float-left">{{ entry.display_username|default:entry.note.username }}</span>
                   <span class="direct-chat-timestamp float-right">
                     {% if entry.membership_request_id and entry.membership_request_url %}
                       <a href="{{ entry.membership_request_url }}" class="text-muted mr-1">(req. #{{ entry.membership_request_id }})</a>
@@ -149,7 +149,14 @@
                 {% endif %}
               </div>
 
-              {% if entry.avatar_user %}
+              {% if entry.is_custos %}
+                <img
+                  class="direct-chat-img img-circle"
+                  src="{% static 'core/images/almalinux-logo.svg' %}"
+                  alt="Astra Custodia"
+                  style="object-fit: cover; background: #fff;"
+                >
+              {% elif entry.avatar_user %}
                 {% avatar entry.avatar_user 40 class="direct-chat-img img-circle" style="object-fit:cover;" alt="Avatar" %}
               {% else %}
                 <img class="direct-chat-img" src="{% static 'core/images/almalinux-logo.svg' %}" alt="user image">
@@ -164,7 +171,10 @@
                 </div>
               {% else %}
                 {% if not entry.is_self and entry.bubble_style %}
-                  <div class="direct-chat-text membership-notes-bubble" style="{{ entry.bubble_style }}">
+                  <div
+                    class="direct-chat-text membership-notes-bubble"
+                    style="{{ entry.bubble_style }}{% if entry.is_custos %} border: 1px dashed rgba(0,0,0,0.15);{% endif %}"
+                  >
                     {{ entry.note.content }}
                   </div>
                 {% else %}

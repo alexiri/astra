@@ -15,21 +15,12 @@ from django.shortcuts import redirect, render
 from python_freeipa import ClientMeta, exceptions
 
 from core.backends import FreeIPAUser
-from core.country_codes import country_code_status_from_user_data
 from core.forms_selfservice import OTPAddForm, OTPConfirmForm, OTPTokenActionForm, OTPTokenRenameForm
-from core.views_utils import _normalize_str, settings_context
+from core.views_utils import _normalize_str, block_action_without_country_code, settings_context
 
 
 def _block_settings_change_without_country_code(request: HttpRequest, *, user_data: dict | None) -> HttpResponse | None:
-    status = country_code_status_from_user_data(user_data)
-    if status.is_valid:
-        return None
-
-    messages.error(
-        request,
-        "A valid country code is required before you can change settings. Please set it on the Address tab.",
-    )
-    return redirect("settings-address")
+    return block_action_without_country_code(request, user_data=user_data, action_label="change settings")
 
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
 # For maximum compatibility, must be a multiple of 5.

@@ -167,10 +167,17 @@ class SettingsOTPViewTests(TestCase):
             otptoken_add=lambda **k: {"result": {"ipatokenuniqueid": ["t1"]}},
         )
 
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.org",
+            _user_data={"fasstatusnote": ["US"]},
+        )
+
         # Only service client is required for confirm.
-        with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
-            with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
-                response = settings_otp(request)
+        with patch("core.views_settings_otp.FreeIPAUser.get", autospec=True, return_value=fake_user):
+            with patch("core.views_settings_otp.settings_context", return_value={}, autospec=True):
+                with patch("core.views_settings_otp.ClientMeta", autospec=True, side_effect=[svc_client, svc_client]):
+                    response = settings_otp(request)
 
         self.assertEqual(response.status_code, 302)
         msgs = [m.message for m in get_messages(request)]

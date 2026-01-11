@@ -5,9 +5,13 @@ import re
 from typing import Any
 
 from django.conf import settings
+from django.contrib import messages
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect
 
 from core.agreements import has_enabled_agreements
 from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
+from core.country_codes import country_code_status_from_user_data
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +21,29 @@ def settings_context(active_tab: str) -> dict[str, object]:
         "active_tab": active_tab,
         "show_agreements_tab": has_enabled_agreements(),
     }
+
+
+def block_action_without_country_code(
+    request: HttpRequest,
+    *,
+    user_data: dict | None,
+    action_label: str,
+) -> HttpResponse | None:
+    """Enforce that a user has a valid country code before performing an action.
+
+    This is a legal/compliance requirement used across multiple flows (e.g.
+    settings updates, membership requests).
+    """
+
+    status = country_code_status_from_user_data(user_data)
+    if status.is_valid:
+        return None
+
+    messages.error(
+        request,
+        f"A valid country code is required before you can {action_label}. Please set it on the Address tab.",
+    )
+    return redirect("settings-address")
 
 
 _ATTR_NOT_ALLOWED_RE = re.compile(r"attribute\s+['\"]?([a-zA-Z0-9_-]+)['\"]?\s+not\s+allowed", re.IGNORECASE)

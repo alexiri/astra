@@ -14,6 +14,13 @@
 {% block content %}
   <div class="card">
     <div class="card-body">
+      {% if embargoed_country_code %}
+        <div class="alert alert-warning" role="alert">
+          <strong>Compliance warning:</strong>
+          Target user country code ({{ embargoed_country_code }}) is in the embargoed list.
+        </div>
+      {% endif %}
+
       <dl class="row mb-0">
         <dt class="col-sm-3">Status</dt>
         <dd class="col-sm-9">{{ req.get_status_display }}</dd>

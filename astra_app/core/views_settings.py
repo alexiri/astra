@@ -19,9 +19,10 @@ from python_freeipa import ClientMeta
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.backends import FreeIPAFASAgreement, FreeIPAUser
-from core.country_codes import country_code_status_from_user_data
 from core.email_context import user_email_context
 from core.forms_selfservice import AddressForm, EmailsForm, KeysForm, PasswordChangeFreeIPAForm, ProfileForm
+from core.membership_notes import CUSTOS, add_note
+from core.models import MembershipRequest
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import (
     _add_change,
@@ -39,6 +40,7 @@ from core.views_utils import (
     _update_user_attrs,
     _value_to_csv,
     _value_to_text,
+    block_action_without_country_code,
     settings_context,
 )
 
@@ -46,15 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 def _block_settings_change_without_country_code(request: HttpRequest, *, user_data: dict | None) -> HttpResponse | None:
-    status = country_code_status_from_user_data(user_data)
-    if status.is_valid:
-        return None
-
-    messages.error(
-        request,
-        "A valid country code is required before you can change settings. Please set it on the Address tab.",
-    )
-    return redirect("settings-address")
+    return block_action_without_country_code(request, user_data=user_data, action_label="change settings")
 
 
 def _photon_best_address_fields(payload: dict) -> dict[str, str] | None:
@@ -426,6 +420,9 @@ def settings_address(request: HttpRequest) -> HttpResponse:
 
     form = AddressForm(request.POST or None, initial=initial)
     if request.method == "POST" and form.is_valid():
+        old_country = str(initial.get("c") or "").strip().upper()
+        new_country = str(form.cleaned_data.get("c") or "").strip().upper()
+
         setattrs: list[str] = []
         delattrs: list[str] = []
 
@@ -489,6 +486,33 @@ def settings_address(request: HttpRequest) -> HttpResponse:
 
             if applied:
                 messages.success(request, "Address updated in FreeIPA.")
+
+                if (
+                    old_country
+                    and new_country
+                    and old_country != new_country
+                    and country_attr not in (skipped or [])
+                ):
+                    pending = list(
+                        MembershipRequest.objects.filter(
+                            requested_username=username,
+                            status=MembershipRequest.Status.pending,
+                        ).only("pk")
+                    )
+                    if pending:
+                        for mr in pending:
+                            try:
+                                add_note(
+                                    membership_request=mr,
+                                    username=CUSTOS,
+                                    content=f"{username} updated their country from {old_country} to {new_country}.",
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to record country-change system note request_id=%s username=%s",
+                                    mr.pk,
+                                    username,
+                                )
             else:
                 messages.info(request, "No changes were applied.")
             return redirect("settings-address")
