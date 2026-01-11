@@ -14,6 +14,7 @@ from post_office.models import EmailTemplate
 
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
+    configured_email_template_names,
     create_email_template_unique,
     email_template_to_dict,
     placeholder_context_from_sources,
@@ -58,7 +59,11 @@ class EmailTemplateManageForm(forms.Form):
 @permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_templates(request: HttpRequest):
     templates = list(EmailTemplate.objects.all().order_by("name"))
-    return render(request, "core/email_templates.html", {"templates": templates})
+    return render(
+        request,
+        "core/email_templates.html",
+        {"templates": templates, "locked_names": configured_email_template_names()},
+    )
 
 
 @require_http_methods(["GET", "POST"])
@@ -114,6 +119,7 @@ def email_template_create(request: HttpRequest):
             "rendered_preview": rendered_preview,
             "available_variables": available_variables,
             "is_create": True,
+            "is_locked": False,
         },
     )
 
@@ -125,14 +131,28 @@ def email_template_edit(request: HttpRequest, template_id: int):
     if tpl is None:
         raise Http404("Template not found")
 
+    locked_names = configured_email_template_names()
+    is_locked = tpl.name in locked_names
+
     rendered_preview = {"html": "", "text": "", "subject": ""}
     available_variables: list[tuple[str, str]] = []
 
     if request.method == "POST":
         form = EmailTemplateManageForm(request.POST)
+        if is_locked:
+            # A locked template may still be edited, but its identity (name) is fixed by config.
+            form.fields["name"].disabled = True
+            form.fields["name"].initial = tpl.name
         if form.is_valid():
             name = form.cleaned_data["name"]
-            if EmailTemplate.objects.exclude(pk=tpl.pk).filter(name=name).exists():
+            if tpl.name in locked_names and name != tpl.name:
+                msg = (
+                    "This template is referenced by the app configuration and cannot be renamed."
+                    " Update settings (or switch to a different template) first."
+                )
+                form.add_error("name", msg)
+                messages.error(request, msg)
+            elif EmailTemplate.objects.exclude(pk=tpl.pk).filter(name=name).exists():
                 form.add_error("name", "A template with this name already exists.")
             else:
                 tpl.name = name
@@ -171,6 +191,8 @@ def email_template_edit(request: HttpRequest, template_id: int):
                 "html_content": tpl.html_content,
             }
         )
+        if is_locked:
+            form.fields["name"].disabled = True
         ctx = placeholder_context_from_sources(tpl.subject, tpl.html_content, tpl.content)
         available_variables = list(ctx.items())
         try:
@@ -199,6 +221,7 @@ def email_template_edit(request: HttpRequest, template_id: int):
             "available_variables": available_variables,
             "is_create": False,
             "template_delete_url": reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
+            "is_locked": is_locked,
         },
     )
 
@@ -209,6 +232,14 @@ def email_template_delete(request: HttpRequest, template_id: int):
     tpl = EmailTemplate.objects.filter(pk=template_id).first()
     if tpl is None:
         raise Http404("Template not found")
+
+    if tpl.name in configured_email_template_names():
+        messages.error(
+            request,
+            "This template is referenced by the app configuration and cannot be deleted."
+            " Update settings (or switch to a different template) first.",
+        )
+        return redirect("email-templates")
 
     try:
         name = str(tpl.name)

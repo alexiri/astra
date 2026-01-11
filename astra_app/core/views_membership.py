@@ -1007,6 +1007,10 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
             send_approved_email=not custom_email,
             approved_email_template_name=None,
         )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        messages.error(request, message)
+        return redirect(redirect_to)
     except Exception:
         logger.exception("Failed to approve membership request pk=%s", req.pk)
         messages.error(request, "Failed to approve the request.")

@@ -40,7 +40,7 @@
     Media types. For broad categories only, to determine what processing
     is possible.
     """
-  
+
     text = "text"
     image = "image"
     audio = "audio"
@@ -78,6 +78,7 @@
 
 - Use `{% empty %}` in templates, instead of `{% if %}{% for _ in _ %}{% endfor %}{% else %}`
 - Don't use javascript confirmations, there are modals defined in `_modal_*.html`
+- If you add new email templates listed in `settings.py`, make sure they're listed in `configured_email_template_names`
 
 ## DRY + Single Source of Truth (required)
 

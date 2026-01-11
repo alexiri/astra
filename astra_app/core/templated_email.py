@@ -34,6 +34,35 @@ _INLINE_IMAGE_TAG_REWRITE_PATTERN = re.compile(
 _MAX_INLINE_IMAGE_BYTES: int = 10 * 1024 * 1024
 
 
+def configured_email_template_names() -> frozenset[str]:
+    """Return template names referenced by Django settings.
+
+    These templates are effectively part of the app's runtime configuration.
+    Renaming/deleting them via the UI can break critical workflows.
+
+    This is intentionally explicit (no reflection over settings) so the list is
+    obvious and safe to audit.
+    """
+
+    return frozenset(
+        {
+            settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+            settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
+            settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
+            settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+            settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+            settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
+            settings.PASSWORD_RESET_EMAIL_TEMPLATE_NAME,
+            settings.PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME,
+            settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+            settings.REGISTRATION_EMAIL_TEMPLATE_NAME,
+            settings.EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME,
+        }
+    )
+
+
 def validate_email_subject_no_folding(subject: str) -> None:
     """Reject subjects that would be serialized as folded headers.
 

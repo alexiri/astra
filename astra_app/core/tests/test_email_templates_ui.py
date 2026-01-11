@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
@@ -105,6 +106,127 @@ class EmailTemplatesUiTests(TestCase):
 
         self.assertEqual(delete_resp.status_code, 200)
         self.assertFalse(EmailTemplate.objects.filter(pk=tpl.pk).exists())
+
+    def test_cannot_delete_template_referenced_by_settings(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
+        tpl, _ = EmailTemplate.objects.update_or_create(
+            name=locked_name,
+            defaults={
+                "description": "Locked",
+                "subject": "Subj",
+                "content": "Text",
+                "html_content": "<p>Text</p>",
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(EmailTemplate.objects.filter(pk=tpl.pk).exists())
+        self.assertContains(resp, "cannot be deleted")
+
+    def test_list_hides_delete_action_for_locked_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
+        tpl, _ = EmailTemplate.objects.update_or_create(
+            name=locked_name,
+            defaults={
+                "description": "Locked",
+                "subject": "Subj",
+                "content": "Text",
+                "html_content": "<p>Text</p>",
+            },
+        )
+
+        delete_url = reverse("email-template-delete", kwargs={"template_id": tpl.pk})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("email-templates"))
+
+        self.assertEqual(resp.status_code, 200)
+        # Locked templates should not advertise a delete action in the UI.
+        self.assertNotContains(resp, f"data-delete-url=\"{delete_url}\"")
+
+    def test_edit_disables_name_field_for_locked_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
+        tpl, _ = EmailTemplate.objects.update_or_create(
+            name=locked_name,
+            defaults={
+                "description": "Locked",
+                "subject": "Subj",
+                "content": "Text",
+                "html_content": "<p>Text</p>",
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("email-template-edit", kwargs={"template_id": tpl.pk}))
+
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        marker = 'id="id_name"'
+        idx = html.find(marker)
+        self.assertNotEqual(idx, -1, "Expected name input to render")
+        start = html.rfind("<input", 0, idx)
+        end = html.find(">", idx)
+        self.assertNotEqual(start, -1)
+        self.assertNotEqual(end, -1)
+        name_input_tag = html[start : end + 1]
+        self.assertIn("disabled", name_input_tag)
+
+    def test_cannot_rename_template_referenced_by_settings(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
+        tpl, _ = EmailTemplate.objects.update_or_create(
+            name=locked_name,
+            defaults={
+                "description": "Locked",
+                "subject": "Subj",
+                "content": "Text",
+                "html_content": "<p>Text</p>",
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
+                data={
+                    "name": f"{locked_name}-renamed",
+                    "description": "Locked",
+                    "subject": "Subj",
+                    "html_content": "<p>Text</p>",
+                    "text_content": "Text",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        tpl.refresh_from_db()
+        self.assertEqual(tpl.name, locked_name)
+        self.assertContains(resp, "cannot be renamed")
 
     def test_create_rejects_subject_that_would_be_header_folded(self) -> None:
         from post_office.models import EmailTemplate

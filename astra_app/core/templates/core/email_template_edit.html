@@ -20,6 +20,9 @@
             <div class="form-group">
               <label for="{{ form.name.id_for_label }}">Name</label>
               {{ form.name }}
+              {% if is_locked %}
+                <div class="text-muted small mt-1">This template is referenced by the app configuration and cannot be renamed.</div>
+              {% endif %}
               {% if form.name.errors %}<div class="text-danger small">{{ form.name.errors }}</div>{% endif %}
             </div>
 
@@ -47,8 +50,12 @@
             <a class="btn btn-outline-secondary" href="{% url 'email-templates' %}">Back</a>
 
             <div class="flex-grow-1 text-center">
-              {% if template %}
+              {% if template and not is_locked %}
                 <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#email-template-delete-modal">
+                  Delete
+                </button>
+              {% elif template and is_locked %}
+                <button type="button" class="btn btn-outline-danger" disabled aria-disabled="true" title="This template is referenced by the app configuration and cannot be deleted.">
                   Delete
                 </button>
               {% endif %}
@@ -61,7 +68,7 @@
     </div>
   </form>
 
-  {% if template %}
-    {% include 'core/_modal_confirm.html' with modal_id='email-template-delete-modal' title='Delete email template?' body_prefix='Delete template:' body_emphasis=template.name body_suffix='This cannot be undone.' action_url=template_delete_url submit_label='Delete' submit_class='btn-danger' %}
+  {% if template and not is_locked %}
+    {% include 'core/_modal_confirm.html' with modal_id='email-template-delete-modal' title='Delete email template?' body_prefix='Delete template:' body_emphasis=template.name body_suffix='<p>This cannot be undone.</p>' action_url=template_delete_url submit_label='Delete' submit_class='btn-danger' %}
   {% endif %}
 {% endblock %}

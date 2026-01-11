@@ -4,7 +4,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
@@ -41,6 +41,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
+                "acceptance_template": None,
                 "isIndividual": True,
                 "isOrganization": False,
                 "sort_order": 0,
@@ -219,6 +220,81 @@ class MembershipRequestsFlowTests(TestCase):
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
         self.assertEqual(kwargs["template"], "membership-request-approved-individual")
+
+    def test_committee_approve_is_blocked_if_configured_template_is_missing(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType
+        from post_office.models import EmailTemplate
+
+        import uuid
+
+        missing_name = f"missing-approval-template-{uuid.uuid4()}"
+        EmailTemplate.objects.filter(name=missing_name).delete()
+        self.assertFalse(EmailTemplate.objects.filter(name=missing_name).exists())
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="individual")
+        self.assertIsNone(membership_type.acceptance_template_id)
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = "membership-committee"
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with override_settings(MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME=missing_name):
+            self.assertEqual(settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME, missing_name)
+            with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+                with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
+                    resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Configured email template")
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        add_mock.assert_not_called()
+        self.assertFalse(
+            MembershipLog.objects.filter(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                action=MembershipLog.Action.approved,
+            ).exists()
+        )
 
     def test_committee_can_approve_request_with_custom_email_redirects_to_send_mail(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
@@ -1462,7 +1538,8 @@ class MembershipRequestsFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'navbar-badge">2<')
-        self.assertContains(resp, 'Membership Requests')
+        self.assertContains(resp, 'href="/membership/requests/"')
+        self.assertContains(resp, 'Pending requests')
 
     def test_approval_expiry_is_end_of_day_utc(self) -> None:
         import datetime

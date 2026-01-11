@@ -7,6 +7,7 @@ import post_office.mail
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
 from core.email_context import (
@@ -25,6 +26,18 @@ from core.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_configured_email_template_exists(*, template_name: str) -> None:
+    name = str(template_name or "").strip()
+    if not name:
+        raise ValidationError("Configured email template name is empty")
+
+    if not EmailTemplate.objects.filter(name=name).exists():
+        raise ValidationError(
+            f"Configured email template {name!r} was not found. "
+            "Please recreate it (or update the relevant setting / membership type template)."
+        )
 
 
 def _organization_notification_email(organization: Organization) -> str:
@@ -352,6 +365,15 @@ def approve_membership_request(
             membership_type.code,
         )
 
+        org_email = _organization_notification_email(org)
+        if send_approved_email and org_email:
+            template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+            if membership_type.acceptance_template_id is not None:
+                template_name = membership_type.acceptance_template.name
+            if approved_email_template_name:
+                template_name = approved_email_template_name
+            _ensure_configured_email_template_exists(template_name=template_name)
+
         # This must be captured before any membership/sponsorship updates.
         previous_expires_at = previous_expires_at_for_org_extension(organization_id=org.pk)
 
@@ -427,7 +449,6 @@ def approve_membership_request(
             )
             raise
 
-        org_email = _organization_notification_email(org)
         if send_approved_email and org_email:
             template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
             if membership_type.acceptance_template_id is not None:
@@ -546,6 +567,14 @@ def approve_membership_request(
             membership_request.requested_username,
         )
         raise ValidationError("Unable to load the requested user from FreeIPA")
+
+    if send_approved_email and target.email:
+        template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+        if membership_type.acceptance_template_id is not None:
+            template_name = membership_type.acceptance_template.name
+        if approved_email_template_name:
+            template_name = approved_email_template_name
+        _ensure_configured_email_template_exists(template_name=template_name)
 
     logger.debug(
         "approve_membership_request: add_to_group start request_id=%s target=%r group_cn=%r",
