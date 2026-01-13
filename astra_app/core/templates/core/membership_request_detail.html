@@ -31,7 +31,7 @@
         <dd class="col-sm-9">{{ req.get_status_display }}</dd>
 
         <dt class="col-sm-3">Requested at</dt>
-        <dd class="col-sm-9">{{ req.requested_at|date:"r" }}</dd>
+        <dd class="col-sm-9">{{ req.requested_at }}</dd>
 
         {% if requested_by_username %}
           <dt class="col-sm-3">Requested by</dt>
@@ -79,7 +79,7 @@
 
         {% if req.decided_at %}
           <dt class="col-sm-3">Decided at</dt>
-          <dd class="col-sm-9">{{ req.decided_at|date:"r" }}</dd>
+          <dd class="col-sm-9">{{ req.decided_at }}</dd>
         {% endif %}
 
         {% if req.decided_by_username %}

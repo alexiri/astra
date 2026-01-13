@@ -145,7 +145,7 @@
                     <div class="mt-2">
                       <div class="small text-muted">
                         <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a>
-                        &middot; {{ r.requested_at|date:"r" }}
+                        &middot; {{ r.requested_at }}
                       </div>
                       <div class="mt-2">
                         {% for item in r.responses %}
@@ -317,7 +317,7 @@
                 <td>{{ r.membership_type.name }}</td>
                 <td class="text-nowrap">
                   {% if r.on_hold_at %}
-                    {{ r.on_hold_at|date:"r" }}
+                    {{ r.on_hold_at }}
                     <div class="text-muted small">{{ r.on_hold_at|timesince }} ago</div>
                   {% else %}
                     <span class="text-muted">(unknown)</span>

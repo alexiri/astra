@@ -17,14 +17,14 @@
         <dd class="col-sm-9">{{ req.get_status_display }}</dd>
 
         <dt class="col-sm-3">Requested at</dt>
-        <dd class="col-sm-9">{{ req.requested_at|date:"r" }}</dd>
+        <dd class="col-sm-9">{{ req.requested_at }}</dd>
 
         <dt class="col-sm-3">Type</dt>
         <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
 
         {% if req.on_hold_at %}
           <dt class="col-sm-3">On hold since</dt>
-          <dd class="col-sm-9">{{ req.on_hold_at|date:"r" }}</dd>
+          <dd class="col-sm-9">{{ req.on_hold_at }}</dd>
         {% endif %}
       </dl>
 
