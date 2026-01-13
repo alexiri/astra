@@ -24,8 +24,8 @@
               </dd>
             <dt class="col-sm-4">Seats</dt>
             <dd class="col-sm-8">{{ election.number_of_seats }}</dd>
-          </dl>     
-          
+          </dl>
+
           {% if election.description %}
             <p>{{ election.description }}</p>
           {% endif %}
@@ -419,13 +419,11 @@
           <div class="card-body" style="display: none;">
             {% if election.status == 'open' %}
               <div class="mb-3">
-                <form method="post" action="{% url 'election-resend-credentials' election.id %}" class="mb-3">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-outline-primary btn-sm">Resend all credentials</button>
-                </form>
+                <div class="mb-3">
+                  <a href="{% url 'election-send-mail-credentials' election.id %}" class="btn btn-outline-primary btn-sm">Resend all credentials</a>
+                </div>
 
-                <form method="post" action="{% url 'election-resend-credentials' election.id %}" class="mb-0">
-                  {% csrf_token %}
+                <form method="get" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
                   <label class="sr-only" for="resend-credential-username">Username</label>
                   <div class="input-group input-group-sm">
                     <input

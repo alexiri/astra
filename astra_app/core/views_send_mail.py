@@ -548,7 +548,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
 
         prefill_type = str(request.GET.get("type") or "").strip().lower()
         to_raw = str(request.GET.get("to") or "").strip()
-        if to_raw:
+        if prefill_type == "csv":
+            initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_CSV
+            deep_link_autoload_recipients = True
+        elif to_raw:
             if prefill_type == "group":
                 initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_GROUP
                 initial["group_cn"] = to_raw
@@ -798,8 +801,15 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     if not usernames:
                         raise ValueError("Select one or more users.")
                     preview, recipients = _preview_for_users(usernames)
+                elif recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
+                    raw_payload = request.session.get(_CSV_SESSION_KEY)
+                    if not raw_payload:
+                        raise ValueError("Upload a CSV.")
+                    payload = json.loads(str(raw_payload))
+                    if not isinstance(payload, dict):
+                        raise ValueError("Saved CSV recipients are unavailable.")
+                    preview, recipients = _preview_from_csv_session_payload(payload)
                 else:
-                    # CSV cannot be deep-linked without an uploaded/saved payload.
                     preview = None
                     recipients = []
             except ValueError as e:

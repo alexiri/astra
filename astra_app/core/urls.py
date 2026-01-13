@@ -72,9 +72,9 @@ urlpatterns = [
     path("elections/<int:election_id>/vote/", views_elections.election_vote, name="election-vote"),
 
     path(
-        "elections/<int:election_id>/resend-credentials/",
-        views_elections.election_resend_credentials,
-        name="election-resend-credentials",
+        "elections/<int:election_id>/send-mail-credentials/",
+        views_elections.election_send_mail_credentials,
+        name="election-send-mail-credentials",
     ),
 
     path("elections/<int:election_id>/extend-end/", views_elections.election_extend_end, name="election-extend-end"),

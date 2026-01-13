@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Max, Min, Prefetch, Sum
 from django.db.models.functions import TruncDate
-from django.http import Http404, HttpResponseBadRequest, HttpResponseGone, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseGone, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -55,6 +55,7 @@ from core.templated_email import (
     render_templated_email_preview_response,
 )
 from core.user_labels import user_choice_from_freeipa, user_label
+from core.views_send_mail import _CSV_SESSION_KEY
 
 _RECEIPT_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -1254,14 +1255,18 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
     }
 
 
-@require_POST
+@require_GET
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
-def election_resend_credentials(request, election_id: int):
+def election_send_mail_credentials(request: HttpRequest, election_id: int) -> HttpResponse:
     election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
 
-    target_username = str(request.POST.get("username") or "").strip()
+    if election.status != Election.Status.open:
+        messages.error(request, "Only open elections can send credential reminders.")
+        return redirect("election-detail", election_id=election.id)
+
+    target_username = str(request.GET.get("username") or "").strip()
 
     credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
     if not credentials_qs.exists():
@@ -1283,10 +1288,7 @@ def election_resend_credentials(request, election_id: int):
         messages.error(request, "That user does not have a voting credential for this election.")
         return redirect("election-detail", election_id=election.id)
 
-    emailed = 0
-    skipped = 0
-    failed = 0
-
+    recipients: list[dict[str, str]] = []
     for credential in credential_list:
         username = str(credential.freeipa_username or "").strip()
         if not username:
@@ -1294,32 +1296,51 @@ def election_resend_credentials(request, election_id: int):
 
         user = FreeIPAUser.get(username)
         if user is None or not user.email:
-            skipped += 1
             continue
 
         tz_name = _get_freeipa_timezone_name(user)
 
-        try:
-            elections_services.send_voting_credential_email(
-                request=request,
-                election=election,
-                username=username,
-                email=user.email,
-                credential_public_id=str(credential.public_id),
-                tz_name=tz_name,
-            )
-            emailed += 1
-        except Exception:
-            failed += 1
+        ctx = elections_services.build_voting_credential_email_context(
+            request=request,
+            election=election,
+            username=username,
+            credential_public_id=str(credential.public_id),
+            tz_name=tz_name,
+            user=user,
+        )
+        recipients.append({str(k): str(v) for k, v in ctx.items()})
 
-    if emailed:
-        messages.success(request, f"Sent {emailed} credential email(s).")
-    if skipped:
-        messages.warning(request, f"Skipped {skipped} user(s) (missing email).")
-    if failed:
-        messages.error(request, f"Failed to send {failed} email(s).")
+    if not recipients:
+        messages.error(request, "No credential recipients are available (missing email addresses?).")
+        return redirect("election-detail", election_id=election.id)
 
-    return redirect("election-detail", election_id=election.id)
+    request.session[_CSV_SESSION_KEY] = json.dumps(
+        {
+            "header_to_var": {
+                "Email": "email",
+                "Username": "username",
+                "First name": "first_name",
+                "Last name": "last_name",
+                "Full name": "full_name",
+                "Election ID": "election_id",
+                "Election name": "election_name",
+                "Election description": "election_description",
+                "Election URL": "election_url",
+                "Election start": "election_start_datetime",
+                "Election end": "election_end_datetime",
+                "Number of seats": "election_number_of_seats",
+                "Credential": "credential_public_id",
+                "Vote URL": "vote_url",
+                "Vote URL (with credential)": "vote_url_with_credential_fragment",
+            },
+            "recipients": recipients,
+        }
+    )
+
+    send_mail_url = reverse("send-mail")
+    template_name = settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME
+    query = urlencode({"type": "csv", "template": template_name})
+    return redirect(f"{send_mail_url}?{query}")
 
 
 @require_POST

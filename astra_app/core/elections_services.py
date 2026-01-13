@@ -21,8 +21,8 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import Email
 
-from core.backends import FreeIPAGroup
-from core.email_context import user_email_context
+from core.backends import FreeIPAGroup, FreeIPAUser
+from core.email_context import user_email_context, user_email_context_from_user
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -353,26 +353,13 @@ def send_voting_credential_email(
     html_template: str | None = None,
     text_template: str | None = None,
 ) -> None:
-    context: dict[str, object] = {
-        **user_email_context(username=username),
-        "election_id": election.id,
-        "election_name": election.name,
-        "election_description": election.description,
-        "election_url": election.url,
-        "election_start_datetime": _format_datetime_in_timezone(dt=election.start_datetime, tz_name=tz_name),
-        "election_end_datetime": _format_datetime_in_timezone(dt=election.end_datetime, tz_name=tz_name),
-        "election_number_of_seats": election.number_of_seats,
-        "credential_public_id": credential_public_id,
-        "vote_url": election_vote_url(
-            request=request,
-            election=election,
-        ),
-        "vote_url_with_credential_fragment": election_vote_url_with_credential_fragment(
-            request=request,
-            election=election,
-            credential_public_id=credential_public_id,
-        ),
-    }
+    context = build_voting_credential_email_context(
+        request=request,
+        election=election,
+        username=username,
+        credential_public_id=credential_public_id,
+        tz_name=tz_name,
+    )
 
     if subject_template is not None or html_template is not None or text_template is not None:
         rendered_subject = _render_template_string(subject_template or "", context)
@@ -396,6 +383,45 @@ def send_voting_credential_email(
         context=context,
         render_on_delivery=True,
     )
+
+
+def build_voting_credential_email_context(
+    *,
+    request: HttpRequest | None,
+    election: Election,
+    username: str,
+    credential_public_id: str,
+    tz_name: str | None = None,
+    user: FreeIPAUser | None = None,
+) -> dict[str, object]:
+    """Build template context for election voting credential emails.
+
+    This is shared by direct credential delivery and by the Send Mail tool deep-link
+    used for reminder/extension announcements.
+    """
+
+    user_context = user_email_context_from_user(user=user) if user is not None else user_email_context(username=username)
+
+    return {
+        **user_context,
+        "election_id": election.id,
+        "election_name": election.name,
+        "election_description": election.description,
+        "election_url": election.url,
+        "election_start_datetime": _format_datetime_in_timezone(dt=election.start_datetime, tz_name=tz_name),
+        "election_end_datetime": _format_datetime_in_timezone(dt=election.end_datetime, tz_name=tz_name),
+        "election_number_of_seats": election.number_of_seats,
+        "credential_public_id": credential_public_id,
+        "vote_url": election_vote_url(
+            request=request,
+            election=election,
+        ),
+        "vote_url_with_credential_fragment": election_vote_url_with_credential_fragment(
+            request=request,
+            election=election,
+            credential_public_id=credential_public_id,
+        ),
+    }
 
 
 def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
