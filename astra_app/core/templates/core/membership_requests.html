@@ -97,37 +97,19 @@
                       </div>
                     {% endif %}
                   {% elif row.organization %}
-                    {% if row.organization.representative %}
-                      {% if row.requested_by_username != row.organization.representative %}
-                        <div class="text-muted small">
-                          Requested by:
-                          <a href="{% url 'user-profile' row.requested_by_username %}">
-                            {% if row.requested_by_full_name %}
-                              {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                            {% else %}
-                              {{ row.requested_by_username }}
-                            {% endif %}
-                          </a>
-                          {% if row.requested_by_deleted %}
-                            <span class="text-muted">(deleted)</span>
-                          {% endif %}
-                        </div>
-                      {% endif %}
-                    {% else %}
-                      <div class="text-muted small">
-                        Requested by:
-                        <a href="{% url 'user-profile' row.requested_by_username %}">
-                          {% if row.requested_by_full_name %}
-                            {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                          {% else %}
-                            {{ row.requested_by_username }}
-                          {% endif %}
-                        </a>
-                        {% if row.requested_by_deleted %}
-                          <span class="text-muted">(deleted)</span>
+                    <div class="text-muted small">
+                      Requested by:
+                      <a href="{% url 'user-profile' row.requested_by_username %}">
+                        {% if row.requested_by_full_name %}
+                          {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                        {% else %}
+                          {{ row.requested_by_username }}
                         {% endif %}
-                      </div>
-                    {% endif %}
+                      </a>
+                      {% if row.requested_by_deleted %}
+                        <span class="text-muted">(deleted)</span>
+                      {% endif %}
+                    </div>
                   {% endif %}
                 {% endif %}
 
@@ -270,37 +252,19 @@
                         </div>
                       {% endif %}
                     {% elif row.organization %}
-                      {% if row.organization.representative %}
-                        {% if row.requested_by_username != row.organization.representative %}
-                          <div class="text-muted small">
-                            Requested by:
-                            <a href="{% url 'user-profile' row.requested_by_username %}">
-                              {% if row.requested_by_full_name %}
-                                {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                              {% else %}
-                                {{ row.requested_by_username }}
-                              {% endif %}
-                            </a>
-                            {% if row.requested_by_deleted %}
-                              <span class="text-muted">(deleted)</span>
-                            {% endif %}
-                          </div>
-                        {% endif %}
-                      {% else %}
-                        <div class="text-muted small">
-                          Requested by:
-                          <a href="{% url 'user-profile' row.requested_by_username %}">
-                            {% if row.requested_by_full_name %}
-                              {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                            {% else %}
-                              {{ row.requested_by_username }}
-                            {% endif %}
-                          </a>
-                          {% if row.requested_by_deleted %}
-                            <span class="text-muted">(deleted)</span>
+                      <div class="text-muted small">
+                        Requested by:
+                        <a href="{% url 'user-profile' row.requested_by_username %}">
+                          {% if row.requested_by_full_name %}
+                            {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+                          {% else %}
+                            {{ row.requested_by_username }}
                           {% endif %}
-                        </div>
-                      {% endif %}
+                        </a>
+                        {% if row.requested_by_deleted %}
+                          <span class="text-muted">(deleted)</span>
+                        {% endif %}
+                      </div>
                     {% endif %}
                   {% endif %}
 
