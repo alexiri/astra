@@ -150,6 +150,13 @@ def _jsonify_tally_result(result: dict[str, object]) -> dict[str, object]:
 
 
 def build_public_ballots_export(*, election: Election) -> dict[str, object]:
+    candidate_usernames_by_id = dict(
+        Candidate.objects.filter(election=election).values_list(
+            "id",
+            "freeipa_username",
+        )
+    )
+
     ballots = list(
         Ballot.objects.filter(election=election)
         .order_by("created_at", "id")
@@ -164,6 +171,20 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
         )
     )
     for row in ballots:
+        ranking_ids = row.get("ranking") or []
+        if isinstance(ranking_ids, list):
+            ranking_usernames: list[str] = []
+            for cid in ranking_ids:
+                try:
+                    candidate_id = int(cid)
+                except (TypeError, ValueError):
+                    continue
+
+                username = str(candidate_usernames_by_id.get(candidate_id) or candidate_id).strip()
+                if username:
+                    ranking_usernames.append(username)
+            row["ranking"] = ranking_usernames
+
         row["superseded_by"] = row.pop("superseded_by__ballot_hash")
 
     genesis_hash = election_genesis_chain_hash(election.id)
@@ -767,7 +788,7 @@ def issue_voting_credential(*, election: Election, freeipa_username: str, weight
 @transaction.atomic
 def anonymize_election(*, election: Election) -> dict[str, int]:
     """Anonymize election credentials and scrub sensitive emails.
-    
+
     Returns a dict with 'credentials_affected' and 'emails_scrubbed' counts.
     """
     if election.status not in {Election.Status.closed, Election.Status.tallied}:
@@ -852,7 +873,7 @@ def close_election(*, election: Election) -> None:
         event_type="election_closed",
         payload={"chain_head": chain_head},
         is_public=True,
-    )    
+    )
 
 
 @transaction.atomic
@@ -915,7 +936,7 @@ def tally_election(*, election: Election) -> dict[str, object]:
     election.save(update_fields=["tally_result", "status"])
 
     persist_public_election_artifacts(election=election)
-    
+
     for idx, round_payload in enumerate(result.get("rounds") or [], start=1):
         AuditLogEntry.objects.create(
             election=election,

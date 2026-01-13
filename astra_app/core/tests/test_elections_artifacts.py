@@ -13,6 +13,44 @@ from core.tokens import election_genesis_chain_hash
 
 
 class ElectionArtifactGenerationTests(TestCase):
+    def test_build_public_ballots_export_uses_candidate_usernames_in_rankings(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Artifact election (ranking mapping)",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+        c1 = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+
+        genesis_hash = election_genesis_chain_hash(election.id)
+        ballot_hash = Ballot.compute_hash(
+            election_id=election.id,
+            credential_public_id="cred-1",
+            ranking=[c1.id],
+            weight=1,
+            nonce="0" * 32,
+        )
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
+        Ballot.objects.create(
+            election=election,
+            credential_public_id="cred-1",
+            ranking=[c1.id],
+            weight=1,
+            ballot_hash=ballot_hash,
+            previous_chain_hash=genesis_hash,
+            chain_hash=chain_hash,
+        )
+
+        payload = elections_services.build_public_ballots_export(election=election)
+        self.assertEqual(payload["ballots"][0]["ranking"], ["alice"])
+
     def test_tally_generates_public_ballots_and_audit_artifacts(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
