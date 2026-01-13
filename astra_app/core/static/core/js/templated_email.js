@@ -307,12 +307,66 @@
       var textTa = q(container, 'textarea[name="text_content"]');
       if (!window.CodeMirror || !htmlTa || !textTa) return;
 
+      function ensureHtmlLintWarning(message) {
+        var existing = q(container, '[data-compose-html-lint-warning]');
+        if (existing) return;
+
+        var label = null;
+        try {
+          label = container.querySelector('label[for="id_html_content"]');
+        } catch (_e0) {
+          label = null;
+        }
+        if (!label || !label.parentNode) return;
+
+        var node = null;
+        try {
+          node = document.createElement('div');
+        } catch (_e1) {
+          node = null;
+        }
+        if (!node) return;
+
+        node.setAttribute('data-compose-html-lint-warning', '1');
+        node.className = 'text-muted small';
+        node.style.marginTop = '-0.25rem';
+        node.textContent = String(message || 'HTML linting is unavailable.');
+        label.parentNode.insertBefore(node, label.nextSibling);
+      }
+
+      function getHtmlLintHelper() {
+        // The html-lint addon registers a helper under "html".
+        // When using htmlmixed mode, cm.getHelper("lint") may or may not
+        // resolve depending on the mode; this keeps linting reliable.
+        try {
+          if (window.CodeMirror && window.CodeMirror.helpers && window.CodeMirror.helpers.lint) {
+            return window.CodeMirror.helpers.lint.html || null;
+          }
+        } catch (_e) {
+          // Ignore.
+        }
+        return null;
+      }
+
       var htmlEditor = window.CodeMirror.fromTextArea(htmlTa, {
         mode: 'htmlmixed',
         theme: 'mdn-like',
         lineNumbers: false,
         lineWrapping: true,
+        gutters: ['CodeMirror-lint-markers'],
+        lint: {
+          getAnnotations: getHtmlLintHelper() || null,
+          selfContain: true,
+          highlightLines: true,
+        },
       });
+
+      // The CodeMirror html-lint addon depends on a global HTMLHint.
+      // If it's missing, lint.js will silently do nothing (and html-lint.js logs
+      // an error). Provide a small inline hint so this is discoverable.
+      if (getHtmlLintHelper() && !window.HTMLHint) {
+        ensureHtmlLintWarning('HTML linting is enabled but HTMLHint is not loaded.');
+      }
 
       var textEditor = window.CodeMirror.fromTextArea(textTa, {
         mode: 'text/plain',
@@ -673,10 +727,111 @@
     return compose.container.querySelector('[data-compose-preview="' + String(kind) + '"]');
   }
 
+  function supportsSrcdoc(iframe) {
+    // Some older browsers don't support srcdoc; keep a fallback so preview
+    // updates never break the rest of the widget.
+    try {
+      return iframe && ('srcdoc' in iframe);
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function wrapHtmlForIframe(html) {
+    var body = String(html || '');
+
+    // If the preview already includes a full document, keep it as-is.
+    // This avoids nesting <html>/<body> tags in a way that can render oddly.
+    if (/<\s*html[\s>]/i.test(body) || /<\s*body[\s>]/i.test(body)) {
+      return body;
+    }
+
+    return (
+      '<!doctype html>' +
+      '<html>' +
+      '<head>' +
+      '<meta charset="utf-8">' +
+      // Keep links from navigating inside the iframe.
+      '<base target="_blank">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<style>html,body{margin:0;padding:0;background:#fff;}body{padding:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.35;}</style>' +
+      '</head>' +
+      '<body>' + body + '</body>' +
+      '</html>'
+    );
+  }
+
+  function ensurePreviewIframe(box) {
+    if (!box) return null;
+
+    var existing = null;
+    try {
+      existing = box.querySelector('iframe[data-compose-preview-iframe="1"]');
+    } catch (_e0) {
+      existing = null;
+    }
+    if (existing) return existing;
+
+    var iframe = null;
+    try {
+      iframe = document.createElement('iframe');
+    } catch (_e1) {
+      iframe = null;
+    }
+    if (!iframe) return null;
+
+    iframe.setAttribute('data-compose-preview-iframe', '1');
+    iframe.setAttribute('title', 'Rendered HTML preview');
+    // Sandbox to prevent preview HTML from affecting the parent page.
+    // Allow popups so links can be followed in a new tab.
+    iframe.setAttribute('sandbox', 'allow-popups');
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    iframe.style.display = 'block';
+    iframe.style.width = '100%';
+    iframe.style.height = '320px';
+    iframe.style.border = '0';
+    iframe.style.background = '#fff';
+
+    // Clear any legacy preview HTML. This is important because malformed HTML
+    // (or <style> tags) can leak into the surrounding page.
+    try {
+      box.textContent = '';
+    } catch (_e2) {
+      // Ignore.
+    }
+    box.appendChild(iframe);
+    return iframe;
+  }
+
   function setPreviewHtml(compose, html) {
     var box = getPreviewBox(compose, 'html');
     if (!box) return;
-    box.innerHTML = html || '<span class="text-muted">No preview yet.</span>';
+
+    var iframe = ensurePreviewIframe(box);
+    if (!iframe) {
+      // Last-resort fallback: preserve existing behavior.
+      box.innerHTML = html || '<span class="text-muted">No preview yet.</span>';
+      return;
+    }
+
+    var content = html || '<span class="text-muted">No preview yet.</span>';
+    var doc = wrapHtmlForIframe(content);
+
+    if (supportsSrcdoc(iframe)) {
+      iframe.srcdoc = doc;
+      return;
+    }
+
+    // Fallback for browsers without srcdoc.
+    try {
+      var w = iframe.contentWindow;
+      if (!w || !w.document) throw new Error('no document');
+      w.document.open();
+      w.document.write(doc);
+      w.document.close();
+    } catch (_e) {
+      box.innerHTML = content;
+    }
   }
 
   function setPreviewText(compose, text) {

@@ -127,11 +127,14 @@
       <div class="col-md-6">
         <h5>Rendered preview (HTML, first recipient)</h5>
         <div class="border rounded p-2 bg-white" style="min-height: 140px;" data-compose-preview="html">
-          {% if rendered_preview.html %}
-            {{ rendered_preview.html|safe }}
-          {% else %}
-            <span class="text-muted">No preview yet.</span>
-          {% endif %}
+          <iframe
+            data-compose-preview-iframe="1"
+            title="Rendered HTML preview"
+            sandbox="allow-popups"
+            referrerpolicy="no-referrer"
+            style="display:block;width:100%;height:320px;border:0;background:#fff;"
+            srcdoc="{% if rendered_preview.html %}{{ rendered_preview.html|escape }}{% else %}&lt;span class=&quot;text-muted&quot;&gt;No preview yet.&lt;/span&gt;{% endif %}"
+          ></iframe>
         </div>
       </div>
       <div class="col-md-6">
@@ -144,6 +147,7 @@
 
 <link rel="stylesheet" href="{% static 'core/vendor/codemirror/codemirror.min.css' %}">
 <link rel="stylesheet" href="{% static 'core/vendor/codemirror/mdn-like.min.css' %}">
+<link rel="stylesheet" href="{% static 'core/vendor/codemirror/lint.css' %}">
 
 <style>
   /* Ensure CodeMirror editors feel like AdminLTE form-controls. */
@@ -171,6 +175,10 @@
 <script src="{% static 'core/vendor/codemirror/css.min.js' %}"></script>
 <script src="{% static 'core/vendor/codemirror/htmlmixed.min.js' %}"></script>
 <script src="{% static 'core/vendor/codemirror/overlay.min.js' %}"></script>
+
+<script src="{% static 'core/vendor/codemirror/lint.js' %}"></script>
+<script src="{% static 'core/vendor/htmlhint/htmlhint.min.js' %}"></script>
+<script src="{% static 'core/vendor/codemirror/html-lint.js' %}"></script>
 
 <script src="{% static 'core/js/templated_email.js' %}"></script>
 
