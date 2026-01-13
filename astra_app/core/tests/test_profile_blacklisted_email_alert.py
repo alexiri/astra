@@ -52,8 +52,8 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="account-setup-required-alert"')
         self.assertContains(resp, 'id="email-blacklisted-alert"')
-        self.assertContains(resp, "alert-danger")
         self.assertContains(resp, "blacklisted", html=False)
         self.assertContains(resp, f'href="{reverse("settings-emails")}"')
 

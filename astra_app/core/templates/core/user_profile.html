@@ -9,30 +9,39 @@
 
 {% block content %}
 <div class="profile-page">
-  {% if is_self and email_is_blacklisted %}
-    <div class="alert alert-danger" id="email-blacklisted-alert" role="alert">
-      <strong>Email delivery problem:</strong>
-      Your email address{% if fu.email %} (<a class="text-reset" href="mailto:{{ fu.email }}">{{ fu.email }}</a>){% endif %} has been blacklisted due to mail delivery issues.
-      Please <a href="{% url 'settings-emails' %}" class="alert-link">set a new email address</a>.
+  {% if is_self and account_setup_required_actions %}
+    <div class="alert alert-danger shadow" id="account-setup-required-alert" role="alert">
+      <strong>Action required:</strong>
+      Please complete these steps to finish setting up your account.
+      <ul class="mb-0 pl-3">
+        {% for item in account_setup_required_actions %}
+          <li id="{{ item.id }}">
+            {{ item.label }} — <a href="{{ item.url }}" class="alert-link">{{ item.url_label }}</a>
+          </li>
+        {% endfor %}
+      </ul>
     </div>
   {% endif %}
 
-  {% if is_self and country_code_missing_or_invalid %}
-    <div class="alert alert-danger" id="country-code-missing-alert" role="alert">
-      <strong>Action required:</strong>
-      Your profile is missing a valid <em>country code</em>. For legal reasons, all users must have a valid ISO 3166-1 alpha-2 country code on file.
-      Please <a href="{% url 'settings-address' %}" class="alert-link">set your country code</a>.
-    </div>
-  {% endif %}
-
-  {% if is_self and membership_action_required_requests %}
-    <div class="alert alert-danger" id="membership-action-required-alert" role="alert">
-      <strong>Action required:</strong>
-      To complete your membership request, please
-      <a
-        href="{% url 'membership-request-self' membership_action_required_requests.0.request_id %}"
-        class="alert-link"
-      >provide the requested information</a>.
+  {% if is_self and not account_setup_required_actions and account_setup_recommended_actions %}
+    <div
+      class="alert alert-warning alert-dismissible fade show"
+      id="account-setup-recommended-alert"
+      role="alert"
+      data-dismiss-key="account_setup_recommended_v1"
+    >
+      <button type="button" class="close" data-dismiss="alert" aria-label="Dismiss">
+        <span aria-hidden="true">&times;</span>
+      </button>
+      <strong>Recommended:</strong>
+      These aren't required, but they'll help you participate more fully.
+      <ul class="mb-0 pl-3">
+        {% for item in account_setup_recommended_actions %}
+          <li id="{{ item.id }}">
+            {{ item.label }} — <a href="{{ item.url }}" class="alert-link">{{ item.url_label }}</a>
+          </li>
+        {% endfor %}
+      </ul>
     </div>
   {% endif %}
 
@@ -352,6 +361,33 @@
 
 {% block scripts %}
   {{ block.super }}
+<script>
+(function () {
+  var node = document.getElementById('account-setup-recommended-alert');
+  if (!node) return;
+
+  var key = node.getAttribute('data-dismiss-key') || '';
+  if (!key) return;
+
+  try {
+    if (window.localStorage && window.localStorage.getItem(key) === '1') {
+      node.parentNode.removeChild(node);
+      return;
+    }
+  } catch (e) {
+    // Best-effort: if storage is blocked, keep showing the alert.
+  }
+
+  // Bootstrap triggers the `closed.bs.alert` event after the fade completes.
+  node.addEventListener('closed.bs.alert', function () {
+    try {
+      if (window.localStorage) window.localStorage.setItem(key, '1');
+    } catch (e) {
+      // Ignore.
+    }
+  });
+})();
+</script>
 <script>
 (function () {
   var tzNode = document.getElementById('user-timezone');

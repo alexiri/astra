@@ -74,17 +74,32 @@ def _profile_context_for_user(
 
     show_agreements = has_enabled_agreements()
     if show_agreements:
-        agreements = [
-            a.cn
-            for a in list_agreements_for_user(
-                fu.username,
-                user_groups=groups_list,
-                include_disabled=False,
-                applicable_only=False,
+        agreements_for_user = list_agreements_for_user(
+            fu.username,
+            user_groups=groups_list,
+            include_disabled=False,
+            applicable_only=False,
+        )
+
+        agreements = sorted([a.cn for a in agreements_for_user if a.signed], key=str.lower)
+
+        coc_agreement = next(
+            (
+                a
+                for a in agreements_for_user
+                if a.cn == settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN and a.enabled
+            ),
+            None,
+        )
+        coc_signed = bool(coc_agreement and coc_agreement.signed)
+        coc_settings_url = (
+            reverse(
+                "settings-agreement-detail",
+                kwargs={"cn": settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN},
             )
-            if a.signed
-        ]
-        agreements = sorted(agreements, key=str.lower)
+            if is_self
+            else None
+        )
 
         missing_required: dict[str, set[str]] = {}
         for group_cn in sorted(member_groups, key=str.lower):
@@ -104,6 +119,8 @@ def _profile_context_for_user(
     else:
         agreements = []
         missing_agreements = []
+        coc_signed = True
+        coc_settings_url = None
 
     def _as_list(value: object) -> list[str]:
         if isinstance(value, list):
@@ -124,6 +141,8 @@ def _profile_context_for_user(
     membership_request_url = reverse("membership-request")
     valid_memberships = get_valid_memberships_for_username(fu.username)
     valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
+
+    has_individual_membership = any(m.membership_type.isIndividual for m in valid_memberships)
 
     membership_type_ids = {m.membership_type_id for m in valid_memberships}
 
@@ -209,6 +228,63 @@ def _profile_context_for_user(
 
     country_status = country_code_status_from_user_data(data)
 
+    account_setup_required_actions: list[dict[str, str]] = []
+    account_setup_recommended_actions: list[dict[str, str]] = []
+
+    has_open_membership_request = bool(pending_requests)
+
+    if is_self:
+        if not coc_signed and coc_settings_url:
+            account_setup_required_actions.append(
+                {
+                    "id": "coc-not-signed-alert",
+                    "label": f"Sign the {settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN}",
+                    "url": coc_settings_url,
+                    "url_label": "Review & sign",
+                }
+            )
+
+        if not country_status.is_valid:
+            account_setup_required_actions.append(
+                {
+                    "id": "country-code-missing-alert",
+                    "label": "Add a valid ISO 3166-1 alpha-2 country code",
+                    "url": reverse("settings-address"),
+                    "url_label": "Set country code",
+                }
+            )
+
+        if email_is_blacklisted:
+            account_setup_required_actions.append(
+                {
+                    "id": "email-blacklisted-alert",
+                    "label": "Fix email delivery (your address is blacklisted)",
+                    "url": reverse("settings-emails"),
+                    "url_label": "Update email",
+                }
+            )
+
+        if membership_action_required_requests:
+            request_id = int(membership_action_required_requests[0]["request_id"])
+            account_setup_required_actions.append(
+                {
+                    "id": "membership-action-required-alert",
+                    "label": "Respond to a membership request (information requested)",
+                    "url": reverse("membership-request-self", args=[request_id]),
+                    "url_label": "Provide info",
+                }
+            )
+
+        if (not has_individual_membership) and membership_can_request_any and (not has_open_membership_request):
+            account_setup_recommended_actions.append(
+                {
+                    "id": "membership-request-recommended-alert",
+                    "label": "Request an individual membership",
+                    "url": membership_request_url,
+                    "url_label": "Request a membership",
+                }
+            )
+
     return {
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
@@ -216,6 +292,8 @@ def _profile_context_for_user(
         "email_is_blacklisted": email_is_blacklisted,
         "country_code": country_status.code,
         "country_code_missing_or_invalid": not country_status.is_valid,
+        "account_setup_required_actions": account_setup_required_actions,
+        "account_setup_recommended_actions": account_setup_recommended_actions,
         "membership_request_url": membership_request_url,
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,

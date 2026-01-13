@@ -113,6 +113,9 @@ SELF_SERVICE_ADDRESS_COUNTRY_ATTR = (
     or "fasstatusnote"
 )
 
+# FreeIPA FAS agreement CN used for the Community Code of Conduct.
+COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN = "AlmaLinux Community Code of Conduct"
+
 # Django management commands (e.g. `migrate`) still import settings, but they don't
 # need certain web-runtime-only secrets. This makes one-off tasks safer and easier
 # to run without granting access to unrelated secrets.

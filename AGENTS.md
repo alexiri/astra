@@ -79,6 +79,7 @@
 - Use `{% empty %}` in templates, instead of `{% if %}{% for _ in _ %}{% endfor %}{% else %}`
 - Don't use javascript confirmations, there are modals defined in `_modal_*.html`
 - If you add new email templates listed in `settings.py`, make sure they're listed in `configured_email_template_names`
+- never use the character `’` (U+2019), use `'`.
 
 ## DRY + Single Source of Truth (required)
 
