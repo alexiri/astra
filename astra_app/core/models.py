@@ -995,7 +995,7 @@ class Election(models.Model):
     end_datetime = models.DateTimeField()
     number_of_seats = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
     quorum = models.PositiveSmallIntegerField(
-        default=50,
+        default=10,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text="Minimum turnout percentage required to conclude the election without extension.",
     )

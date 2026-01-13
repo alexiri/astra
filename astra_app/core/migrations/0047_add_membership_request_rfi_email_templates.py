@@ -30,7 +30,7 @@ def add_membership_request_rfi_and_embargoed_templates(apps, schema_editor) -> N
         {
             "name": "membership-request-rfi",
             "description": "Membership request request-for-information (RFI)",
-            "subject": "Action required: more information needed for your membership application",
+            "subject": "Action required: information needed for your membership application",
             "html_content": (
                 "<p>Hello {{ full_name }},</p>\n"
                 "<p>Thank you for applying for <strong>{{ membership_type }}</strong> membership with the AlmaLinux OS Foundation.</p>\n"

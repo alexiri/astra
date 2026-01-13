@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
             model_name="election",
             name="quorum",
             field=models.PositiveSmallIntegerField(
-                default=50,
+                default=10,
                 help_text="Minimum turnout percentage (0-100) required to conclude the election without extension.",
                 validators=[MinValueValidator(0), MaxValueValidator(100)],
             ),
