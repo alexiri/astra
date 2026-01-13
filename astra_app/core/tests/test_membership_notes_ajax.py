@@ -5,10 +5,9 @@ import re
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.utils import timezone
-
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.membership_notes import CUSTOS

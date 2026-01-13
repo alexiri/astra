@@ -222,10 +222,11 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["template"], "membership-request-approved-individual")
 
     def test_committee_approve_is_blocked_if_configured_template_is_missing(self) -> None:
-        from core.models import MembershipLog, MembershipRequest, MembershipType
+        import uuid
+
         from post_office.models import EmailTemplate
 
-        import uuid
+        from core.models import MembershipLog, MembershipRequest, MembershipType
 
         missing_name = f"missing-approval-template-{uuid.uuid4()}"
         EmailTemplate.objects.filter(name=missing_name).delete()

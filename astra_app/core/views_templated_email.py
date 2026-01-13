@@ -14,9 +14,9 @@ from post_office.models import EmailTemplate
 
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
-    configured_email_template_names,
     create_email_template_unique,
     email_template_to_dict,
+    locked_email_template_names,
     placeholder_context_from_sources,
     render_templated_email_preview,
     render_templated_email_preview_response,
@@ -62,7 +62,7 @@ def email_templates(request: HttpRequest):
     return render(
         request,
         "core/email_templates.html",
-        {"templates": templates, "locked_names": configured_email_template_names()},
+        {"templates": templates, "locked_names": locked_email_template_names()},
     )
 
 
@@ -131,7 +131,7 @@ def email_template_edit(request: HttpRequest, template_id: int):
     if tpl is None:
         raise Http404("Template not found")
 
-    locked_names = configured_email_template_names()
+    locked_names = locked_email_template_names()
     is_locked = tpl.name in locked_names
 
     rendered_preview = {"html": "", "text": "", "subject": ""}
@@ -233,10 +233,10 @@ def email_template_delete(request: HttpRequest, template_id: int):
     if tpl is None:
         raise Http404("Template not found")
 
-    if tpl.name in configured_email_template_names():
+    if tpl.name in locked_email_template_names():
         messages.error(
             request,
-            "This template is referenced by the app configuration and cannot be deleted."
+            "This template is referenced by the app configuration or a membership type and cannot be deleted."
             " Update settings (or switch to a different template) first.",
         )
         return redirect("email-templates")

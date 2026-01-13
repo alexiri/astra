@@ -63,6 +63,30 @@ def configured_email_template_names() -> frozenset[str]:
     )
 
 
+def locked_email_template_names() -> frozenset[str]:
+    """Return template names that must not be deleted/renamed via the UI.
+
+    This includes templates referenced by settings as well as templates that are
+    attached to membership types.
+    """
+
+    locked = set(configured_email_template_names())
+
+    # Import lazily to avoid import cycles during Django startup.
+    from core.models import MembershipType
+
+    for membership_type in (
+        MembershipType.objects.select_related("acceptance_template")
+        .exclude(acceptance_template__isnull=True)
+        .only("acceptance_template__name")
+    ):
+        name = str(membership_type.acceptance_template.name or "").strip()
+        if name:
+            locked.add(name)
+
+    return frozenset(locked)
+
+
 def validate_email_subject_no_folding(subject: str) -> None:
     """Reject subjects that would be serialized as folded headers.
 

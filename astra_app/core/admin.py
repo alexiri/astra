@@ -38,6 +38,7 @@ from core.membership_csv_import import (
     MembershipCSVImportForm,
     MembershipCSVImportResource,
 )
+from core.protected_resources import protected_freeipa_group_cns
 from core.user_labels import user_choice, user_choice_from_freeipa, user_choices_from_users
 from core.views_utils import _normalize_str
 
@@ -68,6 +69,8 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
 
 
 class FreeIPAModelAdmin(admin.ModelAdmin):
@@ -1155,6 +1158,13 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
             freeipa.add_member_group(group_cn)
         for group_cn in sorted(current_member_groups - desired_member_groups):
             freeipa.remove_member_group(group_cn)
+
+    @override
+    def delete_model(self, request, obj) -> None:
+        group_cn = str(obj.cn or obj.pk or "").strip()
+        if group_cn and group_cn in protected_freeipa_group_cns():
+            raise FreeIPAOperationFailed(f"Group {group_cn!r} is protected and cannot be deleted")
+        return super().delete_model(request, obj)
 
 @admin.register(IPAFASAgreement)
 class IPAFASAgreementAdmin(FreeIPAModelAdmin):

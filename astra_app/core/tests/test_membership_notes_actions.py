@@ -45,7 +45,6 @@ class MembershipNotesActionTests(TestCase):
             ).exists()
         )
 
-
     def test_request_created_action_label_includes_creator(self) -> None:
         from core.membership_notes import note_action_label
 

@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
-from core.models import FreeIPAPermissionGrant
+from core.models import FreeIPAPermissionGrant, MembershipType
 from core.permissions import ASTRA_ADD_SEND_MAIL
 
 
@@ -226,6 +226,90 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         tpl.refresh_from_db()
         self.assertEqual(tpl.name, locked_name)
+        self.assertContains(resp, "cannot be renamed")
+
+    def test_cannot_delete_template_referenced_by_membership_type(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        tpl = EmailTemplate.objects.create(
+            name="membership-acceptance-locked",
+            description="Locked",
+            subject="Subj",
+            content="Text",
+            html_content="<p>Text</p>",
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual_acceptance_locked",
+            defaults={
+                "name": "Individual",
+                "votes": 1,
+                "group_cn": "",  # not relevant for this test
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+                "acceptance_template": tpl,
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(EmailTemplate.objects.filter(pk=tpl.pk).exists())
+        self.assertContains(resp, "cannot be deleted")
+
+    def test_cannot_rename_template_referenced_by_membership_type(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+
+        tpl = EmailTemplate.objects.create(
+            name="membership-acceptance-locked-rename",
+            description="Locked",
+            subject="Subj",
+            content="Text",
+            html_content="<p>Text</p>",
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual_acceptance_locked_rename",
+            defaults={
+                "name": "Individual",
+                "votes": 1,
+                "group_cn": "",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+                "acceptance_template": tpl,
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
+                data={
+                    "name": "membership-acceptance-locked-rename-new",
+                    "description": "Locked",
+                    "subject": "Subj",
+                    "html_content": "<p>Text</p>",
+                    "text_content": "Text",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        tpl.refresh_from_db()
+        self.assertEqual(tpl.name, "membership-acceptance-locked-rename")
         self.assertContains(resp, "cannot be renamed")
 
     def test_create_rejects_subject_that_would_be_header_folded(self) -> None:
