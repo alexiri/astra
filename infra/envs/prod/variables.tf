@@ -76,5 +76,12 @@ variable "cron_jobs" {
     weekday = optional(string)
   }))
   description = "Cron jobs to configure on the host."
-  default     = []
+  default = [
+    {
+      name    = "membership-operations"
+      minute  = "0"
+      hour    = "0"
+      command = "podman exec astra-app-1 python manage.py membership_operations"
+    }
+  ]
 }
