@@ -42,6 +42,7 @@ locals {
     "${path.module}/../../systemd/astra-caddy.service",
     "${path.module}/../../systemd/Caddyfile",
     "${path.module}/../../systemd/astra.env.example",
+    "${path.module}/../../systemd/caddy.env.example",
     "${path.module}/../../ansible/files/deploy-prod.sh",
     "${path.module}/../../ansible/files/rollback-prod.sh",
     "${path.module}/../../ansible/files/deploy-prod-sha.sh",

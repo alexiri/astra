@@ -52,9 +52,10 @@ The playbook installs podman, copies the systemd units and Caddyfile, writes `/e
 
 ## Environment file updates
 
-On first boot, `/etc/astra/astra.env` is created with `APP_IMAGE` and `CADDY_IMAGE` plus empty placeholders
-for required application settings. Copy `infra/systemd/astra.env.example`, fill in the values, and upload
-it to `/etc/astra/astra.env`.
+On first boot, `/etc/astra/astra.env` is created with `APP_IMAGE` plus empty placeholders for required
+application settings. `/etc/astra/caddy.env` is created with `CADDY_IMAGE`. Copy
+`infra/systemd/astra.env.example` and `infra/systemd/caddy.env.example`, fill in the values, and upload
+them to `/etc/astra/astra.env` and `/etc/astra/caddy.env`.
 
 After updating the env file on the host:
 

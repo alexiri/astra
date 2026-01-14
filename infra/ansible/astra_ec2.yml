@@ -57,6 +57,15 @@
         mode: "0600"
         force: false
 
+    - name: Install Caddy env file example if missing
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/caddy.env.example"
+        dest: /etc/astra/caddy.env
+        owner: root
+        group: root
+        mode: "0600"
+        force: false
+
     - name: Ensure APP_IMAGE is set
       ansible.builtin.lineinfile:
         path: /etc/astra/astra.env
@@ -66,7 +75,7 @@
 
     - name: Ensure CADDY_IMAGE is set
       ansible.builtin.lineinfile:
-        path: /etc/astra/astra.env
+        path: /etc/astra/caddy.env
         regexp: '^CADDY_IMAGE='
         line: "CADDY_IMAGE={{ caddy_image }}"
       when: caddy_image | length > 0
