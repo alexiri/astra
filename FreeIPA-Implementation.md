@@ -1,29 +1,28 @@
-# FreeIPA Dev Environment Implementation
+# FreeIPA Staging Environment Implementation
 
 ## Overview
 
-This document describes the minimal FreeIPA setup for the Astra dev environment on AWS, based on `fedora-infra/tiny-stage`.
+This document describes the minimal FreeIPA setup for the Astra staging environment on AWS, based on `fedora-infra/tiny-stage`.
 
 ## What Was Implemented
 
 ### 1. Terraform Module (`infra/modules/freeipa/`)
 
-**Purpose:** Provision a single Fedora EC2 instance for FreeIPA with proper security groups.
+**Purpose:** Provision a single AlmaLinux EC2 instance for FreeIPA with proper security groups.
 
 **Key Features:**
-- Uses latest Fedora Cloud AMI (Fedora 43)
-- Instance type: `t3.medium` (FreeIPA needs reasonable resources)
+- Uses latest AlmaLinux OS 10 AMI
+- Instance type: `t3.small` (FreeIPA needs reasonable resources; consider `t3.medium` for faster installs)
 - 30 GB encrypted EBS volume
 - Security groups for all IPA ports (HTTP/S, LDAP/S, Kerberos, DNS)
 - Optional Elastic IP for stable external access
 - Generates Ansible inventory automatically
 
 **Security Model:**
-- ALB/web UI access: configurable CIDRs (default: `0.0.0.0/0` for dev)
-- LDAP/Kerberos: restricted to VPC CIDR (ECS tasks)
-- SSH: configurable CIDRs for admin access
+- Web UI + SSH access: restricted to VPC CIDR (no public access)
+- LDAP/Kerberos: restricted to VPC CIDR (app instances)
 
-### 2. Ansible Playbook (`ansible/freeipa_setup.yml`)
+### 2. Ansible Playbook (`infra/ansible/freeipa_setup.yml`)
 
 **Purpose:** Fully automated IPA installation with FAS extensions.
 
@@ -45,36 +44,25 @@ This document describes the minimal FreeIPA setup for the Astra dev environment 
 - Users auto-assigned to groups based on FPCA signature
 - Member managers (sponsors) for groups
 
-### 3. Integration with Dev Environment
+### 3. Integration with Staging Environment
 
-**Wired into `infra/envs/dev/main.tf`:**
-- FreeIPA module instance in first public subnet
-- `null_resource` to wait for SSH and automatically run Ansible
-- Triggers on instance ID or playbook changes
+**Wired into `infra/envs/staging/main.tf`:**
+- FreeIPA module instance in the default VPC subnet
+- Outputs for the instance ID, public IP, and LDAP URI
 
-**New Variables (`infra/envs/dev/variables.tf`):**
-- `ssh_key_name`: EC2 key pair for instance access
-- `ssh_private_key_path`: Path to private key for Ansible
-- `freeipa_hostname`: FQDN (default: `ipa.astra-dev.test`)
-- `freeipa_domain`: Domain (default: `astra-dev.test`)
-- `freeipa_realm`: Kerberos realm (default: `ASTRA-DEV.TEST`)
-- `freeipa_admin_password`: Admin password (default: `DevPassword123!`)
+**Variables (`infra/envs/staging/variables.tf`):**
+- `key_name`: EC2 key pair for instance access
+- `ansible_private_key_path`: Path to private key for Ansible
+- `freeipa_hostname`: FQDN (for example: `ipa.astra-staging.test`)
+- `freeipa_domain`: Domain (for example: `astra-staging.test`)
+- `freeipa_realm`: Kerberos realm (for example: `ASTRA-STAGING.TEST`)
+- `freeipa_admin_password`: Admin password
 - `freeipa_dm_password`: Directory Manager password
-- `freeipa_service_username`: Service account (default: `svc_astra`)
-- `freeipa_service_password`: Service account password (default: `ServicePassword456!`)
-- `freeipa_allowed_cidrs`: CIDRs for UI/SSH access
+- `freeipa_ansible_user`: SSH user for provisioning
 
-**Updated Application Connection Variables:**
-- `freeipa_host`: Now points to `ipa.astra-dev.test` (was external demo)
-- `freeipa_service_user`: Now `svc_astra` (was `admin`)
-
-**New Outputs (`infra/envs/dev/outputs.tf`):**
+**Outputs (`infra/envs/staging/outputs.tf`):**
 - `freeipa_public_ip`: Public IP address
-- `freeipa_private_ip`: Private IP address
-- `freeipa_web_ui_url`: Web UI URL
 - `freeipa_ldap_uri`: LDAP URI for apps
-- `freeipa_admin_credentials`: Admin credentials (sensitive)
-- `freeipa_service_credentials`: Service account credentials (sensitive)
 
 ## FAS Extensions Included
 
@@ -101,7 +89,7 @@ Based on `fedora-infra/freeipa-fas`, the following extensions are installed:
 ## DNS Considerations
 
 **Current Setup:**
-- FreeIPA runs its own DNS server for `astra-dev.test` domain
+- FreeIPA runs its own DNS server for `astra-staging.test` domain
 - Uses DNS forwarders: `8.8.8.8`, `8.8.4.4`
 - `--no-host-dns` flag used (no reverse DNS zone setup required)
 
@@ -110,10 +98,10 @@ Based on `fedora-infra/freeipa-fas`, the following extensions are installed:
 - External access requires `/etc/hosts` entries or private DNS zones
 - For production, use Route53 private hosted zone
 
-**Workaround for Dev:**
+**Workaround for Staging:**
 Add to `/etc/hosts` on local machine:
 ```
-<FREEIPA_PUBLIC_IP>  ipa.astra-dev.test
+<FREEIPA_PUBLIC_IP>  ipa.astra-staging.test
 ```
 
 ## Usage
@@ -121,15 +109,15 @@ Add to `/etc/hosts` on local machine:
 ### Deploy FreeIPA
 
 ```bash
-cd infra/envs/dev
+cd infra/envs/staging
 
 # Ensure you have an SSH key pair
-export TF_VAR_ssh_key_name="your-key-name"
-export TF_VAR_ssh_private_key_path="~/.ssh/your-key.pem"
+export TF_VAR_key_name="your-key-name"
+export TF_VAR_ansible_private_key_path="~/.ssh/your-key.pem"
 
 # Optional: Override passwords
 export TF_VAR_freeipa_admin_password="YourAdminPass"
-export TF_VAR_freeipa_service_password="YourServicePass"
+export TF_VAR_freeipa_dm_password="YourDirectoryManagerPass"
 
 terraform init
 terraform plan
@@ -142,27 +130,26 @@ After deployment completes:
 
 ```bash
 # Get connection details
-terraform output freeipa_web_ui_url
 terraform output freeipa_public_ip
 
 # Add to /etc/hosts
-echo "$(terraform output -raw freeipa_public_ip) ipa.astra-dev.test" | sudo tee -a /etc/hosts
+echo "$(terraform output -raw freeipa_public_ip) ipa.astra-staging.test" | sudo tee -a /etc/hosts
 
 # Access web UI
-open https://ipa.astra-dev.test/
-# Login: admin / DevPassword123! (or your override)
+open https://ipa.astra-staging.test/
+# Login: admin / <freeipa_admin_password>
 
 # SSH to IPA server
-ssh -i ~/.ssh/your-key.pem fedora@$(terraform output -raw freeipa_public_ip)
+ssh -i ~/.ssh/your-key.pem ec2-user@$(terraform output -raw freeipa_public_ip)
 ```
 
 ### Application Connection
 
 The Django app will automatically connect to FreeIPA using:
-- **Host:** `ipa.astra-dev.test` (via VPC private IP)
+- **Host:** `ipa.astra-staging.test` (via VPC private IP)
 - **Service User:** `svc_astra`
 - **Service Password:** From Secrets Manager (populated from variable)
-- **CA Cert:** Downloaded to `ansible/ipa_ca.crt` (upload to S3 or embed in image)
+- **CA Cert:** Downloaded to `infra/ansible/ipa_ca.crt` (upload to S3 or embed in image)
 
 ## What Was Copied from tiny-stage
 
@@ -172,11 +159,11 @@ The Django app will automatically connect to FreeIPA using:
 3. **Group structure** (developers, designers, elections, etc.)
 4. **Member manager functionality** (sponsors)
 
-**Installation approach:** Based on tiny-stage IPA role logic but simplified for single-instance dev use
+**Installation approach:** Based on tiny-stage IPA role logic but simplified for single-instance staging use
 
 ## What Was Intentionally Dropped
 
-**Not Needed for Dev:**
+**Not Needed for Staging:**
 - Multiple VMs (auth, tinystage, separate IPA server)
 - Vagrant/libvirt-specific configuration
 - Fedora Messaging setup
@@ -184,7 +171,7 @@ The Django app will automatically connect to FreeIPA using:
 - Mail server (Sendria)
 - Complex networking between multiple machines
 - NTP configuration (using cloud provider time sync)
-- Host DNS reverse zones (not needed for dev)
+- Host DNS reverse zones (not needed for staging)
 - Replication/high availability
 - ansible-freeipa collection (using direct ipa-server-install)
 
@@ -193,26 +180,26 @@ The Django app will automatically connect to FreeIPA using:
 1. **AWS Region:** `eu-west-1` (or override via `aws_region`)
 2. **VPC CIDR:** `10.20.0.0/16` (configurable)
 3. **SSH Key:** You must have an EC2 key pair created
-4. **Ansible:** Installed locally for Terraform to execute
+4. **Ansible:** Installed locally to run the FreeIPA playbook
 5. **Python packages:** `python-freeipa`, `faker` installed on IPA server (playbook handles this)
 6. **Instance Size:** `t3.medium` minimum (IPA is resource-intensive)
 7. **Storage:** 30 GB for IPA data (certificates, LDAP, Kerberos database)
 
 ## Instance Sizing
 
-**Dev Default:** `t3.small` (2 vCPU, 2 GB RAM)
+**Staging Default:** `t3.small` (2 vCPU, 2 GB RAM)
 - FreeIPA includes: LDAP, Kerberos KDC, DNS, Certificate Authority, Web UI
-- Installation will be slower but functional for dev/testing
+- Installation will be slower but functional for staging/testing
 - Low user traffic makes this acceptable
 
 **Production Recommended:** `t3.medium` or larger for better performance under load
 
-## Cost Estimate (Dev)
+## Cost Estimate (Staging)
 
 - EC2 `t3.small`: ~$15/month (on-demand)
 - EBS 30 GB: ~$3/month
 - Elastic IP: Free while attached, $3.60/month if unattached
-- Data transfer: Minimal for dev
+- Data transfer: Minimal for staging
 
 **Total:** ~$18-22/month
 
@@ -224,8 +211,7 @@ The Django app will automatically connect to FreeIPA using:
 ## Idempotency Notes
 
 **Terraform:**
-- Fully idempotent
-- `null_resource` triggers only on instance recreation or playbook changes
+- Fully idempotent for the FreeIPA instance provisioning
 
 **Ansible:**
 - Most tasks use `register` and `changed_when` for proper idempotency
@@ -240,8 +226,8 @@ terraform apply
 
 # Manually rerun Ansible only
 cd ../..
-cd ansible
-ansible-playbook -i ../infra/envs/dev/ipa_inventory.ini freeipa_setup.yml
+cd infra/ansible
+ansible-playbook -i ../envs/staging/ipa_inventory.ini freeipa_setup.yml
 ```
 
 ## Troubleshooting
@@ -293,8 +279,8 @@ sudo ipactl restart
 **Not included for simplicity:**
 - **Automated DNS via Route53:** Would require private hosted zone
 - **TLS certificate automation:** Currently using self-signed IPA CA
-- **Backup/restore automation:** Not critical for dev
-- **Multi-AZ/HA setup:** Overkill for dev, needs 3+ replicas
+- **Backup/restore automation:** Not critical for staging
+- **Multi-AZ/HA setup:** Overkill for staging, needs 3+ replicas
 - **Monitoring/alerting:** Dev doesn't need CloudWatch alarms
 - **FASJSON/Noggin/Ipsilon:** Separate services, not required for basic LDAP/Kerberos
 

@@ -15,342 +15,219 @@ variable "environment" {
   default     = "staging"
 }
 
-variable "image_tag" {
+variable "instance_type" {
   type        = string
-  description = "Docker image tag to deploy (bootstrap only; CI/CD updates ECS service task definition)."
+  description = "EC2 instance type."
+  default     = "t3.small"
 }
 
-variable "vpc_cidr" {
+variable "key_name" {
   type        = string
-  description = "VPC CIDR."
-  default     = "10.30.0.0/16"
+  description = "EC2 key pair name."
 }
 
-variable "az_count" {
-  type        = number
-  description = "AZ count for subnets."
-  default     = 2
-}
-
-variable "single_nat_gateway" {
-  type        = bool
-  description = "Use a single NAT gateway (cost optimized)."
-  default     = true
-}
-
-variable "acm_certificate_arn" {
-  type        = string
-  description = "Optional ACM certificate ARN for HTTPS."
-  default     = null
-}
-
-variable "https_domain_name" {
-  type        = string
-  description = "Optional DNS name for ALB HTTPS (ACM DNS validation via https_route53_zone_id when set)."
-  default     = ""
-}
-
-variable "https_route53_zone_id" {
-  type        = string
-  description = "Optional Route53 hosted zone id used for ACM DNS validation and (optionally) an ALB alias record for https_domain_name."
-  default     = ""
-}
-
-variable "container_port" {
-  type        = number
-  description = "Container port."
-  default     = 8000
-}
-
-variable "enable_direct_task_ingress" {
-  type        = bool
-  description = "TEMPORARY TEST OVERRIDE: when true, allow direct inbound access to ECS tasks on container_port. Leave false for ALB-only ingress."
-  default     = false
-}
-
-variable "direct_task_ingress_cidrs" {
+variable "allowed_ssh_cidrs" {
   type        = list(string)
-  description = "CIDR blocks allowed to reach ECS tasks directly when enable_direct_task_ingress=true."
-  default     = []
-
-  validation {
-    condition     = !var.enable_direct_task_ingress || length(var.direct_task_ingress_cidrs) > 0
-    error_message = "direct_task_ingress_cidrs must be set when enable_direct_task_ingress is true."
-  }
-}
-
-variable "desired_count" {
-  type        = number
-  description = "Desired ECS task count."
-  default     = 1
-}
-
-variable "task_cpu" {
-  type        = string
-  description = "Fargate CPU units."
-  default     = "256"
-}
-
-variable "task_memory" {
-  type        = string
-  description = "Fargate memory (MiB)."
-  default     = "512"
-}
-
-variable "django_settings_module" {
-  type        = string
-  description = "DJANGO_SETTINGS_MODULE."
-  default     = "config.settings"
-}
-
-variable "django_debug" {
-  type        = bool
-  description = "Expose DJANGO_DEBUG=1/0."
-  default     = false
-}
-
-variable "allowed_hosts" {
-  type        = list(string)
-  description = "Django ALLOWED_HOSTS (optional; defaults to the ALB DNS name when django_debug=false)."
+  description = "CIDR blocks allowed to access SSH."
   default     = []
 }
 
-variable "public_base_url" {
+variable "app_image" {
   type        = string
-  description = "PUBLIC_BASE_URL used for absolute links in email."
-  default     = null
+  description = "Container image for the Astra app."
 }
 
-variable "default_from_email" {
+variable "caddy_image" {
   type        = string
-  description = "DEFAULT_FROM_EMAIL override."
-  default     = null
+  description = "Container image for Caddy."
 }
 
-variable "email_url" {
+variable "s3_bucket_name" {
   type        = string
-  description = "EMAIL_URL (optional if using SES backend)."
-  default     = null
+  description = "S3 bucket name for user uploads."
 }
 
-variable "enable_send_queued_mail_schedule" {
+variable "s3_force_destroy" {
   type        = bool
-  description = "If true, run `python manage.py send_queued_mail` periodically via EventBridge + ECS RunTask."
-  default     = true
-}
-
-variable "send_queued_mail_schedule_expression" {
-  type        = string
-  description = "EventBridge schedule expression for send_queued_mail (e.g. rate(1 minute))."
-  default     = "rate(1 minute)"
-}
-
-variable "enable_membership_operations_schedule" {
-  type        = bool
-  description = "If true, run `python manage.py membership_operations` periodically via EventBridge + ECS RunTask."
-  default     = true
-}
-
-variable "membership_operations_schedule_expression" {
-  type        = string
-  description = "EventBridge schedule expression for membership_operations (e.g. rate(1 day))."
-  default     = "rate(1 day)"
-}
-
-variable "enable_cleanup_mail_schedule" {
-  type        = bool
-  description = "If true, run `python manage.py cleanup_mail --days 90 --delete-attachments` periodically via EventBridge + ECS RunTask."
-  default     = true
-}
-
-variable "cleanup_mail_schedule_expression" {
-  type        = string
-  description = "EventBridge schedule expression for cleanup_mail (e.g. rate(1 day))."
-  default     = "rate(1 day)"
-}
-
-variable "aws_storage_bucket_name" {
-  type        = string
-  description = "S3 bucket name for django-storages (AWS_STORAGE_BUCKET_NAME)."
-  default     = null
-}
-
-variable "aws_s3_domain" {
-  type        = string
-  description = "AWS_S3_DOMAIN (scheme+host/path used to derive media URLs)."
-  default     = null
-}
-
-variable "aws_s3_region_name" {
-  type        = string
-  description = "AWS_S3_REGION_NAME."
-  default     = null
-}
-
-variable "aws_s3_endpoint_url" {
-  type        = string
-  description = "AWS_S3_ENDPOINT_URL (optional; useful for MinIO)."
-  default     = null
-}
-
-variable "aws_s3_addressing_style" {
-  type        = string
-  description = "AWS_S3_ADDRESSING_STYLE (path or virtual)."
-  default     = null
-}
-
-variable "aws_querystring_auth" {
-  type        = bool
-  description = "AWS_QUERYSTRING_AUTH."
+  description = "Force destroy S3 bucket on delete."
   default     = false
-}
-
-variable "aws_ses_region_name" {
-  type        = string
-  description = "AWS_SES_REGION_NAME."
-  default     = null
-}
-
-variable "aws_ses_configuration_set" {
-  type        = string
-  description = "AWS_SES_CONFIGURATION_SET (optional)."
-  default     = null
-}
-
-variable "freeipa_host" {
-  type        = string
-  description = "FREEIPA_HOST."
-  default     = "ipa.demo1.freeipa.org"
-}
-
-variable "freeipa_private_dns_enabled" {
-  type        = bool
-  description = "If true, create a Route53 private hosted zone + A record in this VPC for FreeIPA (for VPC-internal name resolution)."
-  default     = false
-}
-
-variable "freeipa_private_zone_name" {
-  type        = string
-  description = "Private hosted zone name (e.g. astra-staging.test). Required if freeipa_private_dns_enabled=true."
-  default     = null
-}
-
-variable "freeipa_private_record_name" {
-  type        = string
-  description = "Record name to create in the private zone (e.g. ipa.astra-staging.test). Required if freeipa_private_dns_enabled=true."
-  default     = null
-}
-
-variable "freeipa_private_record_ip" {
-  type        = string
-  description = "Private IP address for the FreeIPA A record. Required if freeipa_private_dns_enabled=true."
-  default     = null
-}
-
-variable "freeipa_verify_ssl" {
-  type        = bool
-  description = "FREEIPA_VERIFY_SSL."
-  default     = true
-}
-
-variable "freeipa_service_user" {
-  type        = string
-  description = "FREEIPA_SERVICE_USER."
-  default     = "admin"
-}
-
-variable "freeipa_admin_group" {
-  type        = string
-  description = "FREEIPA_ADMIN_GROUP."
-  default     = "admins"
-}
-
-variable "freeipa_service_password_secret_arn" {
-  type        = string
-  description = "Secrets Manager ARN for FREEIPA_SERVICE_PASSWORD (required)."
-  default     = null
 }
 
 variable "db_name" {
   type        = string
-  description = "Database name."
-  default     = "astra"
+  description = "Database name for Aurora."
 }
 
-variable "db_user" {
+variable "db_username" {
   type        = string
-  description = "Database user."
-  default     = "astra"
+  description = "Database master username for Aurora."
+}
+
+variable "db_password" {
+  type        = string
+  sensitive   = true
+  description = "Database master password for Aurora."
+}
+
+variable "db_engine_version" {
+  type        = string
+  description = "Aurora Postgres engine version."
+  default     = "17.7"
 }
 
 variable "db_instance_class" {
   type        = string
-  description = "RDS instance class."
-  default     = "db.t4g.micro"
-}
-
-variable "db_allocated_storage_gb" {
-  type        = number
-  description = "RDS storage (GB)."
-  default     = 20
-}
-
-variable "db_max_allocated_storage_gb" {
-  type        = number
-  description = "RDS max autoscaled storage (GB)."
-  default     = 100
+  description = "Aurora instance class."
+  default     = "db.t3.medium"
 }
 
 variable "db_backup_retention_days" {
   type        = number
-  description = "RDS backup retention days."
-  default     = 7
-}
-
-variable "db_multi_az" {
-  type        = bool
-  description = "Enable Multi-AZ."
-  default     = false
+  description = "Number of days to retain Aurora backups."
+  default     = 1
 }
 
 variable "db_deletion_protection" {
   type        = bool
-  description = "Enable deletion protection."
+  description = "Enable deletion protection for Aurora."
   default     = false
 }
 
 variable "db_skip_final_snapshot" {
   type        = bool
-  description = "Skip final snapshot on destroy."
+  description = "Skip final snapshot on Aurora deletion."
   default     = true
 }
 
-variable "enable_ses" {
-  type        = bool
-  description = "Whether to manage SES domain + event publishing."
-  default     = false
+variable "freeipa_hostname" {
+  type        = string
+  description = "FreeIPA hostname for staging (e.g., ipa.staging.example.test)."
 }
 
-variable "ses_domain" {
+variable "freeipa_domain" {
   type        = string
-  description = "SES sending domain (e.g. example.com)."
+  description = "FreeIPA domain for staging (e.g., staging.example.test)."
+}
+
+variable "freeipa_realm" {
+  type        = string
+  description = "FreeIPA Kerberos realm for staging (e.g., STAGING.EXAMPLE.TEST)."
+}
+
+variable "freeipa_admin_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA admin password for staging."
+}
+
+variable "freeipa_dm_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA directory manager password for staging."
+}
+
+variable "freeipa_ansible_user" {
+  type        = string
+  description = "SSH user for staging FreeIPA provisioning."
+  default     = "ec2-user"
+}
+
+variable "ansible_user" {
+  type        = string
+  description = "SSH user for Ansible."
+  default     = "ec2-user"
+}
+
+variable "ansible_private_key_path" {
+  type        = string
+  description = "Path to SSH private key for Ansible."
+}
+
+variable "ansible_known_hosts_path" {
+  type        = string
+  description = "Path to SSH known_hosts for Ansible."
+  default     = "~/.ssh/known_hosts"
+}
+
+variable "django_settings_module" {
+  type        = string
+  description = "DJANGO_SETTINGS_MODULE value for the env file."
+  default     = "config.settings"
+}
+
+variable "secret_key" {
+  type        = string
+  sensitive   = true
+  description = "Django SECRET_KEY for production. If empty, provisioning generates one on the host."
   default     = ""
 }
 
-variable "route53_zone_id" {
+variable "allowed_hosts" {
+  type        = list(string)
+  description = "Django ALLOWED_HOSTS. If empty, provisioning derives a safe default from instance metadata."
+  default     = []
+}
+
+variable "public_base_url" {
   type        = string
-  description = "Route53 hosted zone id for ses_domain."
+  description = "PUBLIC_BASE_URL (used for absolute links in email)."
   default     = ""
 }
 
-variable "create_github_actions_user" {
+variable "default_from_email" {
+  type        = string
+  description = "DEFAULT_FROM_EMAIL used by Django."
+  default     = ""
+}
+
+variable "freeipa_service_user" {
+  type        = string
+  description = "FreeIPA service account username used by the app."
+  default     = "svc_astra"
+}
+
+variable "freeipa_service_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA service account password used by the app. If empty, defaults to freeipa_admin_password."
+  default     = ""
+}
+
+variable "freeipa_verify_ssl" {
   type        = bool
-  description = "Create an IAM user + policy for GitHub Actions."
+  description = "Whether the app should verify FreeIPA TLS certificates."
   default     = false
 }
 
-variable "tags" {
-  type        = map(string)
-  description = "Tags applied to all resources."
-  default     = {}
+variable "django_auto_migrate" {
+  type        = bool
+  description = "If true, containers run migrate on startup (entrypoint DJANGO_AUTO_MIGRATE=1)."
+  default     = true
+}
+
+variable "django_migrate_retries" {
+  type        = number
+  description = "How many times to retry migrations on startup."
+  default     = 30
+}
+
+variable "cron_jobs" {
+  type = list(object({
+    name    = string
+    command = string
+    minute  = optional(string)
+    hour    = optional(string)
+    day     = optional(string)
+    month   = optional(string)
+    weekday = optional(string)
+  }))
+  description = "Cron jobs to configure on the host."
+  default = [
+    {
+      name    = "membership-operations"
+      minute  = "0"
+      hour    = "0"
+      command = "podman exec astra-app-1 python manage.py membership_operations"
+    }
+  ]
 }

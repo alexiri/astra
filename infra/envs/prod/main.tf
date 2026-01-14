@@ -1,141 +1,98 @@
+resource "local_sensitive_file" "astra_extra_vars" {
+  # Keep secrets out of the repo and out of the command line.
+  filename = "${path.module}/.terraform/astra_extra_vars.json"
+  content = jsonencode({
+    database_password        = var.db_password
+    freeipa_service_password = var.freeipa_service_password
+    # If empty, the Ansible playbook will generate a strong one on the host.
+    secret_key = var.secret_key
+  })
+  file_permission = "0600"
+}
+
 provider "aws" {
   region = var.aws_region
 }
 
-data "aws_caller_identity" "current" {}
+data "aws_ami" "almalinux_10" {
+  most_recent = true
+  owners      = ["aws-marketplace"]
 
-locals {
-  use_route53_validated_https = (
-    var.acm_certificate_arn == null
-    && trimspace(var.https_domain_name) != ""
-    && trimspace(var.https_route53_zone_id) != ""
-  )
-
-  # Listener creation must not depend on apply-time ACM validation status.
-  enable_https_listener = (
-    (var.acm_certificate_arn != null && trimspace(var.acm_certificate_arn) != "")
-    || local.use_route53_validated_https
-  )
-
-  effective_acm_certificate_arn = (
-    var.acm_certificate_arn != null && trimspace(var.acm_certificate_arn) != ""
-    ? var.acm_certificate_arn
-    : (local.use_route53_validated_https ? aws_acm_certificate_validation.alb_dns[0].certificate_arn : null)
-  )
-}
-
-resource "aws_acm_certificate" "alb_dns" {
-  count = local.use_route53_validated_https ? 1 : 0
-
-  domain_name       = var.https_domain_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
+  filter {
+    name   = "name"
+    values = ["AlmaLinux OS 10* x86_64*"]
   }
 
-  tags = merge(var.tags, {
-    app = var.app_name
-    env = var.environment
-  })
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
 }
 
-resource "aws_route53_record" "alb_dns_validation" {
-  for_each = local.use_route53_validated_https ? {
-    for dvo in aws_acm_certificate.alb_dns[0].domain_validation_options : dvo.domain_name => {
-      name  = dvo.resource_record_name
-      type  = dvo.resource_record_type
-      value = dvo.resource_record_value
-    }
-  } : {}
-
-  zone_id = var.https_route53_zone_id
-  name    = each.value.name
-  type    = each.value.type
-  ttl     = 60
-  records = [each.value.value]
+data "aws_vpc" "default" {
+  default = true
 }
 
-resource "aws_acm_certificate_validation" "alb_dns" {
-  count = local.use_route53_validated_https ? 1 : 0
-
-  certificate_arn         = aws_acm_certificate.alb_dns[0].arn
-  validation_record_fqdns = [for r in aws_route53_record.alb_dns_validation : r.fqdn]
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
 }
 
 locals {
   name = "${var.app_name}-${var.environment}"
-  tags = merge(var.tags, {
+  tags = {
     app = var.app_name
     env = var.environment
-  })
-}
-
-module "network" {
-  source = "../../modules/network"
-
-  name               = local.name
-  vpc_cidr           = var.vpc_cidr
-  az_count           = var.az_count
-  single_nat_gateway = var.single_nat_gateway
-  tags               = local.tags
-}
-
-module "alb" {
-  source = "../../modules/alb"
-
-  name                = local.name
-  vpc_id              = module.network.vpc_id
-  public_subnet_ids   = module.network.public_subnet_ids
-  target_port         = var.container_port
-  enable_https        = local.enable_https_listener
-  acm_certificate_arn = local.effective_acm_certificate_arn
-  tags                = local.tags
-}
-
-resource "aws_route53_record" "alb_https" {
-  count = trimspace(var.https_route53_zone_id) != "" && trimspace(var.https_domain_name) != "" ? 1 : 0
-
-  zone_id = var.https_route53_zone_id
-  name    = var.https_domain_name
-  type    = "A"
-
-  alias {
-    name                   = module.alb.alb_dns_name
-    zone_id                = module.alb.alb_zone_id
-    evaluate_target_health = true
   }
+
+  s3_endpoint_url          = "https://s3.${var.aws_region}.amazonaws.com"
+  s3_domain                = local.s3_endpoint_url
+  ansible_known_hosts_path = pathexpand(var.ansible_known_hosts_path)
+  ansible_files = [
+    "${path.module}/../../ansible/astra_ec2.yml",
+    "${path.module}/../../systemd/astra-app@.service",
+    "${path.module}/../../systemd/astra-caddy.service",
+    "${path.module}/../../systemd/Caddyfile.j2",
+    "${path.module}/../../systemd/astra.env.example",
+    "${path.module}/../../systemd/caddy.env",
+    "${path.module}/../../ansible/files/deploy-prod.sh",
+    "${path.module}/../../ansible/files/rollback-prod.sh",
+    "${path.module}/../../ansible/files/deploy-prod-sha.sh",
+  ]
+  ansible_hash = sha256(join("", [for path in local.ansible_files : filesha256(path)]))
 }
 
-resource "aws_security_group" "ecs_service" {
-  name        = "${local.name}-svc-sg"
-  description = "ECS service security group"
-  vpc_id      = module.network.vpc_id
+resource "aws_security_group" "astra" {
+  name        = "${local.name}-sg"
+  description = "Astra EC2 security group"
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
-    description     = "App from ALB"
-    from_port       = var.container_port
-    to_port         = var.container_port
-    protocol        = "tcp"
-    security_groups = [module.alb.alb_security_group_id]
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description     = "Health check from ALB"
-    from_port       = 9000
-    to_port         = 9000
-    protocol        = "tcp"
-    security_groups = [module.alb.alb_security_group_id]
+    description = "HTTPS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   dynamic "ingress" {
-    for_each = var.enable_direct_task_ingress ? [1] : []
+    for_each = length(var.allowed_ssh_cidrs) > 0 ? [1] : []
     content {
-      description = "TEMPORARY TEST OVERRIDE: direct access to ECS tasks"
-      from_port   = var.container_port
-      to_port     = var.container_port
+      description = "SSH"
+      from_port   = 22
+      to_port     = 22
       protocol    = "tcp"
-      cidr_blocks = var.direct_task_ingress_cidrs
+      cidr_blocks = var.allowed_ssh_cidrs
     }
   }
 
@@ -147,247 +104,173 @@ resource "aws_security_group" "ecs_service" {
   }
 
   tags = merge(local.tags, {
-    Name = "${local.name}-svc-sg"
+    Name = "${local.name}-sg"
   })
 }
 
-# Optional: VPC-internal DNS for FreeIPA.
-# Only enable this when your FreeIPA hostname is NOT publicly resolvable and you
-# want ECS tasks to resolve it via the VPC resolver.
-resource "aws_route53_zone" "freeipa_private" {
-  count = var.freeipa_private_dns_enabled ? 1 : 0
+resource "aws_instance" "astra" {
+  ami                         = data.aws_ami.almalinux_10.id
+  instance_type               = var.instance_type
+  subnet_id                   = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids      = [aws_security_group.astra.id]
+  key_name                    = var.key_name
+  associate_public_ip_address = true
 
-  name = var.freeipa_private_zone_name
+  user_data = <<-EOF
+#!/bin/bash
+set -euo pipefail
 
-  vpc {
-    vpc_id = module.network.vpc_id
+dnf -y install python3
+EOF
+
+  tags = merge(local.tags, {
+    Name = local.name
+  })
+}
+
+resource "aws_security_group" "db" {
+  name        = "${local.name}-db-sg"
+  description = "Astra Aurora security group"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description     = "Postgres"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.astra.id]
   }
 
-  tags = local.tags
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, {
+    Name = "${local.name}-db-sg"
+  })
 }
 
-resource "aws_route53_record" "freeipa_a" {
-  count = var.freeipa_private_dns_enabled ? 1 : 0
+resource "aws_db_subnet_group" "aurora" {
+  name       = "${local.name}-aurora"
+  subnet_ids = data.aws_subnets.default.ids
 
-  zone_id = aws_route53_zone.freeipa_private[0].zone_id
-  name    = var.freeipa_private_record_name
-  type    = "A"
-  ttl     = 60
-  records = [var.freeipa_private_record_ip]
+  tags = merge(local.tags, {
+    Name = "${local.name}-aurora"
+  })
 }
 
-module "ecr" {
-  source          = "../../modules/ecr"
-  repository_name = "${var.app_name}-${var.environment}"
-  tags            = local.tags
+resource "aws_rds_cluster" "astra" {
+  cluster_identifier      = "${local.name}-aurora"
+  engine                  = "aurora-postgresql"
+  engine_version          = var.db_engine_version
+  database_name           = var.db_name
+  master_username         = var.db_username
+  master_password         = var.db_password
+  db_subnet_group_name    = aws_db_subnet_group.aurora.name
+  vpc_security_group_ids  = [aws_security_group.db.id]
+  storage_encrypted       = true
+  deletion_protection     = var.db_deletion_protection
+  skip_final_snapshot     = var.db_skip_final_snapshot
+  backup_retention_period = var.db_backup_retention_days
 }
 
-module "secrets" {
-  source = "../../modules/secrets"
-  name   = local.name
-  tags   = local.tags
+resource "aws_rds_cluster_instance" "astra" {
+  identifier          = "${local.name}-aurora-1"
+  cluster_identifier  = aws_rds_cluster.astra.id
+  instance_class      = var.db_instance_class
+  engine              = aws_rds_cluster.astra.engine
+  engine_version      = aws_rds_cluster.astra.engine_version
+  publicly_accessible = false
 }
 
-module "rds" {
-  source = "../../modules/rds"
+resource "aws_s3_bucket" "astra_media" {
+  bucket        = var.s3_bucket_name
+  force_destroy = var.s3_force_destroy
 
-  name                  = local.name
-  vpc_id                = module.network.vpc_id
-  private_subnet_ids    = module.network.private_subnet_ids
-  app_security_group_id = aws_security_group.ecs_service.id
-
-  db_name         = var.db_name
-  master_username = var.db_user
-
-  instance_class           = var.db_instance_class
-  allocated_storage_gb     = var.db_allocated_storage_gb
-  max_allocated_storage_gb = var.db_max_allocated_storage_gb
-
-  backup_retention_days = var.db_backup_retention_days
-  multi_az              = var.db_multi_az
-  deletion_protection   = var.db_deletion_protection
-  skip_final_snapshot   = var.db_skip_final_snapshot
-
-  tags = local.tags
+  tags = merge(local.tags, {
+    Name = "${local.name}-media"
+  })
 }
 
-module "ecs" {
-  source = "../../modules/ecs"
-
-  name                      = local.name
-  aws_region                = var.aws_region
-  vpc_id                    = module.network.vpc_id
-  subnet_ids                = module.network.public_subnet_ids
-  assign_public_ip          = true
-  service_security_group_id = aws_security_group.ecs_service.id
-  target_group_arn          = module.alb.target_group_arn
-
-  image_repository_url = module.ecr.repository_url
-  image_tag            = var.image_tag
-
-  container_port = var.container_port
-  desired_count  = var.desired_count
-  task_cpu       = var.task_cpu
-  task_memory    = var.task_memory
-
-  django_settings_module = var.django_settings_module
-  django_debug           = var.django_debug
-
-  allowed_hosts = length(var.allowed_hosts) > 0 ? var.allowed_hosts : (
-    var.enable_direct_task_ingress ? ["*"] : (var.django_debug ? [] : [module.alb.alb_dns_name])
-  )
-  public_base_url    = var.public_base_url
-  default_from_email = var.default_from_email
-  email_url          = var.email_url
-
-  db_host = module.rds.endpoint
-  db_port = module.rds.port
-  db_name = module.rds.db_name
-  db_user = module.rds.master_username
-
-  db_password_secret_arn              = module.rds.master_password_secret_arn
-  django_secret_key_secret_arn        = module.secrets.django_secret_key_secret_arn
-  freeipa_service_password_secret_arn = coalesce(var.freeipa_service_password_secret_arn, module.secrets.freeipa_service_password_secret_arn)
-  secrets_manager_arns = [
-    module.rds.master_password_secret_arn,
-    module.secrets.django_secret_key_secret_arn,
-    coalesce(var.freeipa_service_password_secret_arn, module.secrets.freeipa_service_password_secret_arn),
-  ]
-
-  aws_storage_bucket_name = coalesce(var.aws_storage_bucket_name, "${var.app_name}-${var.environment}-media")
-  aws_s3_domain           = coalesce(var.aws_s3_domain, "https://s3.${var.aws_region}.amazonaws.com")
-  aws_s3_region_name      = var.aws_s3_region_name
-  aws_s3_endpoint_url     = var.aws_s3_endpoint_url
-  aws_s3_addressing_style = var.aws_s3_addressing_style
-  aws_querystring_auth    = var.aws_querystring_auth
-
-  aws_ses_region_name = coalesce(var.aws_ses_region_name, var.aws_region)
-  aws_ses_configuration_set = (
-    var.aws_ses_configuration_set != null && trimspace(var.aws_ses_configuration_set) != ""
-    ? var.aws_ses_configuration_set
-    : (var.enable_ses ? module.ses[0].configuration_set_name : null)
-  )
-
-  freeipa_host         = var.freeipa_host
-  freeipa_verify_ssl   = var.freeipa_verify_ssl
-  freeipa_service_user = var.freeipa_service_user
-  freeipa_admin_group  = var.freeipa_admin_group
-
-  tags = local.tags
+resource "aws_s3_bucket_public_access_block" "astra_media" {
+  bucket                  = aws_s3_bucket.astra_media.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
-module "send_queued_mail_schedule" {
-  source = "../../modules/scheduled_ecs_task"
+resource "null_resource" "configure_instance" {
+  triggers = {
+    instance_id   = aws_instance.astra.id
+    config_hash   = local.ansible_hash
+    app_image     = var.app_image
+    caddy_image   = var.caddy_image
+    cron_jobs     = jsonencode(var.cron_jobs)
+    s3_bucket     = var.s3_bucket_name
+    s3_domain     = local.s3_domain
+    allowed_hosts = jsonencode(var.allowed_hosts)
+    freeipa_host  = var.freeipa_host
+  }
 
-  name                = "${local.name}-send-queued-mail"
-  enabled             = var.enable_send_queued_mail_schedule
-  schedule_expression = var.send_queued_mail_schedule_expression
-  description         = "Run Django send_queued_mail periodically"
-  tags                = local.tags
+  provisioner "local-exec" {
+    command = <<-EOT
+set -euo pipefail
 
-  cluster_arn         = module.ecs.cluster_arn
-  task_definition_arn = module.ecs.task_definition_arn
-  subnet_ids          = module.network.public_subnet_ids
-  security_group_ids  = [aws_security_group.ecs_service.id]
-  assign_public_ip    = true
+# StrictHostKeyChecking=yes requires the host key to already exist.
+# Populate it automatically so provisioning is non-interactive but still safe.
+KNOWN_HOSTS_FILE='${local.ansible_known_hosts_path}'
+mkdir -p "$(dirname "$KNOWN_HOSTS_FILE")"
+touch "$KNOWN_HOSTS_FILE"
+ssh-keygen -R '${aws_instance.astra.public_ip}' -f "$KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
 
-  container_name = "astra"
-  command        = ["python", "manage.py", "send_queued_mail"]
+# Wait for SSH to accept connections with strict host key checking.
+for _ in $(seq 1 60); do
+  ssh-keyscan -H -t rsa,ecdsa,ed25519 '${aws_instance.astra.public_ip}' >> "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+  if ssh -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
+    -i '${pathexpand(var.ansible_private_key_path)}' '${var.ansible_user}@${aws_instance.astra.public_ip}' true 2>/dev/null; then
+    break
+  fi
+  sleep 5
+done
 
-  pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
+ssh -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
+  -i '${pathexpand(var.ansible_private_key_path)}' '${var.ansible_user}@${aws_instance.astra.public_ip}' true
+
+ansible-playbook \
+  -i '${aws_instance.astra.public_ip},' \
+  -u '${var.ansible_user}' \
+  --private-key '${pathexpand(var.ansible_private_key_path)}' \
+  -e '@${local_sensitive_file.astra_extra_vars.filename}' \
+  -e 'app_image=${var.app_image}' \
+  -e 'caddy_image=${var.caddy_image}' \
+  -e 'django_settings_module=${var.django_settings_module}' \
+  -e 's3_bucket_name=${var.s3_bucket_name}' \
+  -e 's3_endpoint_url=${local.s3_endpoint_url}' \
+  -e 's3_domain=${local.s3_domain}' \
+  -e 's3_region_name=${var.aws_region}' \
+  -e '${jsonencode({
+    database_host          = aws_rds_cluster.astra.endpoint
+    database_port          = aws_rds_cluster.astra.port
+    database_name          = var.db_name
+    database_user          = var.db_username
+    allowed_hosts          = var.allowed_hosts
+    public_base_url        = var.public_base_url
+    default_from_email     = var.default_from_email
+    freeipa_host           = var.freeipa_host
+    freeipa_verify_ssl     = var.freeipa_verify_ssl
+    freeipa_service_user   = var.freeipa_service_user
+    django_auto_migrate    = var.django_auto_migrate
+    django_migrate_retries = var.django_migrate_retries
+})}' \
+  -e "ansible_ssh_common_args='-o UserKnownHostsFile=${local.ansible_known_hosts_path} -o StrictHostKeyChecking=yes'" \
+  -e '${jsonencode({ astra_cron_jobs = var.cron_jobs })}' \
+  '${abspath(path.module)}/../../ansible/astra_ec2.yml'
+EOT
 }
 
-module "membership_operations_schedule" {
-  source = "../../modules/scheduled_ecs_task"
-
-  name                = "${local.name}-membership-operations"
-  enabled             = var.enable_membership_operations_schedule
-  schedule_expression = var.membership_operations_schedule_expression
-  description         = "Run Django membership_operations periodically"
-  tags                = local.tags
-
-  cluster_arn         = module.ecs.cluster_arn
-  task_definition_arn = module.ecs.task_definition_arn
-  subnet_ids          = module.network.public_subnet_ids
-  security_group_ids  = [aws_security_group.ecs_service.id]
-  assign_public_ip    = true
-
-  container_name = "astra"
-  command        = ["python", "manage.py", "membership_operations"]
-
-  pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
-}
-
-module "cleanup_mail_schedule" {
-  source = "../../modules/scheduled_ecs_task"
-
-  name                = "${local.name}-cleanup-mail"
-  enabled             = var.enable_cleanup_mail_schedule
-  schedule_expression = var.cleanup_mail_schedule_expression
-  description         = "Run Django cleanup_mail periodically"
-  tags                = local.tags
-
-  cluster_arn         = module.ecs.cluster_arn
-  task_definition_arn = module.ecs.task_definition_arn
-  subnet_ids          = module.network.public_subnet_ids
-  security_group_ids  = [aws_security_group.ecs_service.id]
-  assign_public_ip    = true
-
-  container_name = "astra"
-  command        = ["python", "manage.py", "cleanup_mail", "--days", "90", "--delete-attachments"]
-
-  pass_role_arns = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
-}
-
-module "parameters" {
-  source = "../../modules/parameters"
-
-  app_name                            = var.app_name
-  environment                         = var.environment
-  ecs_cluster_name                    = module.ecs.cluster_name
-  ecs_service_name                    = module.ecs.service_name
-  ecs_subnet_ids                      = module.network.public_subnet_ids
-  ecs_tasks_security_group_id         = aws_security_group.ecs_service.id
-  ecr_repository_name                 = module.ecr.repository_name
-  freeipa_service_password_secret_arn = coalesce(var.freeipa_service_password_secret_arn, module.secrets.freeipa_service_password_secret_arn)
-  tags                                = local.tags
-}
-
-module "ses" {
-  count  = var.enable_ses ? 1 : 0
-  source = "../../modules/ses"
-
-  name            = local.name
-  domain          = var.ses_domain
-  route53_zone_id = var.route53_zone_id
-  aws_account_id  = data.aws_caller_identity.current.account_id
-  event_webhook_url = (
-    var.public_base_url != null && trimspace(var.public_base_url) != ""
-    ? "${trim(var.public_base_url, "/")}/ses/event-webhook/"
-    : null
-  )
-  tags = local.tags
-}
-
-module "github_actions_iam" {
-  count  = var.create_github_actions_user ? 1 : 0
-  source = "../../modules/iam_github_actions"
-
-  user_name      = "${var.app_name}-${var.environment}-github-actions"
-  app_name       = var.app_name
-  aws_region     = var.aws_region
-  aws_account_id = data.aws_caller_identity.current.account_id
-
-  ecr_repository_arns  = [module.ecr.repository_arn]
-  ecs_task_role_arns   = [module.ecs.task_execution_role_arn, module.ecs.task_role_arn]
-  secrets_inspect_arns = [coalesce(var.freeipa_service_password_secret_arn, module.secrets.freeipa_service_password_secret_arn)]
-  tags                 = local.tags
-}
-
-module "application" {
-  source = "../../modules/application"
-
-  app_name    = var.app_name
-  environment = var.environment
-  tags        = local.tags
+depends_on = [aws_instance.astra]
 }

@@ -1,0 +1,459 @@
+---
+- name: Configure Astra EC2 host
+  hosts: all
+  become: true
+  vars:
+    app_image_value: "{{ app_image | default('') }}"
+    caddy_image_value: "{{ caddy_image | default('') }}"
+    django_settings_module_value: "{{ django_settings_module | default('config.settings') }}"
+    database_host_value: "{{ database_host | default('') }}"
+    database_port_value: "{{ database_port | default('') }}"
+    database_name_value: "{{ database_name | default('') }}"
+    database_user_value: "{{ database_user | default('') }}"
+    database_password_value: "{{ database_password | default('') }}"
+    allowed_hosts_value: "{{ allowed_hosts | default([]) }}"
+    public_base_url_value: "{{ public_base_url | default('') }}"
+    default_from_email_value: "{{ default_from_email | default('') }}"
+    freeipa_host_value: "{{ freeipa_host | default('') }}"
+    freeipa_private_ip_value: "{{ freeipa_private_ip | default('') }}"
+    freeipa_verify_ssl_value: "{{ freeipa_verify_ssl | default(false) | bool }}"
+    freeipa_service_user_value: "{{ freeipa_service_user | default('') }}"
+    freeipa_service_password_value: "{{ freeipa_service_password | default('') }}"
+    secret_key_value: "{{ secret_key | default('') }}"
+    django_auto_migrate_value: "{{ django_auto_migrate | default(true) }}"
+    django_migrate_retries_value: "{{ django_migrate_retries | default(30) }}"
+    s3_bucket_name_value: "{{ s3_bucket_name | default('') }}"
+    s3_domain_value: "{{ s3_domain | default('') }}"
+    s3_endpoint_url_value: "{{ s3_endpoint_url | default('') }}"
+    s3_region_name_value: "{{ s3_region_name | default('') }}"
+    astra_cron_jobs_value: "{{ astra_cron_jobs | default([]) }}"
+  handlers:
+    - name: Restart astra services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - astra-app@1.service
+        - astra-app@2.service
+        - astra-caddy.service
+  tasks:
+    - name: Read EC2 instance metadata (public hostname and IPv4)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json
+        import urllib.request
+
+        token_req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
+        )
+        token = urllib.request.urlopen(token_req, timeout=2).read().decode()
+
+        def get(path: str) -> str:
+            req = urllib.request.Request(
+                f"http://169.254.169.254/latest/meta-data/{path}",
+                headers={"X-aws-ec2-metadata-token": token},
+            )
+            return urllib.request.urlopen(req, timeout=2).read().decode()
+
+        print(
+            json.dumps(
+                {
+                    "public_hostname": get("public-hostname"),
+                    "public_ipv4": get("public-ipv4"),
+                }
+            )
+        )
+        PY
+      args:
+        executable: /bin/bash
+      register: _astra_imds_json
+      changed_when: false
+      failed_when: false
+
+    - name: Install podman
+      ansible.builtin.dnf:
+        name: podman
+        state: present
+
+    - name: Ensure astra directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /etc/astra
+        - /var/lib/caddy
+
+    - name: Ensure Caddy data directory is writable by the container
+      ansible.builtin.file:
+        path: /var/lib/caddy
+        state: directory
+        owner: "1000"
+        group: "1000"
+        mode: "0755"
+
+    - name: Install systemd unit for app
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/astra-app@.service"
+        dest: /etc/systemd/system/astra-app@.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install systemd unit for Caddy
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/astra-caddy.service"
+        dest: /etc/systemd/system/astra-caddy.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart astra services
+
+    - name: Install Caddyfile
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../systemd/Caddyfile.j2"
+        dest: /etc/astra/Caddyfile
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart astra services
+
+    - name: Install env file example if missing
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/astra.env.example"
+        dest: /etc/astra/astra.env
+        owner: root
+        group: root
+        mode: "0600"
+        force: false
+
+    - name: Install Caddy env file example if missing
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/caddy.env"
+        dest: /etc/astra/caddy.env
+        owner: root
+        group: root
+        mode: "0600"
+        force: false
+
+    - name: Ensure APP_IMAGE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^APP_IMAGE='
+        line: "APP_IMAGE={{ app_image_value }}"
+      when: app_image_value | length > 0
+
+    - name: Ensure CADDY_IMAGE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/caddy.env
+        regexp: '^CADDY_IMAGE='
+        line: "CADDY_IMAGE={{ (caddy_image_value if '/' in caddy_image_value else 'docker.io/library/' ~ caddy_image_value) }}"
+      notify: Restart astra services
+      when: caddy_image_value | length > 0
+
+    - name: Ensure DJANGO_SETTINGS_MODULE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DJANGO_SETTINGS_MODULE='
+        line: "DJANGO_SETTINGS_MODULE={{ django_settings_module_value }}"
+
+    - name: Ensure DJANGO_AUTO_MIGRATE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DJANGO_AUTO_MIGRATE='
+        line: "DJANGO_AUTO_MIGRATE={{ '1' if django_auto_migrate_value else '0' }}"
+      notify: Restart astra services
+
+    - name: Ensure DJANGO_MIGRATE_RETRIES is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DJANGO_MIGRATE_RETRIES='
+        line: "DJANGO_MIGRATE_RETRIES={{ django_migrate_retries_value }}"
+      notify: Restart astra services
+
+    - name: Validate database variables when database_host is provided
+      ansible.builtin.assert:
+        that:
+          - database_name_value | length > 0
+          - database_user_value | length > 0
+          - database_password_value | length > 0
+        fail_msg: "database_name and database_user must be set when database_host is provided."
+      when: database_host_value | length > 0
+
+    - name: Ensure DATABASE_URL is blank when using DATABASE_HOST
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DATABASE_URL='
+        line: 'DATABASE_URL='
+      notify: Restart astra services
+      when: database_host_value | length > 0
+
+    - name: Ensure DATABASE_HOST is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DATABASE_HOST='
+        line: "DATABASE_HOST={{ database_host_value }}"
+      notify: Restart astra services
+      when: database_host_value | length > 0
+
+    - name: Ensure DATABASE_PORT is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DATABASE_PORT='
+        line: "DATABASE_PORT={{ database_port_value or '5432' }}"
+      notify: Restart astra services
+      when: database_host_value | length > 0
+
+    - name: Ensure DATABASE_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DATABASE_NAME='
+        line: "DATABASE_NAME={{ database_name_value }}"
+      notify: Restart astra services
+      when: database_host_value | length > 0
+
+    - name: Ensure DATABASE_USER is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DATABASE_USER='
+        line: "DATABASE_USER={{ database_user_value }}"
+      notify: Restart astra services
+      when: database_host_value | length > 0
+
+    - name: Ensure DATABASE_PASSWORD is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DATABASE_PASSWORD='
+        line: "DATABASE_PASSWORD={{ database_password_value }}"
+      notify: Restart astra services
+      no_log: true
+      when: database_host_value | length > 0
+
+    - name: Ensure /etc/hosts contains FreeIPA private address mapping
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        # Match by hostname so we replace stale mappings when the FreeIPA private IP changes.
+        regexp: "^\\s*\\d+\\.\\d+\\.\\d+\\.\\d+\\s+{{ freeipa_host_value }}\\s*$"
+        line: "{{ freeipa_private_ip_value }} {{ freeipa_host_value }}"
+      when:
+        - freeipa_private_ip_value | length > 0
+        - freeipa_host_value | length > 0
+
+    - name: Check whether SECRET_KEY is set
+      ansible.builtin.command: bash -lc "grep -E '^SECRET_KEY=' /etc/astra/astra.env"
+      register: _astra_secret_key_line
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure SECRET_KEY is set from provisioning variables when provided
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^SECRET_KEY='
+        line: "SECRET_KEY={{ secret_key_value }}"
+      notify: Restart astra services
+      no_log: true
+      when: secret_key_value | length > 0
+
+    - name: Generate a strong SECRET_KEY if missing
+      ansible.builtin.command: python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+      register: _astra_secret_key_generated
+      changed_when: true
+      no_log: true
+      when:
+        - secret_key_value | length == 0
+        - _astra_secret_key_line.rc != 0 or _astra_secret_key_line.stdout == 'SECRET_KEY='
+
+    - name: Determine SECRET_KEY value to set
+      ansible.builtin.set_fact:
+        _astra_secret_key_to_set: >-
+          {{
+            _astra_secret_key_generated.stdout
+            if (_astra_secret_key_generated is defined and 'stdout' in _astra_secret_key_generated)
+            else ''
+          }}
+      no_log: true
+
+    - name: Ensure SECRET_KEY is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^SECRET_KEY='
+        line: "SECRET_KEY={{ _astra_secret_key_to_set }}"
+      notify: Restart astra services
+      no_log: true
+      when: _astra_secret_key_to_set | length > 0
+
+    - name: Check whether ALLOWED_HOSTS is set
+      ansible.builtin.command: bash -lc "grep -E '^ALLOWED_HOSTS=' /etc/astra/astra.env"
+      register: _astra_allowed_hosts_line
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure ALLOWED_HOSTS is set from Terraform when provided
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^ALLOWED_HOSTS='
+        line: "ALLOWED_HOSTS={{ allowed_hosts_value | join(',') }}"
+      notify: Restart astra services
+      when:
+        - allowed_hosts_value | length > 0
+
+    - name: Ensure ALLOWED_HOSTS is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^ALLOWED_HOSTS='
+        line: >-
+          ALLOWED_HOSTS={{ (
+            [
+              (_astra_imds_json.stdout | default('{}') | from_json).get('public_hostname', ''),
+              (_astra_imds_json.stdout | default('{}') | from_json).get('public_ipv4', ''),
+              inventory_hostname,
+              'localhost',
+              '127.0.0.1'
+            ]
+            | map('string')
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          ) | join(',') }}
+      notify: Restart astra services
+      when:
+        - allowed_hosts_value | length == 0
+        - _astra_allowed_hosts_line.rc != 0 or _astra_allowed_hosts_line.stdout == 'ALLOWED_HOSTS='
+
+    - name: Ensure PUBLIC_BASE_URL is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^PUBLIC_BASE_URL='
+        line: "PUBLIC_BASE_URL={{ public_base_url_value }}"
+      notify: Restart astra services
+      when: public_base_url_value | length > 0
+
+    - name: Ensure DEFAULT_FROM_EMAIL is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DEFAULT_FROM_EMAIL='
+        line: "DEFAULT_FROM_EMAIL={{ default_from_email_value }}"
+      notify: Restart astra services
+      when: default_from_email_value | length > 0
+
+    - name: Ensure FREEIPA_* settings are present when FreeIPA is configured
+      ansible.builtin.assert:
+        that:
+          - freeipa_service_password_value | length > 0
+          - freeipa_service_user_value | length > 0
+        fail_msg: "FreeIPA is configured but FREEIPA_SERVICE_USER or FREEIPA_SERVICE_PASSWORD is missing."
+      no_log: true
+      when: freeipa_host_value | length > 0
+
+    - name: Ensure FREEIPA_HOST is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^FREEIPA_HOST='
+        line: "FREEIPA_HOST={{ freeipa_host_value }}"
+      notify: Restart astra services
+      when: freeipa_host_value | length > 0
+
+    - name: Ensure FREEIPA_VERIFY_SSL is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^FREEIPA_VERIFY_SSL='
+        line: "FREEIPA_VERIFY_SSL={{ '1' if freeipa_verify_ssl_value else '0' }}"
+      notify: Restart astra services
+      when: freeipa_host_value | length > 0
+
+    - name: Ensure FREEIPA_SERVICE_USER is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^FREEIPA_SERVICE_USER='
+        line: "FREEIPA_SERVICE_USER={{ freeipa_service_user_value }}"
+      notify: Restart astra services
+      when: freeipa_host_value | length > 0
+
+    - name: Ensure FREEIPA_SERVICE_PASSWORD is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^FREEIPA_SERVICE_PASSWORD='
+        line: "FREEIPA_SERVICE_PASSWORD={{ freeipa_service_password_value }}"
+      notify: Restart astra services
+      no_log: true
+      when: freeipa_host_value | length > 0
+
+    - name: Ensure AWS_STORAGE_BUCKET_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_STORAGE_BUCKET_NAME='
+        line: "AWS_STORAGE_BUCKET_NAME={{ s3_bucket_name_value }}"
+      when: s3_bucket_name_value | length > 0
+
+    - name: Ensure AWS_S3_DOMAIN is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_DOMAIN='
+        line: "AWS_S3_DOMAIN={{ s3_domain_value }}"
+      when: s3_domain_value | length > 0
+
+    - name: Ensure AWS_S3_ENDPOINT_URL is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_ENDPOINT_URL='
+        line: "AWS_S3_ENDPOINT_URL={{ s3_endpoint_url_value }}"
+      when: s3_endpoint_url_value | length > 0
+
+    - name: Ensure AWS_S3_REGION_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_REGION_NAME='
+        line: "AWS_S3_REGION_NAME={{ s3_region_name_value }}"
+      when: s3_region_name_value | length > 0
+
+    - name: Install deployment scripts
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/files/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - deploy-prod.sh
+        - rollback-prod.sh
+        - deploy-prod-sha.sh
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - astra-app@1.service
+        - astra-app@2.service
+        - astra-caddy.service
+
+    - name: Validate cron jobs
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.command is defined
+        fail_msg: "Cron jobs must include name and command."
+      loop: "{{ astra_cron_jobs_value }}"
+
+    - name: Configure cron jobs
+      ansible.builtin.cron:
+        name: "{{ item.name }}"
+        minute: "{{ item.minute | default('0', true) }}"
+        hour: "{{ item.hour | default('0', true) }}"
+        day: "{{ item.day | default('*', true) }}"
+        month: "{{ item.month | default('*', true) }}"
+        weekday: "{{ item.weekday | default('*', true) }}"
+        user: root
+        job: "{{ item.command }}"
+      loop: "{{ astra_cron_jobs_value }}"

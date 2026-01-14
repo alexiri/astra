@@ -128,18 +128,6 @@ _ALLOW_MISSING_RUNTIME_SECRETS = _DJANGO_SUBCOMMAND in {
     "collectstatic",
 }
 
-# Development convenience: silence urllib3's InsecureRequestWarning spam when
-# intentionally running with verify_ssl disabled (e.g. local FreeIPA with self-signed cert).
-if DEBUG:
-    try:
-        import urllib3
-        from urllib3.exceptions import InsecureRequestWarning
-
-        urllib3.disable_warnings(InsecureRequestWarning)
-    except Exception:
-        # Best-effort; if urllib3 isn't available/changes, don't break startup.
-        pass
-
 _DEFAULT_SECRET_KEY_PLACEHOLDER = "django-insecure-dev-only-change-me"
 SECRET_KEY = _env_str("SECRET_KEY", default=_DEFAULT_SECRET_KEY_PLACEHOLDER) or _DEFAULT_SECRET_KEY_PLACEHOLDER
 if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS:
@@ -218,6 +206,7 @@ TEMPLATES = [
                 'core.context_processors.membership_review',
                 'core.context_processors.organization_nav',
                 'core.context_processors.chat_networks',
+                'core.context_processors.build_info',
             ],
         },
     },
@@ -563,6 +552,18 @@ FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS = _env_bool(
     "FREEIPA_SERVICE_CLIENT_REUSE_ACROSS_REQUESTS",
     default=True,
 )
+
+# Development convenience: silence urllib3's InsecureRequestWarning spam when
+# intentionally running with verify_ssl disabled (e.g. local FreeIPA with self-signed cert).
+if FREEIPA_VERIFY_SSL is False:
+    try:
+        import urllib3
+        from urllib3.exceptions import InsecureRequestWarning
+
+        urllib3.disable_warnings(InsecureRequestWarning)
+    except Exception:
+        # Best-effort; if urllib3 isn't available/changes, don't break startup.
+        pass
 
 # Registration
 # Inspired by Noggin's stage-user registration flow.
