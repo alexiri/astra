@@ -4,29 +4,20 @@ This folder provisions AWS infrastructure for the **astra** Django app.
 
 ## What Terraform manages
 
-- VPC with public + private subnets (+ NAT)
-- Application Load Balancer (ALB)
-- ECS cluster + Fargate service
-- ECR repository (immutable tags)
-- RDS PostgreSQL
-- CloudWatch logs
-- IAM roles for ECS tasks
-- Secrets Manager secrets (DB password, Django secret key)
-- SSM Parameters used by CI/CD (cluster/service/subnets/SG/ECR repo)
-- Optional SES domain + SNS event publishing for bounces/complaints
+- One EC2 instance (default `t3.small`) per environment
+- Security group for SSH + HTTP/HTTPS
+- User data that installs podman and systemd units for the app + Caddy
+- Uses the default VPC and its subnets
 
 ## What Terraform does NOT do
 
 - Build/push container images
-- Deploy new images (handled by GitHub Actions)
-
-To prevent Terraform fighting deployments, the ECS service ignores drift of `task_definition` (CI/CD updates it).
+- Configure application secrets (these live in `/etc/astra/astra.env` on the host)
 
 ## Environments and state
 
 Environments live under:
 
-- `infra/envs/dev`
 - `infra/envs/staging`
 - `infra/envs/prod`
 
@@ -39,47 +30,21 @@ Assumption: the S3 state bucket and DynamoDB lock table already exist:
 
 If you need Terraform to create these for a new account, run the one-time bootstrap stack in `infra/bootstrap` first.
 
-## Health checks
+## Systemd + podman layout
 
-- ALB target group health check: `/healthz`
-- Container-level health check (inside ECS): `/readyz`
+User data installs podman and writes systemd units from `infra/systemd`:
 
-## Secrets injection
+- `astra-app@.service` runs two app instances (ports `8001` + `8002`) with `sdnotify=container`.
+- `astra-caddy.service` runs Caddy and load-balances to `localhost:8001` and `localhost:8002`.
 
-ECS task definition injects secrets via Secrets Manager:
+## Environment file updates
 
-- `DATABASE_PASSWORD` from RDS password secret
-- `DJANGO_SECRET_KEY` from secrets module
+On first boot, `/etc/astra/astra.env` is created with `APP_IMAGE` and `CADDY_IMAGE` plus empty placeholders
+for required application settings. Copy `infra/systemd/astra.env.example`, fill in the values, and upload
+it to `/etc/astra/astra.env`.
 
-These are referenced by ARN in the task definition, and the **task execution role** is granted `secretsmanager:GetSecretValue` for those ARNs.
+After updating the env file on the host:
 
-## SES (optional)
-
-If `enable_ses = true`, Terraform will:
-
-- Verify `ses_domain` via Route53 (you must provide `route53_zone_id`)
-- Enable DKIM
-- Create a configuration set
-- Publish events to an SNS topic (bounces/complaints/etc)
-
-## CI/CD inputs
-
-CI/CD reads these SSM parameters per environment:
-
-- `/${APP_NAME}/${ENV}/ecs/cluster_name`
-- `/${APP_NAME}/${ENV}/ecs/service_name`
-- `/${APP_NAME}/${ENV}/network/private_subnet_ids` (StringList)
-- `/${APP_NAME}/${ENV}/ecs/tasks_security_group_id`
-- `/${APP_NAME}/${ENV}/ecr/repository_name`
-
-See `.github/workflows/deploy.yml`.
-
-## Tagging + “Application” view
-
-All taggable resources are tagged consistently to make them easy to find:
-
-- `app = astra`
-- `env = dev|staging|prod`
-
-Each environment also creates an AWS Resource Group (shown as an “Application” in the console)
-that automatically includes any resources with matching `app` + `env` tags.
+```bash
+sudo systemctl restart astra-app@1.service astra-app@2.service astra-caddy.service
+```
