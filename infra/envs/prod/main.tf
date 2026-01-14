@@ -123,13 +123,14 @@ resource "null_resource" "configure_instance" {
 
   provisioner "local-exec" {
     command = <<-EOT
-ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \\
+ansible-playbook \\
   -i '${aws_instance.astra.public_ip},' \\
   -u '${var.ansible_user}' \\
   --private-key '${var.ansible_private_key_path}' \\
   -e 'app_image=${var.app_image}' \\
   -e 'caddy_image=${var.caddy_image}' \\
   -e 'django_settings_module=${var.django_settings_module}' \\
+  -e 'ansible_ssh_common_args=-o StrictHostKeyChecking=accept-new' \\
   -e 'astra_cron_jobs=${jsonencode(var.cron_jobs)}' \\
   '${path.module}/../../ansible/astra_ec2.yml'
 EOT

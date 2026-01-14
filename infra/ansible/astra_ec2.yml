@@ -104,6 +104,14 @@
         - astra-caddy.service
 
     - name: Configure cron jobs
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.command is defined
+        fail_msg: "Cron jobs must include name and command."
+      loop: "{{ astra_cron_jobs }}"
+
+    - name: Configure cron jobs
       ansible.builtin.cron:
         name: "{{ item.name }}"
         minute: "{{ item.minute | default('0') }}"

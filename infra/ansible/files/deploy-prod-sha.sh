@@ -28,7 +28,7 @@ new_image=""
 
 if [[ "$digest_input" == sha256:* ]]; then
   digest="$digest_input"
-elif [[ "$digest_input" =~ ^[0-9a-f]{64}$ ]]; then
+elif [[ "$digest_input" =~ ^[0-9a-fA-F]{64}$ ]]; then
   digest="sha256:$digest_input"
 else
   new_image="$digest_input"

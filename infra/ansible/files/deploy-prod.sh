@@ -45,7 +45,10 @@ fi
 
 podman pull "$APP_IMAGE"
 
-podman run --rm --name astra-migrate --env-file "$ENV_FILE" "$APP_IMAGE" python manage.py migrate --noinput
+if ! podman run --rm --name astra-migrate --env-file "$ENV_FILE" "$APP_IMAGE" python manage.py migrate --noinput; then
+  echo "Migration failed; containers were not restarted." >&2
+  exit 1
+fi
 
 systemctl restart astra-app@1.service
 wait_for_unit astra-app@1.service
