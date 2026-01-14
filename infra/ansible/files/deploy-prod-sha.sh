@@ -23,6 +23,29 @@ if [[ -z "${APP_IMAGE:-}" ]]; then
   exit 1
 fi
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local tmp_file
+
+  tmp_file="$(mktemp)"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { found = 0 }
+    $0 ~ "^" key "=" {
+      print key "=" value
+      found = 1
+      next
+    }
+    { print }
+    END {
+      if (found == 0) {
+        print key "=" value
+      }
+    }
+  ' "$ENV_FILE" > "$tmp_file"
+  mv "$tmp_file" "$ENV_FILE"
+}
+
 digest_input="$1"
 digest_input_normalized="${digest_input,,}"
 new_image=""
@@ -46,10 +69,6 @@ if [[ -z "$new_image" ]]; then
   new_image="${base_image}@${digest}"
 fi
 
-if grep -q "^APP_IMAGE=" "$ENV_FILE"; then
-  sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${new_image}|" "$ENV_FILE"
-else
-  echo "APP_IMAGE=${new_image}" >> "$ENV_FILE"
-fi
+set_env_value "APP_IMAGE" "$new_image"
 
 /usr/local/bin/deploy-prod.sh

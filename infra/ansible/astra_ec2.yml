@@ -103,7 +103,7 @@
         - astra-app@2.service
         - astra-caddy.service
 
-    - name: Configure cron jobs
+    - name: Validate cron jobs
       ansible.builtin.assert:
         that:
           - item.name is defined

@@ -83,3 +83,5 @@ cron_jobs = [
   }
 ]
 ```
+
+If `minute` or `hour` are omitted, they default to `0` (midnight local time).
