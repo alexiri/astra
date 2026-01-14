@@ -47,12 +47,13 @@ set_env_value() {
 }
 
 digest_input="$1"
-digest_input_normalized="${digest_input,,}"
+digest_input_normalized="$(printf '%s' "$digest_input" | tr '[:upper:]' '[:lower:]')"
+digest_regex='^[0-9a-f]{64}$'
 new_image=""
 
 if [[ "$digest_input_normalized" == sha256:* ]]; then
   digest="$digest_input_normalized"
-elif [[ "$digest_input_normalized" =~ ^[0-9a-f]{64}$ ]]; then
+elif [[ "$digest_input_normalized" =~ $digest_regex ]]; then
   digest="sha256:$digest_input_normalized"
 else
   new_image="$digest_input"
