@@ -80,7 +80,7 @@ cron_jobs = [
   {
     name    = "membership-operations"
     minute  = "0"
-    hour    = "2"
+    hour    = "0"
     command = "podman exec astra-app-1 python manage.py membership_operations"
   }
 ]

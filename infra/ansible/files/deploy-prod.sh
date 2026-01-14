@@ -68,6 +68,3 @@ wait_for_unit astra-app@1.service
 
 systemctl restart astra-app@2.service
 wait_for_unit astra-app@2.service
-
-systemctl restart astra-caddy.service
-wait_for_unit astra-caddy.service
