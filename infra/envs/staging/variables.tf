@@ -53,6 +53,12 @@ variable "ansible_private_key_path" {
   description = "Path to SSH private key for Ansible."
 }
 
+variable "ansible_known_hosts_path" {
+  type        = string
+  description = "Path to SSH known_hosts for Ansible."
+  default     = "~/.ssh/known_hosts"
+}
+
 variable "django_settings_module" {
   type        = string
   description = "DJANGO_SETTINGS_MODULE value for the env file."

@@ -35,6 +35,7 @@ locals {
     env = var.environment
   }
 
+  ansible_known_hosts_path = pathexpand(var.ansible_known_hosts_path)
   ansible_files = [
     "${path.module}/../../ansible/astra_ec2.yml",
     "${path.module}/../../systemd/astra-app@.service",
@@ -130,7 +131,7 @@ ansible-playbook \\
   -e 'app_image=${var.app_image}' \\
   -e 'caddy_image=${var.caddy_image}' \\
   -e 'django_settings_module=${var.django_settings_module}' \\
-  -e 'ansible_ssh_common_args=-o StrictHostKeyChecking=accept-new' \\
+  -e 'ansible_ssh_common_args=-o UserKnownHostsFile=${local.ansible_known_hosts_path} -o StrictHostKeyChecking=yes' \\
   -e 'astra_cron_jobs=${jsonencode(var.cron_jobs)}' \\
   '${path.module}/../../ansible/astra_ec2.yml'
 EOT

@@ -36,7 +36,19 @@ wait_for_unit() {
 }
 
 current_digest=""
-if podman image inspect "$APP_IMAGE" >/dev/null 2>&1; then
+current_image_id=""
+for container_name in astra-app-1 astra-app-2; do
+  if podman inspect "$container_name" >/dev/null 2>&1; then
+    current_image_id=$(podman inspect "$container_name" --format '{{.Image}}')
+    if [[ -n "$current_image_id" ]]; then
+      break
+    fi
+  fi
+done
+
+if [[ -n "$current_image_id" ]]; then
+  current_digest=$(podman image inspect "$current_image_id" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}')
+elif podman image inspect "$APP_IMAGE" >/dev/null 2>&1; then
   current_digest=$(podman image inspect "$APP_IMAGE" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}')
 fi
 if [[ -n "$current_digest" ]]; then

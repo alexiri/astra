@@ -45,6 +45,7 @@ variables:
 
 - `ansible_private_key_path` (required)
 - `ansible_user` (defaults to `ec2-user`)
+- `ansible_known_hosts_path` (defaults to `~/.ssh/known_hosts`; ensure the host key is present)
 
 The playbook installs podman, copies the systemd units and Caddyfile, writes `/etc/astra/astra.env`
 (if missing), and installs the deployment scripts under `/usr/local/bin`.
