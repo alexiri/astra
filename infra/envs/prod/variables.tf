@@ -41,3 +41,34 @@ variable "caddy_image" {
   type        = string
   description = "Container image for Caddy."
 }
+
+variable "ansible_user" {
+  type        = string
+  description = "SSH user for Ansible."
+  default     = "ec2-user"
+}
+
+variable "ansible_private_key_path" {
+  type        = string
+  description = "Path to SSH private key for Ansible."
+}
+
+variable "django_settings_module" {
+  type        = string
+  description = "DJANGO_SETTINGS_MODULE value for the env file."
+  default     = "config.settings"
+}
+
+variable "cron_jobs" {
+  type = list(object({
+    name    = string
+    command = string
+    minute  = optional(string)
+    hour    = optional(string)
+    day     = optional(string)
+    month   = optional(string)
+    weekday = optional(string)
+  }))
+  description = "Cron jobs to configure on the host."
+  default     = []
+}

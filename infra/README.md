@@ -32,10 +32,22 @@ If you need Terraform to create these for a new account, run the one-time bootst
 
 ## Systemd + podman layout
 
-User data installs podman and writes systemd units from `infra/systemd`:
+Ansible installs podman and writes systemd units from `infra/systemd`:
 
 - `astra-app@.service` runs two app instances (ports `8001` + `8002`) with `sdnotify=container`.
 - `astra-caddy.service` runs Caddy and load-balances to `localhost:8001` and `localhost:8002`.
+
+## Ansible provisioning
+
+Terraform launches the EC2 instance and then runs `infra/ansible/astra_ec2.yml` via a local-exec
+provisioner. You must provide the SSH private key path and (optionally) the SSH user in the env
+variables:
+
+- `ansible_private_key_path` (required)
+- `ansible_user` (defaults to `ec2-user`)
+
+The playbook installs podman, copies the systemd units and Caddyfile, writes `/etc/astra/astra.env`
+(if missing), and installs the deployment scripts under `/usr/local/bin`.
 
 ## Environment file updates
 
@@ -47,4 +59,27 @@ After updating the env file on the host:
 
 ```bash
 sudo systemctl restart astra-app@1.service astra-app@2.service astra-caddy.service
+```
+
+## Deployment scripts
+
+Ansible installs the following scripts:
+
+- `/usr/local/bin/deploy-prod.sh` (pull latest image, run migrations, restart app instances in order)
+- `/usr/local/bin/rollback-prod.sh` (roll back to the previous digest stored in `/etc/astra/last_app_image`)
+- `/usr/local/bin/deploy-prod-sha.sh <sha256|sha256:hash|image@sha256:hash>` (deploy a specific digest)
+
+## Cron jobs
+
+Define cron jobs in Terraform using the `cron_jobs` variable. Example:
+
+```hcl
+cron_jobs = [
+  {
+    name    = "membership-operations"
+    minute  = "0"
+    hour    = "2"
+    command = "podman exec astra-app-1 python manage.py membership_operations"
+  }
+]
 ```

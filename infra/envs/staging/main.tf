@@ -35,9 +35,17 @@ locals {
     env = var.environment
   }
 
-  app_unit   = file("${path.module}/../../systemd/astra-app@.service")
-  caddy_unit = file("${path.module}/../../systemd/astra-caddy.service")
-  caddyfile  = file("${path.module}/../../systemd/Caddyfile")
+  ansible_files = [
+    "${path.module}/../../ansible/astra_ec2.yml",
+    "${path.module}/../../systemd/astra-app@.service",
+    "${path.module}/../../systemd/astra-caddy.service",
+    "${path.module}/../../systemd/Caddyfile",
+    "${path.module}/../../systemd/astra.env.example",
+    "${path.module}/../../ansible/files/deploy-prod.sh",
+    "${path.module}/../../ansible/files/rollback-prod.sh",
+    "${path.module}/../../ansible/files/deploy-prod-sha.sh",
+  ]
+  ansible_hash = sha256(join("", [for path in local.ansible_files : filesha256(path)]))
 }
 
 resource "aws_security_group" "astra" {
@@ -96,38 +104,36 @@ resource "aws_instance" "astra" {
 #!/bin/bash
 set -euo pipefail
 
-dnf -y install podman
-
-mkdir -p /etc/astra /var/lib/caddy
-
-cat >/etc/systemd/system/astra-app@.service <<'UNIT'
-${local.app_unit}
-UNIT
-
-cat >/etc/systemd/system/astra-caddy.service <<'UNIT'
-${local.caddy_unit}
-UNIT
-
-cat >/etc/astra/Caddyfile <<'CADDY'
-${local.caddyfile}
-CADDY
-
-cat >/etc/astra/astra.env <<'ENV'
-APP_IMAGE=${var.app_image}
-CADDY_IMAGE=${var.caddy_image}
-DJANGO_SETTINGS_MODULE=config.settings
-FREEIPA_SERVICE_PASSWORD=
-AWS_STORAGE_BUCKET_NAME=
-AWS_S3_DOMAIN=
-PUBLIC_BASE_URL=
-DATABASE_URL=
-ENV
-
-systemctl daemon-reload
-systemctl enable --now astra-app@1.service astra-app@2.service astra-caddy.service
+dnf -y install python3
 EOF
 
   tags = merge(local.tags, {
     Name = local.name
   })
+}
+
+resource "null_resource" "configure_instance" {
+  triggers = {
+    instance_id = aws_instance.astra.id
+    config_hash = local.ansible_hash
+    app_image   = var.app_image
+    caddy_image = var.caddy_image
+    cron_jobs   = jsonencode(var.cron_jobs)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \\
+  -i '${aws_instance.astra.public_ip},' \\
+  -u '${var.ansible_user}' \\
+  --private-key '${var.ansible_private_key_path}' \\
+  -e 'app_image=${var.app_image}' \\
+  -e 'caddy_image=${var.caddy_image}' \\
+  -e 'django_settings_module=${var.django_settings_module}' \\
+  -e 'astra_cron_jobs=${jsonencode(var.cron_jobs)}' \\
+  '${path.module}/../../ansible/astra_ec2.yml'
+EOT
+  }
+
+  depends_on = [aws_instance.astra]
 }
