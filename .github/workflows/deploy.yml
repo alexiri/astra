@@ -1,252 +1,49 @@
-name: Deploy (ECS)
+name: Build and Publish Image
 
 on:
   push:
     branches:
-      - dev
       - staging
       - master
 
 concurrency:
-  group: deploy-${{ github.ref_name }}
+  group: image-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: read
-
-env:
-  AWS_REGION: eu-west-1
-  APP_NAME: astra
+  packages: write
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (static keys)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short,prefix=,priority=1000
+            type=raw,value=latest,enable=${{ github.ref_name == 'master' }},priority=0
 
-      - name: Select environment
-        id: env
-        shell: bash
-        run: |
-          set -euo pipefail
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-          case "${GITHUB_REF_NAME}" in
-            master)
-              echo "deploy_env=prod" >> "$GITHUB_OUTPUT"
-              ;;
-            staging)
-              echo "deploy_env=staging" >> "$GITHUB_OUTPUT"
-              ;;
-            dev)
-              echo "deploy_env=dev" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Read deployment parameters from SSM
-        id: ssm
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PREFIX="/${APP_NAME}/${{ steps.env.outputs.deploy_env }}"
-
-          CLUSTER_NAME=$(aws ssm get-parameter --name "${PREFIX}/ecs/cluster_name" --query 'Parameter.Value' --output text)
-          SERVICE_NAME=$(aws ssm get-parameter --name "${PREFIX}/ecs/service_name" --query 'Parameter.Value' --output text)
-          SUBNETS_CSV=$(aws ssm get-parameter --name "${PREFIX}/network/ecs_subnet_ids" --query 'Parameter.Value' --output text)
-          TASKS_SG=$(aws ssm get-parameter --name "${PREFIX}/ecs/tasks_security_group_id" --query 'Parameter.Value' --output text)
-          ECR_REPOSITORY=$(aws ssm get-parameter --name "${PREFIX}/ecr/repository_name" --query 'Parameter.Value' --output text)
-
-          echo "cluster_name=${CLUSTER_NAME}" >> "$GITHUB_OUTPUT"
-          echo "service_name=${SERVICE_NAME}" >> "$GITHUB_OUTPUT"
-          echo "subnets_csv=${SUBNETS_CSV}" >> "$GITHUB_OUTPUT"
-          echo "tasks_sg=${TASKS_SG}" >> "$GITHUB_OUTPUT"
-          echo "ecr_repository=${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve AWS account and ECR registry
-        id: aws
-        shell: bash
-        run: |
-          set -euo pipefail
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "account_id=${ACCOUNT_ID}" >> "$GITHUB_OUTPUT"
-          echo "ecr_registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> "$GITHUB_OUTPUT"
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push image (immutable SHA tag)
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.aws.outputs.ecr_registry }}/${{ steps.ssm.outputs.ecr_repository }}:${{ github.sha }}
-
-      - name: Register new task definition revision (update image)
-        id: taskdef
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
-          SERVICE="${{ steps.ssm.outputs.service_name }}"
-          IMAGE="${{ steps.aws.outputs.ecr_registry }}/${{ steps.ssm.outputs.ecr_repository }}:${GITHUB_SHA}"
-
-          CURRENT_TASK_DEF_ARN=$(aws ecs describe-services \
-            --cluster "$CLUSTER" \
-            --services "$SERVICE" \
-            --query 'services[0].taskDefinition' \
-            --output text | awk 'NR==1{print $1}')
-
-          if [ -z "$CURRENT_TASK_DEF_ARN" ] || [ "$CURRENT_TASK_DEF_ARN" = "None" ] || [ "$CURRENT_TASK_DEF_ARN" = "null" ]; then
-            echo "Could not resolve current ECS task definition ARN for service: ${SERVICE}" >&2
-            exit 1
-          fi
-
-          # Important: the service may still point at an older task definition even
-          # after Terraform created a newer revision (the service ignores task_definition
-          # changes to allow CI/CD-driven deploys). Base the deploy on the latest ACTIVE
-          # revision in the family so we pick up Terraform-managed env/secrets changes.
-          FAMILY=$(aws ecs describe-task-definition \
-            --task-definition "$CURRENT_TASK_DEF_ARN" \
-            --query 'taskDefinition.family' \
-            --output text | awk 'NR==1{print $1}')
-
-          if [ -z "$FAMILY" ] || [ "$FAMILY" = "None" ] || [ "$FAMILY" = "null" ]; then
-            echo "Could not resolve task definition family from: ${CURRENT_TASK_DEF_ARN}" >&2
-            exit 1
-          fi
-
-          BASE_TASK_DEF_ARN=$(aws ecs list-task-definitions \
-            --family-prefix "$FAMILY" \
-            --status ACTIVE \
-            --sort DESC \
-            --max-results 1 \
-            --query 'taskDefinitionArns[0]' \
-            --output text | awk 'NR==1{print $1}')
-
-          if [ -z "$BASE_TASK_DEF_ARN" ] || [ "$BASE_TASK_DEF_ARN" = "None" ] || [ "$BASE_TASK_DEF_ARN" = "null" ]; then
-            BASE_TASK_DEF_ARN="$CURRENT_TASK_DEF_ARN"
-          fi
-
-          aws ecs describe-task-definition \
-            --task-definition "$BASE_TASK_DEF_ARN" \
-            --query 'taskDefinition' \
-            --output json > taskdef.base.json
-
-          # Build a clean register-task-definition payload (AWS rejects unknown/read-only keys).
-          # This is more robust than trying to "del(...)" every possible extra field.
-          jq --arg IMAGE "$IMAGE" '
-            {
-              family: .family,
-              taskRoleArn: .taskRoleArn,
-              executionRoleArn: .executionRoleArn,
-              networkMode: .networkMode,
-              containerDefinitions: (
-                .containerDefinitions
-                | map(if .name == "astra" then .image = $IMAGE else . end)
-              ),
-              volumes: .volumes,
-              placementConstraints: .placementConstraints,
-              requiresCompatibilities: .requiresCompatibilities,
-              cpu: .cpu,
-              memory: .memory,
-              tags: .tags,
-              pidMode: .pidMode,
-              ipcMode: .ipcMode,
-              proxyConfiguration: .proxyConfiguration,
-              inferenceAccelerators: .inferenceAccelerators,
-              ephemeralStorage: .ephemeralStorage,
-              runtimePlatform: .runtimePlatform,
-              enableFaultInjection: .enableFaultInjection
-            }
-            | with_entries(select(.value != null))
-          ' taskdef.base.json > taskdef.rendered.json
-
-          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://taskdef.rendered.json \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
-
-          echo "task_definition_arn=${NEW_TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
-          echo "Registered new task definition: ${NEW_TASK_DEF_ARN}"
-
-      - name: Run Django migrations (one-off ECS task)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
-          TASK_DEF="${{ steps.taskdef.outputs.task_definition_arn }}"
-
-          # SSM stores subnet IDs as a comma-separated string list.
-          SUBNETS_JSON=$(printf '%s' "${{ steps.ssm.outputs.subnets_csv }}" | jq -R 'split(",")')
-          SGS_JSON=$(printf '%s' "${{ steps.ssm.outputs.tasks_sg }}" | jq -R 'split(",")')
-          NETWORK=$(jq -n --argjson subnets "$SUBNETS_JSON" --argjson sgs "$SGS_JSON" '{awsvpcConfiguration:{subnets:$subnets,securityGroups:$sgs,assignPublicIp:"ENABLED"}}')
-
-          # The container entrypoint cd's into the directory that contains manage.py.
-          OVERRIDES=$(jq -n '{containerOverrides:[{name:"astra",command:["python","manage.py","migrate","--noinput"]}] }')
-
-          TASK_ARN=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --launch-type FARGATE \
-            --task-definition "$TASK_DEF" \
-            --network-configuration "$NETWORK" \
-            --overrides "$OVERRIDES" \
-            --query 'tasks[0].taskArn' \
-            --output text)
-
-          echo "Started migrate task: ${TASK_ARN}"
-          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
-
-          EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
-          if [ "$EXIT_CODE" != "0" ]; then
-            echo "Migrate task failed with exit code: $EXIT_CODE" >&2
-
-            aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --output json | \
-              jq '.tasks[0] | {stoppedReason, stopCode, containers: (.containers | map({name, exitCode, reason, lastStatus}))}'
-
-            TASK_ID="${TASK_ARN##*/}"
-            TASKDEF_JSON=$(aws ecs describe-task-definition --task-definition "$TASK_DEF" --output json)
-            LOG_GROUP=$(printf '%s' "$TASKDEF_JSON" | jq -r '.taskDefinition.containerDefinitions[] | select(.name=="astra") | .logConfiguration.options["awslogs-group"]')
-            LOG_PREFIX=$(printf '%s' "$TASKDEF_JSON" | jq -r '.taskDefinition.containerDefinitions[] | select(.name=="astra") | .logConfiguration.options["awslogs-stream-prefix"]')
-            LOG_STREAM="${LOG_PREFIX}/astra/${TASK_ID}"
-
-            echo "--- CloudWatch logs: ${LOG_GROUP} / ${LOG_STREAM} ---" >&2
-            aws logs get-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" --start-from-head --limit 200 || true
-            exit 1
-          else
-            echo "Migrate task completed successfully."
-          fi
-
-      - name: Deploy to ECS service
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CLUSTER="${{ steps.ssm.outputs.cluster_name }}"
-          SERVICE="${{ steps.ssm.outputs.service_name }}"
-          TASK_DEF="${{ steps.taskdef.outputs.task_definition_arn }}"
-
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "$SERVICE" \
-            --task-definition "$TASK_DEF" \
-            --force-new-deployment > /dev/null
-
-          echo "Updating service to task definition ${TASK_DEF}..."
-          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-          echo "Service is stable."
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            ASTRA_BUILD_SHA=${{ steps.meta.outputs.version }}
+          labels: ${{ steps.meta.outputs.labels }}

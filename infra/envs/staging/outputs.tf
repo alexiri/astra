@@ -1,19 +1,47 @@
-output "alb_dns_name" {
-  value       = module.alb.alb_dns_name
-  description = "ALB DNS name."
+output "instance_id" {
+  value = aws_instance.astra.id
 }
 
-output "rds_endpoint" {
-  value       = module.rds.endpoint
-  description = "RDS endpoint hostname."
+output "public_ip" {
+  value = aws_instance.astra.public_ip
 }
 
-output "ssm_parameter_prefix" {
-  value       = module.parameters.parameter_prefix
-  description = "SSM parameter prefix used by CI/CD."
+output "public_dns" {
+  value = aws_instance.astra.public_dns
 }
 
-output "ecr_repository_url" {
-  value       = module.ecr.repository_url
-  description = "ECR repository URL (no tag)."
+output "freeipa_instance_id" {
+  value = module.freeipa.instance_id
+}
+
+output "freeipa_public_ip" {
+  value = module.freeipa.public_ip
+}
+
+output "freeipa_ldap_uri" {
+  value = module.freeipa.ldap_uri
+}
+
+output "db_endpoint" {
+  value = aws_rds_cluster.astra.endpoint
+}
+
+output "db_reader_endpoint" {
+  value = aws_rds_cluster.astra.reader_endpoint
+}
+
+output "db_port" {
+  value = aws_rds_cluster.astra.port
+}
+
+output "s3_bucket_name" {
+  value = aws_s3_bucket.astra_media.bucket
+}
+
+output "s3_domain" {
+  value = local.s3_domain
+}
+
+output "s3_endpoint_url" {
+  value = local.s3_endpoint_url
 }

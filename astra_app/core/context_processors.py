@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.conf import settings
 
+from core.build_info import get_build_sha
 from core.models import MembershipRequest
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
@@ -78,3 +79,11 @@ def organization_nav(request) -> dict[str, object]:
 
 def chat_networks(_request) -> dict[str, object]:
     return {"chat_networks": settings.CHAT_NETWORKS}
+
+
+def build_info(_request) -> dict[str, object]:
+    build_sha = get_build_sha()
+    build_label = "Powered by AlmaLinux Astra"
+    if build_sha:
+        build_label = f"{build_label} ({build_sha})"
+    return {"build_sha": build_sha, "build_label": build_label}

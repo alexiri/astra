@@ -1,0 +1,17 @@
+[Unit]
+Description=Astra app container instance %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=all
+EnvironmentFile=/etc/astra/astra.env
+ExecStartPre=-/usr/bin/podman rm -f astra-app-%i
+ExecStart=/usr/bin/podman run --rm --sdnotify=container --name astra-app-%i --env-file /etc/astra/astra.env -p 127.0.0.1:800%i:8000 ${APP_IMAGE}
+ExecStop=/usr/bin/podman stop -t 10 astra-app-%i
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

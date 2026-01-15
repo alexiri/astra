@@ -1,0 +1,165 @@
+---
+- name: Configure Astra EC2 host
+  hosts: all
+  become: true
+  vars:
+    app_image: "{{ app_image | default('') }}"
+    caddy_image: "{{ caddy_image | default('') }}"
+    django_settings_module: "{{ django_settings_module | default('config.settings') }}"
+    s3_bucket_name: "{{ s3_bucket_name | default('') }}"
+    s3_domain: "{{ s3_domain | default('') }}"
+    s3_endpoint_url: "{{ s3_endpoint_url | default('') }}"
+    s3_region_name: "{{ s3_region_name | default('') }}"
+    astra_cron_jobs: "{{ astra_cron_jobs | default([]) }}"
+  tasks:
+    - name: Install podman
+      ansible.builtin.dnf:
+        name: podman
+        state: present
+
+    - name: Ensure astra directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /etc/astra
+        - /var/lib/caddy
+
+    - name: Install systemd unit for app
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/astra-app@.service"
+        dest: /etc/systemd/system/astra-app@.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install systemd unit for Caddy
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/astra-caddy.service"
+        dest: /etc/systemd/system/astra-caddy.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install Caddyfile
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/Caddyfile"
+        dest: /etc/astra/Caddyfile
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install env file example if missing
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/astra.env.example"
+        dest: /etc/astra/astra.env
+        owner: root
+        group: root
+        mode: "0600"
+        force: false
+
+    - name: Install Caddy env file example if missing
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/caddy.env.example"
+        dest: /etc/astra/caddy.env
+        owner: root
+        group: root
+        mode: "0600"
+        force: false
+
+    - name: Ensure APP_IMAGE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^APP_IMAGE='
+        line: "APP_IMAGE={{ app_image }}"
+      when: app_image | length > 0
+
+    - name: Ensure CADDY_IMAGE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/caddy.env
+        regexp: '^CADDY_IMAGE='
+        line: "CADDY_IMAGE={{ caddy_image }}"
+      when: caddy_image | length > 0
+
+    - name: Ensure DJANGO_SETTINGS_MODULE is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^DJANGO_SETTINGS_MODULE='
+        line: "DJANGO_SETTINGS_MODULE={{ django_settings_module }}"
+
+    - name: Ensure AWS_STORAGE_BUCKET_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_STORAGE_BUCKET_NAME='
+        line: "AWS_STORAGE_BUCKET_NAME={{ s3_bucket_name }}"
+      when: s3_bucket_name | length > 0
+
+    - name: Ensure AWS_S3_DOMAIN is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_DOMAIN='
+        line: "AWS_S3_DOMAIN={{ s3_domain }}"
+      when: s3_domain | length > 0
+
+    - name: Ensure AWS_S3_ENDPOINT_URL is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_ENDPOINT_URL='
+        line: "AWS_S3_ENDPOINT_URL={{ s3_endpoint_url }}"
+      when: s3_endpoint_url | length > 0
+
+    - name: Ensure AWS_S3_REGION_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_REGION_NAME='
+        line: "AWS_S3_REGION_NAME={{ s3_region_name }}"
+      when: s3_region_name | length > 0
+
+    - name: Install deployment scripts
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/files/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - deploy-prod.sh
+        - rollback-prod.sh
+        - deploy-prod-sha.sh
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - astra-app@1.service
+        - astra-app@2.service
+        - astra-caddy.service
+
+    - name: Validate cron jobs
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.command is defined
+        fail_msg: "Cron jobs must include name and command."
+      loop: "{{ astra_cron_jobs }}"
+
+    - name: Configure cron jobs
+      ansible.builtin.cron:
+        name: "{{ item.name }}"
+        minute: "{{ item.minute | default('0') }}"
+        hour: "{{ item.hour | default('0') }}"
+        day: "{{ item.day | default('*') }}"
+        month: "{{ item.month | default('*') }}"
+        weekday: "{{ item.weekday | default('*') }}"
+        user: root
+        job: "{{ item.command }}"
+      loop: "{{ astra_cron_jobs }}"
