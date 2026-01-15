@@ -1,13 +1,13 @@
 # Minimal FreeIPA Server Module for Dev Environment
 # Based on fedora-infra/tiny-stage implementation
 
-data "aws_ami" "fedora" {
+data "aws_ami" "almalinux_10" {
   most_recent = true
-  owners      = ["125523088429"] # Fedora official AWS account
+  owners      = ["aws-marketplace"]
 
   filter {
     name   = "name"
-    values = ["Fedora-Cloud-Base-AmazonEC2.x86_64-43-*"]
+    values = ["AlmaLinux OS 10* x86_64*"]
   }
 
   filter {
@@ -137,7 +137,7 @@ resource "aws_security_group" "ipa" {
 }
 
 resource "aws_instance" "ipa" {
-  ami           = data.aws_ami.fedora.id
+  ami           = data.aws_ami.almalinux_10.id
   instance_type = var.instance_type
   key_name      = var.key_name
 

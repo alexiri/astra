@@ -42,6 +42,17 @@ variable "caddy_image" {
   description = "Container image for Caddy."
 }
 
+variable "s3_bucket_name" {
+  type        = string
+  description = "S3 bucket name for user uploads."
+}
+
+variable "s3_force_destroy" {
+  type        = bool
+  description = "Force destroy S3 bucket on delete."
+  default     = false
+}
+
 variable "db_name" {
   type        = string
   description = "Database name for Aurora."

@@ -21,3 +21,15 @@ output "db_reader_endpoint" {
 output "db_port" {
   value = aws_rds_cluster.astra.port
 }
+
+output "s3_bucket_name" {
+  value = aws_s3_bucket.astra_media.bucket
+}
+
+output "s3_domain" {
+  value = local.s3_domain
+}
+
+output "s3_endpoint_url" {
+  value = local.s3_endpoint_url
+}

@@ -2,13 +2,13 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_ami" "amazon_linux_2023" {
+data "aws_ami" "almalinux_10" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["aws-marketplace"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["AlmaLinux OS 10* x86_64*"]
   }
 
   filter {
@@ -35,6 +35,8 @@ locals {
     env = var.environment
   }
 
+  s3_endpoint_url = "https://s3.${var.aws_region}.amazonaws.com"
+  s3_domain       = local.s3_endpoint_url
   freeipa_ingress_cidrs = []
   ansible_known_hosts_path = pathexpand(var.ansible_known_hosts_path)
   ansible_files = [
@@ -96,7 +98,7 @@ resource "aws_security_group" "astra" {
 }
 
 resource "aws_instance" "astra" {
-  ami                         = data.aws_ami.amazon_linux_2023.id
+  ami                         = data.aws_ami.almalinux_10.id
   instance_type               = var.instance_type
   subnet_id                   = data.aws_subnets.default.ids[0]
   vpc_security_group_ids      = [aws_security_group.astra.id]
@@ -194,6 +196,23 @@ resource "aws_rds_cluster_instance" "astra" {
   publicly_accessible = false
 }
 
+resource "aws_s3_bucket" "astra_media" {
+  bucket        = var.s3_bucket_name
+  force_destroy = var.s3_force_destroy
+
+  tags = merge(local.tags, {
+    Name = "${local.name}-media"
+  })
+}
+
+resource "aws_s3_bucket_public_access_block" "astra_media" {
+  bucket                  = aws_s3_bucket.astra_media.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "null_resource" "configure_instance" {
   triggers = {
     instance_id = aws_instance.astra.id
@@ -201,6 +220,8 @@ resource "null_resource" "configure_instance" {
     app_image   = var.app_image
     caddy_image = var.caddy_image
     cron_jobs   = jsonencode(var.cron_jobs)
+    s3_bucket   = var.s3_bucket_name
+    s3_domain   = local.s3_domain
   }
 
   provisioner "local-exec" {
@@ -212,6 +233,10 @@ ansible-playbook \\
   -e 'app_image=${var.app_image}' \\
   -e 'caddy_image=${var.caddy_image}' \\
   -e 'django_settings_module=${var.django_settings_module}' \\
+  -e 's3_bucket_name=${var.s3_bucket_name}' \\
+  -e 's3_endpoint_url=${local.s3_endpoint_url}' \\
+  -e 's3_domain=${local.s3_domain}' \\
+  -e 's3_region_name=${var.aws_region}' \\
   -e 'ansible_ssh_common_args=-o UserKnownHostsFile=${local.ansible_known_hosts_path} -o StrictHostKeyChecking=yes' \\
   -e 'astra_cron_jobs=${jsonencode(var.cron_jobs)}' \\
   '${path.module}/../../ansible/astra_ec2.yml'

@@ -6,6 +6,10 @@
     app_image: "{{ app_image | default('') }}"
     caddy_image: "{{ caddy_image | default('') }}"
     django_settings_module: "{{ django_settings_module | default('config.settings') }}"
+    s3_bucket_name: "{{ s3_bucket_name | default('') }}"
+    s3_domain: "{{ s3_domain | default('') }}"
+    s3_endpoint_url: "{{ s3_endpoint_url | default('') }}"
+    s3_region_name: "{{ s3_region_name | default('') }}"
     astra_cron_jobs: "{{ astra_cron_jobs | default([]) }}"
   tasks:
     - name: Install podman
@@ -85,6 +89,34 @@
         path: /etc/astra/astra.env
         regexp: '^DJANGO_SETTINGS_MODULE='
         line: "DJANGO_SETTINGS_MODULE={{ django_settings_module }}"
+
+    - name: Ensure AWS_STORAGE_BUCKET_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_STORAGE_BUCKET_NAME='
+        line: "AWS_STORAGE_BUCKET_NAME={{ s3_bucket_name }}"
+      when: s3_bucket_name | length > 0
+
+    - name: Ensure AWS_S3_DOMAIN is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_DOMAIN='
+        line: "AWS_S3_DOMAIN={{ s3_domain }}"
+      when: s3_domain | length > 0
+
+    - name: Ensure AWS_S3_ENDPOINT_URL is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_ENDPOINT_URL='
+        line: "AWS_S3_ENDPOINT_URL={{ s3_endpoint_url }}"
+      when: s3_endpoint_url | length > 0
+
+    - name: Ensure AWS_S3_REGION_NAME is set
+      ansible.builtin.lineinfile:
+        path: /etc/astra/astra.env
+        regexp: '^AWS_S3_REGION_NAME='
+        line: "AWS_S3_REGION_NAME={{ s3_region_name }}"
+      when: s3_region_name | length > 0
 
     - name: Install deployment scripts
       ansible.builtin.copy:
