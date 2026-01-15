@@ -1,4 +1,4 @@
-# Minimal FreeIPA Server Module for Dev Environment
+# Minimal FreeIPA Server Module for Staging Environment
 # Based on fedora-infra/tiny-stage implementation
 
 data "aws_ami" "almalinux_10" {

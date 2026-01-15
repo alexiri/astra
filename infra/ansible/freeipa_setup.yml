@@ -1,7 +1,7 @@
 ---
 # Minimal FreeIPA + FAS Extensions Setup
 # Based on fedora-infra/tiny-stage implementation
-# Optimized for single AWS EC2 instance, dev-only
+# Optimized for single AWS EC2 instance, staging/test use
 
 - name: Install and Configure FreeIPA with FAS Extensions
   hosts: ipa_servers

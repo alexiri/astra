@@ -83,7 +83,7 @@ variable "create_ansible_inventory" {
 variable "ansible_user" {
   type        = string
   description = "SSH user for Ansible"
-  default     = "fedora"
+  default     = "ec2-user"
 }
 
 variable "ansible_ssh_key_path" {

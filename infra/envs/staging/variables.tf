@@ -129,7 +129,7 @@ variable "freeipa_dm_password" {
 variable "freeipa_ansible_user" {
   type        = string
   description = "SSH user for staging FreeIPA provisioning."
-  default     = "fedora"
+  default     = "ec2-user"
 }
 
 variable "ansible_user" {
