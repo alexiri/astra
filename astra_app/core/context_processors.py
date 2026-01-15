@@ -82,4 +82,8 @@ def chat_networks(_request) -> dict[str, object]:
 
 
 def build_info(_request) -> dict[str, object]:
-    return {"build_sha": get_build_sha()}
+    build_sha = get_build_sha()
+    build_label = "Powered by AlmaLinux Astra"
+    if build_sha:
+        build_label = f"{build_label} ({build_sha})"
+    return {"build_sha": build_sha, "build_label": build_label}

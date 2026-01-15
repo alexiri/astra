@@ -29,15 +29,15 @@ jobs:
           set -euo pipefail
           IMAGE_REPO="ghcr.io/${GITHUB_REPOSITORY}"
           SHORT_SHA="${GITHUB_SHA::7}"
-          TAGS="${IMAGE_REPO}:${SHORT_SHA}"
+          TAGS=("${IMAGE_REPO}:${SHORT_SHA}")
           if [[ "${GITHUB_REF_NAME}" == "master" ]]; then
-            TAGS="${TAGS}\n${IMAGE_REPO}:latest"
+            TAGS+=("${IMAGE_REPO}:latest")
           fi
           {
             echo "image_repo=${IMAGE_REPO}"
             echo "short_sha=${SHORT_SHA}"
             echo "tags<<EOF"
-            echo -e "${TAGS}"
+            printf '%s\n' "${TAGS[@]}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
