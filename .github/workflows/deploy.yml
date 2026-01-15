@@ -31,6 +31,14 @@ jobs:
             type=sha,format=short,prefix=
             type=raw,value=latest,enable=${{ github.ref_name == 'master' }},priority=0
 
+      - name: Short SHA metadata
+        id: meta_sha
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short,prefix=
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -45,5 +53,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            ASTRA_BUILD_SHA=${{ steps.meta.outputs.version }}
+            ASTRA_BUILD_SHA=${{ steps.meta_sha.outputs.version }}
           labels: ${{ steps.meta.outputs.labels }}
