@@ -3,7 +3,6 @@ name: Terraform Apply
 on:
   push:
     branches:
-      - dev
       - staging
       - master
     paths:
@@ -55,9 +54,6 @@ jobs:
               ;;
             staging)
               echo "deploy_env=staging" >> "$GITHUB_OUTPUT"
-              ;;
-            dev)
-              echo "deploy_env=dev" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2

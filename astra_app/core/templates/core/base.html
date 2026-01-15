@@ -325,11 +325,19 @@
       <!-- <div class="float-right d-none d-sm-inline">Powered by AlmaLinux Astra</div> -->
       <!-- <strong>Powered by AlmaLinux Astra</strong> -->
       <div class="container text-right">
-        <small class="text-muted">Powered by AlmaLinux Astra</small>
+        {% if build_sha %}
+          <small class="text-muted">Powered by AlmaLinux Astra ({{ build_sha }})</small>
+        {% else %}
+          <small class="text-muted">Powered by AlmaLinux Astra</small>
+        {% endif %}
       </div>
     {% else %}
       <div class="container text-center">
-        <small class="text-muted">Powered by AlmaLinux Astra</small>
+        {% if build_sha %}
+          <small class="text-muted">Powered by AlmaLinux Astra ({{ build_sha }})</small>
+        {% else %}
+          <small class="text-muted">Powered by AlmaLinux Astra</small>
+        {% endif %}
       </div>
     {% endif %}
   </footer>

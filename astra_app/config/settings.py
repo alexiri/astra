@@ -218,6 +218,7 @@ TEMPLATES = [
                 'core.context_processors.membership_review',
                 'core.context_processors.organization_nav',
                 'core.context_processors.chat_networks',
+                'core.context_processors.build_info',
             ],
         },
     },
