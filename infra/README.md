@@ -5,6 +5,7 @@ This folder provisions AWS infrastructure for the **astra** Django app.
 ## What Terraform manages
 
 - One EC2 instance (default `t3.small`) per environment
+- Staging also provisions a FreeIPA EC2 instance for testing (production uses the real FreeIPA host)
 - Security group for SSH + HTTP/HTTPS
 - User data that installs podman and systemd units for the app + Caddy
 - Uses the default VPC and its subnets

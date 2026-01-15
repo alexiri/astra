@@ -42,6 +42,39 @@ variable "caddy_image" {
   description = "Container image for Caddy."
 }
 
+variable "freeipa_hostname" {
+  type        = string
+  description = "FreeIPA hostname for staging (e.g., ipa.staging.example.test)."
+}
+
+variable "freeipa_domain" {
+  type        = string
+  description = "FreeIPA domain for staging (e.g., staging.example.test)."
+}
+
+variable "freeipa_realm" {
+  type        = string
+  description = "FreeIPA Kerberos realm for staging (e.g., STAGING.EXAMPLE.TEST)."
+}
+
+variable "freeipa_admin_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA admin password for staging."
+}
+
+variable "freeipa_dm_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA directory manager password for staging."
+}
+
+variable "freeipa_ansible_user" {
+  type        = string
+  description = "SSH user for staging FreeIPA provisioning."
+  default     = "fedora"
+}
+
 variable "ansible_user" {
   type        = string
   description = "SSH user for Ansible."

@@ -35,6 +35,7 @@ locals {
     env = var.environment
   }
 
+  freeipa_ingress_cidrs = length(var.allowed_ssh_cidrs) > 0 ? var.allowed_ssh_cidrs : ["0.0.0.0/0"]
   ansible_known_hosts_path = pathexpand(var.ansible_known_hosts_path)
   ansible_files = [
     "${path.module}/../../ansible/astra_ec2.yml",
@@ -112,6 +113,27 @@ EOF
   tags = merge(local.tags, {
     Name = local.name
   })
+}
+
+module "freeipa" {
+  source = "../../modules/freeipa"
+
+  name_prefix     = local.name
+  vpc_id          = data.aws_vpc.default.id
+  subnet_id       = data.aws_subnets.default.ids[0]
+  key_name        = var.key_name
+  ipa_hostname    = var.freeipa_hostname
+  ipa_domain      = var.freeipa_domain
+  ipa_realm       = var.freeipa_realm
+  ipa_admin_password = var.freeipa_admin_password
+  ipa_dm_password    = var.freeipa_dm_password
+
+  app_security_group_cidrs = [data.aws_vpc.default.cidr_block]
+  allowed_ingress_cidrs    = local.freeipa_ingress_cidrs
+  ssh_allowed_cidrs        = local.freeipa_ingress_cidrs
+  ansible_ssh_key_path     = var.ansible_private_key_path
+  ansible_user             = var.freeipa_ansible_user
+  tags                     = local.tags
 }
 
 resource "null_resource" "configure_instance" {
