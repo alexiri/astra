@@ -200,7 +200,7 @@
         and 'no modifications to be performed' not in (svc_password_expiration.stderr | lower)
       changed_when: svc_password_expiration.rc == 0
 
-    - name: Grant service account admin privileges (dev)
+    - name: Grant service account admin privileges (staging)
       command: >
         ipa group-add-member admins
         --users={{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}

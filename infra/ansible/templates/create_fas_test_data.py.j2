@@ -92,7 +92,7 @@ for group in groups.keys():
 with suppress(python_freeipa.exceptions.DuplicateEntry):
     ipa.group_add("general", "A group for general stuff", fasgroup=True)
 
-# Create test users (20 users for dev, not 100)
+# Create test users (20 users for staging, not 100)
 num_users = 20
 print(f"Creating {num_users} test users...")
 
@@ -114,7 +114,7 @@ for x in range(num_users):
             fasircnick=[username, username + "_"],
             faslocale="en-US",
             fastimezone="UTC",
-            # In dev, SELF_SERVICE_ADDRESS_COUNTRY_ATTR defaults to fasstatusnote.
+            # In staging, SELF_SERVICE_ADDRESS_COUNTRY_ATTR defaults to fasstatusnote.
             # Use a valid ISO 3166-1 alpha-2 code so the app isn't blocked by compliance gating.
             fasstatusnote="US",
             fasgpgkeyid=[],
