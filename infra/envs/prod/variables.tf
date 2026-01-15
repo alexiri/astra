@@ -42,6 +42,52 @@ variable "caddy_image" {
   description = "Container image for Caddy."
 }
 
+variable "db_name" {
+  type        = string
+  description = "Database name for Aurora."
+}
+
+variable "db_username" {
+  type        = string
+  description = "Database master username for Aurora."
+}
+
+variable "db_password" {
+  type        = string
+  sensitive   = true
+  description = "Database master password for Aurora."
+}
+
+variable "db_engine_version" {
+  type        = string
+  description = "Aurora Postgres engine version."
+  default     = "15.4"
+}
+
+variable "db_instance_class" {
+  type        = string
+  description = "Aurora instance class."
+  default     = "db.t3.medium"
+}
+
+variable "db_backup_retention_days" {
+  type        = number
+  description = "Number of days to retain Aurora backups."
+  default     = 7
+}
+
+variable "db_deletion_protection" {
+  type        = bool
+  description = "Enable deletion protection for Aurora."
+  default     = true
+}
+
+variable "db_skip_final_snapshot" {
+  type        = bool
+  description = "Skip final snapshot on Aurora deletion."
+  default     = false
+}
+
 variable "ansible_user" {
   type        = string
   description = "SSH user for Ansible."

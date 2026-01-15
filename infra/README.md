@@ -5,6 +5,7 @@ This folder provisions AWS infrastructure for the **astra** Django app.
 ## What Terraform manages
 
 - One EC2 instance (default `t3.small`) per environment
+- Aurora PostgreSQL cluster per environment (not publicly accessible)
 - Staging also provisions a FreeIPA EC2 instance for testing (production uses the real FreeIPA host)
 - Security group for SSH + HTTP/HTTPS
 - User data that installs podman and systemd units for the app + Caddy
@@ -13,7 +14,7 @@ This folder provisions AWS infrastructure for the **astra** Django app.
 ## What Terraform does NOT do
 
 - Build/push container images
-- Configure application secrets (these live in `/etc/astra/astra.env` on the host)
+- Configure application secrets (these live in `/etc/astra/astra.env` on the host, including the Aurora connection string)
 
 ## Environments and state
 

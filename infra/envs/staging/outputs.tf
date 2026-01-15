@@ -21,3 +21,15 @@ output "freeipa_public_ip" {
 output "freeipa_ldap_uri" {
   value = module.freeipa.ldap_uri
 }
+
+output "db_endpoint" {
+  value = aws_rds_cluster.astra.endpoint
+}
+
+output "db_reader_endpoint" {
+  value = aws_rds_cluster.astra.reader_endpoint
+}
+
+output "db_port" {
+  value = aws_rds_cluster.astra.port
+}

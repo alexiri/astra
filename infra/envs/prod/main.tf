@@ -114,6 +114,64 @@ EOF
   })
 }
 
+resource "aws_security_group" "db" {
+  name        = "${local.name}-db-sg"
+  description = "Astra Aurora security group"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description     = "Postgres"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.astra.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, {
+    Name = "${local.name}-db-sg"
+  })
+}
+
+resource "aws_db_subnet_group" "aurora" {
+  name       = "${local.name}-aurora"
+  subnet_ids = data.aws_subnets.default.ids
+
+  tags = merge(local.tags, {
+    Name = "${local.name}-aurora"
+  })
+}
+
+resource "aws_rds_cluster" "astra" {
+  cluster_identifier = "${local.name}-aurora"
+  engine             = "aurora-postgresql"
+  engine_version     = var.db_engine_version
+  database_name      = var.db_name
+  master_username    = var.db_username
+  master_password    = var.db_password
+  db_subnet_group_name   = aws_db_subnet_group.aurora.name
+  vpc_security_group_ids = [aws_security_group.db.id]
+  storage_encrypted      = true
+  deletion_protection    = var.db_deletion_protection
+  skip_final_snapshot    = var.db_skip_final_snapshot
+  backup_retention_period = var.db_backup_retention_days
+}
+
+resource "aws_rds_cluster_instance" "astra" {
+  identifier         = "${local.name}-aurora-1"
+  cluster_identifier = aws_rds_cluster.astra.id
+  instance_class     = var.db_instance_class
+  engine             = aws_rds_cluster.astra.engine
+  engine_version     = aws_rds_cluster.astra.engine_version
+  publicly_accessible = false
+}
+
 resource "null_resource" "configure_instance" {
   triggers = {
     instance_id = aws_instance.astra.id
