@@ -32,3 +32,8 @@ output "ldap_uri" {
   value       = "ldaps://${var.ipa_hostname}"
   description = "LDAP URI for applications"
 }
+
+output "ansible_inventory_path" {
+  value       = try(local_file.ansible_inventory[0].filename, "")
+  description = "Path to the generated Ansible inventory for the FreeIPA instance"
+}

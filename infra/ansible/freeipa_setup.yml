@@ -13,7 +13,30 @@
     freeipa_fas_repo: "https://github.com/fedora-infra/freeipa-fas.git"
     freeipa_fas_version: "develop"
 
+    # Service account used by the application to talk to FreeIPA.
+    # Passed from Terraform.
+    freeipa_service_user: "svc_astra"
+
+    # Avoid reliance on KCM/sssd-kcm for non-interactive automation.
+    ipa_admin_ccache: "FILE:/tmp/krb5cc_astra_ipa_admin"
+
+  environment:
+    KRB5CCNAME: "{{ ipa_admin_ccache }}"
+
   tasks:
+    - name: Validate required FreeIPA inputs
+      assert:
+        that:
+          - ipa_hostname | length > 0
+          - ipa_domain | length > 0
+          - ipa_realm | length > 0
+          - ipa_admin_password | length > 0
+          - ipa_dm_password | length > 0
+          - freeipa_service_user | length > 0
+          - freeipa_service_password | length > 0
+        fail_msg: "Missing required FreeIPA variables; check Terraform extra-vars for freeipa_setup.yml."
+      no_log: true
+
     - name: Wait for system to be ready
       wait_for_connection:
         timeout: 300
@@ -43,7 +66,7 @@
 
     - name: Set hostname with hostnamectl
       command: hostnamectl set-hostname {{ ipa_hostname }}
-      
+
     - name: Verify hostname is set correctly
       command: hostname -f
       register: hostname_check
@@ -52,16 +75,10 @@
 
     - name: Debug hostname configuration
       debug:
-        msg: 
+        msg:
           - "Private IP: {{ instance_private_ip }}"
           - "IPA Hostname: {{ ipa_hostname }}"
           - "Current FQDN: {{ hostname_check.stdout }}"
-
-    - name: Update all packages
-      dnf:
-        name: "*"
-        state: latest
-        update_cache: yes
 
     - name: Install FreeIPA server packages
       dnf:
@@ -75,6 +92,8 @@
           - python3-devel
           - gcc
         state: present
+      async: 3600
+      poll: 10
 
     - name: Install python-freeipa for data population
       pip:
@@ -82,6 +101,8 @@
           - python-freeipa
           - faker
         state: present
+      async: 1800
+      poll: 10
 
     - name: Check if IPA is already installed
       stat:
@@ -104,13 +125,70 @@
         --unattended
       when: not ipa_installed.stat.exists
       register: ipa_install_result
-      failed_when: ipa_install_result.rc != 0
+      no_log: true
+      async: 5400
+      poll: 15
+      failed_when: false
+
+    - name: Read ipa-server-install log tail on failure
+      when:
+        - not ipa_installed.stat.exists
+        - ipa_install_result.rc != 0
+      command: tail -n 200 /var/log/ipaserver-install.log
+      register: ipa_install_log_tail
+      changed_when: false
+      failed_when: false
+
+    - name: Read kernel log tail for OOM hints
+      when:
+        - not ipa_installed.stat.exists
+        - ipa_install_result.rc != 0
+      command: dmesg | tail -n 200
+      register: ipa_dmesg_tail
+      changed_when: false
+      failed_when: false
+
+    - name: Show ipa-server-install diagnostics
+      when:
+        - not ipa_installed.stat.exists
+        - ipa_install_result.rc != 0
+      debug:
+        msg:
+          - "ipa-server-install failed (details from /var/log/ipaserver-install.log tail):"
+          - "{{ ipa_install_log_tail.stdout_lines | default([]) }}"
+          - "dmesg tail (look for OOM-kill / killed process):"
+          - "{{ ipa_dmesg_tail.stdout_lines | default([]) }}"
+
+    - name: Fail if ipa-server-install failed
+      when:
+        - not ipa_installed.stat.exists
+        - ipa_install_result.rc != 0
+      fail:
+        msg: "ipa-server-install failed; see /var/log/ipaserver-install.log (tail printed above)."
 
     - name: Enable and start IPA services
       systemd:
         name: ipa
         enabled: yes
         state: started
+
+    - name: Ensure FreeIPA ports are allowed in firewalld
+      ansible.posix.firewalld:
+        port: "{{ item }}"
+        permanent: true
+        immediate: true
+        state: enabled
+      loop:
+        - 80/tcp
+        - 443/tcp
+        - 389/tcp
+        - 636/tcp
+        - 88/tcp
+        - 88/udp
+        - 464/tcp
+        - 464/udp
+        - 53/tcp
+        - 53/udp
 
     - name: Remove old freeipa-fas repository if exists
       file:
@@ -124,16 +202,131 @@
         version: "{{ freeipa_fas_version }}"
         force: yes
 
+    - name: Ensure SSSD directories are writable by sssd
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: /var/log/sssd
+          owner: sssd
+          group: sssd
+          mode: '0750'
+        - path: /var/lib/sss
+          owner: root
+          group: root
+          mode: '0755'
+        - path: /var/lib/sss/db
+          owner: sssd
+          group: sssd
+          mode: '0750'
+        - path: /var/lib/sss/pipes/private
+          owner: sssd
+          group: sssd
+          mode: '0700'
+        - path: /var/lib/sss/gpo_cache
+          owner: sssd
+          group: sssd
+          mode: '0750'
+
+    - name: Restore SELinux contexts for SSSD directories
+      command: restorecon -RF /var/log/sssd /var/lib/sss
+      register: restorecon_sssd
+      changed_when: restorecon_sssd.rc == 0
+      failed_when: false
+
+    - name: Ensure SSSD domain has krb5_realm configured
+      ini_file:
+        path: /etc/sssd/sssd.conf
+        section: "domain/{{ ipa_domain }}"
+        option: krb5_realm
+        value: "{{ ipa_realm }}"
+      register: sssd_krb5_realm
+      changed_when: sssd_krb5_realm.changed
+      failed_when: false
+
+    - name: Restart SSSD before FreeIPA upgrade
+      systemd:
+        name: sssd
+        state: restarted
+      register: sssd_restart
+      failed_when: false
+
+    - name: Collect diagnostics if SSSD restart fails
+      when: sssd_restart.failed
+      block:
+        - name: Show SSSD status
+          command: systemctl status sssd --no-pager -l
+          register: sssd_status_after_restart
+          changed_when: false
+          failed_when: false
+
+        - name: Show SSSD journal tail
+          command: bash -lc 'journalctl -xeu sssd --no-pager | tail -n 200'
+          register: sssd_journal_after_restart
+          changed_when: false
+          failed_when: false
+
+        - name: Show SSSD log tail
+          command: bash -lc 'tail -n 200 /var/log/sssd/sssd.log'
+          register: sssd_log_after_restart
+          changed_when: false
+          failed_when: false
+
+        - name: Fail early when SSSD cannot start
+          fail:
+            msg:
+              - "SSSD failed to restart; FreeIPA upgrade will fail until SSSD starts cleanly."
+              - "SSSD status:"
+              - "{{ sssd_status_after_restart.stdout_lines | default([]) }}"
+              - "SSSD journal tail:"
+              - "{{ sssd_journal_after_restart.stdout_lines | default([]) }}"
+              - "SSSD log tail:"
+              - "{{ sssd_log_after_restart.stdout_lines | default([]) }}"
+
     - name: Install freeipa-fas extensions
       command: bash install.sh
       args:
         chdir: /tmp/freeipa-fas
       register: fas_install
       changed_when: fas_install.rc == 0
+      failed_when: false
+      async: 1800
+      poll: 10
 
-    - name: Run ipa-server-upgrade after FAS extension install
-      command: ipa-server-upgrade
-      when: fas_install.changed
+    - name: Collect diagnostics when freeipa-fas install fails
+      when: fas_install.rc != 0
+      block:
+        - name: Show SSSD status
+          command: systemctl status sssd --no-pager -l
+          register: sssd_status
+          changed_when: false
+          failed_when: false
+
+        - name: Show SSSD journal tail
+          command: bash -lc 'journalctl -xeu sssd --no-pager | tail -n 200'
+          register: sssd_journal
+          changed_when: false
+          failed_when: false
+
+        - name: Show ipaupgrade log tail
+          command: tail -n 200 /var/log/ipaupgrade.log
+          register: ipaupgrade_log_tail
+          changed_when: false
+          failed_when: false
+
+        - name: Fail with actionable diagnostics
+          fail:
+            msg:
+              - "freeipa-fas install failed (install.sh returned rc={{ fas_install.rc }})."
+              - "SSSD status:"
+              - "{{ sssd_status.stdout_lines | default([]) }}"
+              - "SSSD journal tail:"
+              - "{{ sssd_journal.stdout_lines | default([]) }}"
+              - "ipaupgrade.log tail:"
+              - "{{ ipaupgrade_log_tail.stdout_lines | default([]) }}"
 
     - name: Restart IPA to load FAS plugins
       systemd:
@@ -144,16 +337,39 @@
     - name: Wait for IPA to be fully operational
       wait_for:
         port: 443
-        host: "{{ ipa_hostname }}"
+        # Check locally on the IPA host. The public EIP may be blocked by SGs,
+        # and EC2 instances can't always reach themselves via the public IP.
+        host: 127.0.0.1
         delay: 10
-        timeout: 120
+        timeout: 900
 
     - name: Get Kerberos ticket for admin
-      shell: echo '{{ ipa_admin_password }}' | kinit admin
-      no_log: true
-      changed_when: false
-      args:
-        executable: /bin/bash
+      block:
+        - name: Run kinit for admin
+          command: kinit admin
+          args:
+            stdin: "{{ ipa_admin_password }}\n"
+          register: kinit_admin
+          no_log: true
+          changed_when: false
+          retries: 30
+          delay: 10
+          until: kinit_admin.rc == 0
+      rescue:
+        - name: Collect kinit diagnostics
+          command: bash -lc 'KRB5_TRACE=/dev/stderr kinit admin'
+          args:
+            stdin: "{{ ipa_admin_password }}\n"
+          register: kinit_diag
+          changed_when: false
+          failed_when: false
+
+        - name: Fail with kinit diagnostics
+          fail:
+            msg:
+              - "kinit admin failed after retries."
+              - "kinit stderr (KRB5_TRACE):"
+              - "{{ kinit_diag.stderr_lines | default([]) }}"
 
     - name: Refresh IPA schema cache
       command: ipa -eforce_schema_check=True ping
@@ -178,20 +394,21 @@
 
     - name: Create service account for application
       command: >
-        ipa user-add {{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+        ipa user-add {{ freeipa_service_user }}
         --first=Service
         --last=Account
         --cn="Application Service Account"
         --password
       args:
-        stdin: "{{ lookup('env', 'FREEIPA_SERVICE_PASSWORD') | default('ServicePassword456!', true) }}\n{{ lookup('env', 'FREEIPA_SERVICE_PASSWORD') | default('ServicePassword456!', true) }}\n"
+        stdin: "{{ freeipa_service_password }}\n{{ freeipa_service_password }}\n"
+      no_log: true
       register: svc_create
       failed_when: svc_create.rc != 0 and 'already exists' not in svc_create.stderr
       changed_when: svc_create.rc == 0
 
     - name: Ensure service account password is not expired
       command: >
-        ipa user-mod {{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+        ipa user-mod {{ freeipa_service_user }}
         --setattr=krbpasswordexpiration=20380119031407Z
       register: svc_password_expiration
       failed_when: >
@@ -203,18 +420,23 @@
     - name: Grant service account admin privileges (staging)
       command: >
         ipa group-add-member admins
-        --users={{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+        --users={{ freeipa_service_user }}
       register: svc_admins_add
       failed_when: svc_admins_add.rc != 0 and 'already a member' not in (svc_admins_add.stdout | lower) and 'already a member' not in (svc_admins_add.stderr | lower)
       changed_when: svc_admins_add.rc == 0 and 'already a member' not in (svc_admins_add.stdout | lower) and 'already a member' not in (svc_admins_add.stderr | lower)
 
     - name: Add service account to User Administrators role
       command: >
-        ipa role-add-member "User Administrator"
-        --users={{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}
+        ipa role-add-member "User Administrator" --users={{ freeipa_service_user }}
       register: role_add
-      failed_when: role_add.rc != 0 and 'already a member' not in role_add.stdout
-      changed_when: role_add.rc == 0 and 'already a member' not in role_add.stdout
+      failed_when: >
+        role_add.rc != 0
+        and 'already a member' not in role_add.stdout
+        and 'already a member' not in role_add.stderr
+      changed_when: >
+        role_add.rc == 0
+        and 'already a member' not in role_add.stdout
+        and 'already a member' not in role_add.stderr
 
     - name: Copy IPA CA certificate to shared location
       fetch:
@@ -236,5 +458,5 @@
           - "Realm: {{ ipa_realm }}"
           - "Domain: {{ ipa_domain }}"
           - "LDAP URI: ldaps://{{ ipa_hostname }}"
-          - "Service account: {{ lookup('env', 'FREEIPA_SERVICE_USERNAME') | default('svc_astra', true) }}"
+          - "Service account: {{ freeipa_service_user }}"
           - "CA cert downloaded to: {{ playbook_dir }}/ipa_ca.crt"

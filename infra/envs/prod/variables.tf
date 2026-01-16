@@ -122,6 +122,66 @@ variable "django_settings_module" {
   default     = "config.settings"
 }
 
+variable "secret_key" {
+  type        = string
+  sensitive   = true
+  description = "Django SECRET_KEY for production. If empty, provisioning generates one on the host."
+  default     = ""
+}
+
+variable "allowed_hosts" {
+  type        = list(string)
+  description = "Django ALLOWED_HOSTS. If empty, provisioning derives a safe default from instance metadata."
+  default     = []
+}
+
+variable "public_base_url" {
+  type        = string
+  description = "PUBLIC_BASE_URL (used for absolute links in email)."
+  default     = ""
+}
+
+variable "default_from_email" {
+  type        = string
+  description = "DEFAULT_FROM_EMAIL used by Django."
+  default     = ""
+}
+
+variable "freeipa_host" {
+  type        = string
+  description = "FreeIPA host for the app to connect to (hostname preferred)."
+}
+
+variable "freeipa_verify_ssl" {
+  type        = bool
+  description = "Whether the app should verify FreeIPA TLS certificates."
+  default     = true
+}
+
+variable "freeipa_service_user" {
+  type        = string
+  description = "FreeIPA service account username used by the app."
+  default     = "admin"
+}
+
+variable "freeipa_service_password" {
+  type        = string
+  sensitive   = true
+  description = "FreeIPA service account password used by the app."
+}
+
+variable "django_auto_migrate" {
+  type        = bool
+  description = "If true, containers run migrate on startup (entrypoint DJANGO_AUTO_MIGRATE=1)."
+  default     = true
+}
+
+variable "django_migrate_retries" {
+  type        = number
+  description = "How many times to retry migrations on startup."
+  default     = 30
+}
+
 variable "cron_jobs" {
   type = list(object({
     name    = string

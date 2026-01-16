@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 EnvironmentFile=/etc/astra/caddy.env
 ExecStartPre=-/usr/bin/podman rm -f astra-caddy
-ExecStart=/usr/bin/podman run --rm --name astra-caddy --network host -v /etc/astra/Caddyfile:/etc/caddy/Caddyfile:ro -v /var/lib/caddy:/data ${CADDY_IMAGE}
+ExecStart=/usr/bin/podman run --rm --name astra-caddy --network host -v /etc/astra/Caddyfile:/etc/caddy/Caddyfile:ro,Z -v /var/lib/caddy:/data:Z ${CADDY_IMAGE}
 ExecStop=/usr/bin/podman stop -t 10 astra-caddy
 Restart=always
 RestartSec=5

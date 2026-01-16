@@ -1,0 +1,37 @@
+{% set public_hostname_from_base_url = public_base_url_value | regex_replace('^https?://', '') | regex_replace('/.*$', '') %}
+{% set public_hostname_from_imds = (_astra_imds_json.stdout | default('{}') | from_json).get('public_hostname', '') %}
+{% set public_ipv4 = (_astra_imds_json.stdout | default('{}') | from_json).get('public_ipv4', '') %}
+{% set public_hostname = public_hostname_from_base_url if (public_hostname_from_base_url | length > 0) else public_hostname_from_imds %}
+
+{% if public_hostname | length > 0 %}
+{% set http_addrs = [public_hostname ~ ":80"] %}
+{% set https_addrs = [public_hostname ~ ":443"] %}
+{% if public_ipv4 | length > 0 %}
+{% set http_addrs = http_addrs + [public_ipv4 ~ ":80"] %}
+{% set https_addrs = https_addrs + [public_ipv4 ~ ":443"] %}
+{% endif %}
+
+{{ http_addrs | unique | join(", ") }} {
+    redir https://{host}{uri} permanent
+}
+
+{{ https_addrs | unique | join(", ") }} {
+    # Staging-friendly HTTPS without needing a public DNS name you control.
+    # Clients must trust Caddy's internal CA (or use curl -k).
+    tls internal
+
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002
+}
+{% else %}
+:80 {
+    redir https://{host}{uri} permanent
+}
+
+:443 {
+    # Staging-friendly HTTPS without needing a public DNS name.
+    # Clients must trust Caddy's internal CA (or use curl -k).
+    tls internal
+
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002
+}
+{% endif %}

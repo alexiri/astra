@@ -16,8 +16,7 @@ This folder provisions AWS infrastructure for the **astra** Django app.
 ## What Terraform does NOT do
 
 - Build/push container images
-- Configure application secrets (these live in `/etc/astra/astra.env` on the host, including the Aurora connection string)
-- Update `/etc/astra/astra.env` with AWS S3 settings (bucket name, domain, endpoint URL, region)
+- Manage secrets outside of Terraform/Ansible (you still need to provide values in `terraform.tfvars`, which is gitignored)
 
 ## Environments and state
 
@@ -35,12 +34,30 @@ Assumption: the S3 state bucket and DynamoDB lock table already exist:
 
 If you need Terraform to create these for a new account, run the one-time bootstrap stack in `infra/bootstrap` first.
 
+## Providing variables (no more -var / prompts)
+
+Each environment is designed to be applied from its folder (e.g. `infra/envs/prod`).
+
+Terraform automatically loads variable values from a `terraform.tfvars` file in the working directory.
+This repo includes per-environment templates you can copy and edit:
+
+- `infra/envs/staging/terraform.tfvars.example`
+- `infra/envs/prod/terraform.tfvars.example`
+
+Workflow:
+
+- Copy `terraform.tfvars.example` to `terraform.tfvars` in the same folder
+- Fill in values (especially secrets like `db_password`)
+- Run Terraform normally; it will pick up the values automatically
+
+Note: `terraform.tfvars` is gitignored (all `*.tfvars` are) to avoid committing secrets.
+
 ## Systemd + podman layout
 
 Ansible installs podman and writes systemd units from `infra/systemd`:
 
 - `astra-app@.service` runs two app instances (ports `8001` + `8002`) with `sdnotify=container`.
-- `astra-caddy.service` runs Caddy and load-balances to `localhost:8001` and `localhost:8002`.
+- `astra-caddy.service` runs Caddy and load-balances to `127.0.0.1:8001` and `127.0.0.1:8002`.
 
 ## Ansible provisioning
 
@@ -57,10 +74,13 @@ The playbook installs podman, copies the systemd units and Caddyfile, writes `/e
 
 ## Environment file updates
 
-On first boot, `/etc/astra/astra.env` is created with `APP_IMAGE` plus empty placeholders for required
-application settings. `/etc/astra/caddy.env` is created with `CADDY_IMAGE`. Copy
-`infra/systemd/astra.env.example` and `infra/systemd/caddy.env.example`, fill in the values, and upload
-them to `/etc/astra/astra.env` and `/etc/astra/caddy.env`.
+On provisioning, Ansible writes/updates `/etc/astra/astra.env` and `/etc/astra/caddy.env` based on the
+Terraform inputs (database endpoint, S3 settings, FreeIPA settings, etc.).
+
+Sensitive values are passed to Ansible via a local-only Terraform `local_sensitive_file` that is
+referenced from `ansible-playbook` using `-e @...json`.
+
+This keeps secrets out of Terraform state output, shell history, and most logs.
 
 After updating the env file on the host:
 
