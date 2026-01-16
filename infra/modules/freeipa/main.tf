@@ -1,13 +1,13 @@
-# Minimal FreeIPA Server Module for Dev Environment
+# Minimal FreeIPA Server Module for Staging Environment
 # Based on fedora-infra/tiny-stage implementation
 
-data "aws_ami" "fedora" {
+data "aws_ami" "almalinux_10" {
   most_recent = true
-  owners      = ["125523088429"] # Fedora official AWS account
+  owners      = ["aws-marketplace"]
 
   filter {
     name   = "name"
-    values = ["Fedora-Cloud-Base-AmazonEC2.x86_64-43-*"]
+    values = ["AlmaLinux OS 10* x86_64*"]
   }
 
   filter {
@@ -114,12 +114,15 @@ resource "aws_security_group" "ipa" {
   }
 
   # SSH for admin access
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = var.ssh_allowed_cidrs
-    description = "SSH for administration"
+  dynamic "ingress" {
+    for_each = length(var.ssh_allowed_cidrs) > 0 ? [1] : []
+    content {
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = var.ssh_allowed_cidrs
+      description = "SSH for administration"
+    }
   }
 
   # Allow all outbound
@@ -137,7 +140,7 @@ resource "aws_security_group" "ipa" {
 }
 
 resource "aws_instance" "ipa" {
-  ami           = data.aws_ami.fedora.id
+  ami           = data.aws_ami.almalinux_10.id
   instance_type = var.instance_type
   key_name      = var.key_name
 
@@ -160,12 +163,39 @@ resource "aws_instance" "ipa" {
   # User data to set hostname properly before Ansible runs
   user_data = <<-EOF
     #!/bin/bash
+    set -euo pipefail
+
+    # Ansible requires a Python interpreter on the target.
+    dnf -y install python3 openssh-server firewalld
+
+    # FreeIPA install can temporarily require more RAM than a small instance has.
+    # Add swap so pki-tomcatd does not get OOM-killed mid-install.
+    if [ ! -f /swapfile ]; then
+      fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+
+    # Ensure SSH is reachable for Terraform/Ansible provisioning.
+    systemctl enable --now sshd
+    systemctl enable --now firewalld
+    if command -v firewall-cmd >/dev/null 2>&1; then
+      firewall-cmd --permanent --add-service=ssh || true
+      firewall-cmd --reload || true
+    fi
+
     hostnamectl set-hostname ${var.ipa_hostname}
     echo "preserve_hostname: true" >> /etc/cloud/cloud.cfg
     
     # Ensure hostname resolves locally
-    echo "127.0.0.1 ${var.ipa_hostname} $(hostname -s)" >> /etc/hosts
+    PRIVATE_IP="$(curl -fsS http://169.254.169.254/latest/meta-data/local-ipv4)"
+    echo "$PRIVATE_IP ${var.ipa_hostname} $(hostname -s)" >> /etc/hosts
   EOF
+
+  # FreeIPA provisioning depends on user_data effects; replace the instance if user_data changes.
+  user_data_replace_on_change = true
 
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-ipa"
@@ -199,8 +229,6 @@ resource "local_file" "ansible_inventory" {
     [ipa_servers:vars]
     ipa_realm=${var.ipa_realm}
     ipa_domain=${var.ipa_domain}
-    ipa_admin_password=${var.ipa_admin_password}
-    ipa_dm_password=${var.ipa_dm_password}
     ipa_hostname=${var.ipa_hostname}
   EOF
 

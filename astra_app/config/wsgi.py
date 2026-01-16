@@ -10,10 +10,15 @@ application = get_wsgi_application()
 logger = logging.getLogger(__name__)
 
 try:
-
     from core.startup import ensure_membership_type_groups_exist
 
     ensure_membership_type_groups_exist()
+    from core.systemd_notify import send_systemd_notification
+
+    try:
+        send_systemd_notification("READY=1")
+    except Exception:
+        logger.exception("Systemd notification failed")
 except Exception:
-	logger.exception("Startup membership group sync failed")
-	raise
+    logger.exception("Startup membership group sync failed")
+    raise

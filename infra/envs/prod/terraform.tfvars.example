@@ -1,0 +1,63 @@
+# Copy this file to terraform.tfvars and fill in values.
+# Terraform automatically loads terraform.tfvars from the working directory.
+
+# --- AWS / EC2
+# aws_region = "eu-west-1"     # optional (defaults in variables.tf)
+# instance_type = "t3.small"   # optional
+
+key_name = "YOUR_EC2_KEYPAIR_NAME"
+
+# Lock down SSH. Empty list disables port 22 ingress entirely.
+allowed_ssh_cidrs = ["203.0.113.10/32"]
+
+# --- Container images
+# Use GitLab Container Registry images, e.g.:
+# app_image   = "registry.gitlab.com/<group>/<project>/astra:<tag>"
+# caddy_image = "registry.gitlab.com/<group>/<project>/caddy:<tag>"
+app_image   = "registry.gitlab.com/REPLACE_ME/astra:REPLACE_ME"
+caddy_image = "docker.io/library/caddy:2"
+
+# --- S3 (uploads)
+s3_bucket_name = "astra-prod-media"
+# s3_force_destroy = false # optional
+
+# --- Database (Aurora)
+db_name     = "astra"
+db_username = "astra"
+db_password = "REPLACE_ME_CHANGE_ME"
+
+# --- Ansible provisioning (runs from your machine during terraform apply)
+ansible_user             = "ec2-user"               # optional
+ansible_private_key_path = "~/.ssh/id_rsa"          # required
+# ansible_known_hosts_path = "~/.ssh/known_hosts"   # optional
+
+# --- Django runtime
+# django_settings_module = "config.settings"        # optional
+secret_key = "REPLACE_ME_CHANGE_ME"  # optional; if empty, provisioning generates one
+
+# If empty, provisioning derives a safe default from instance metadata.
+allowed_hosts = []
+
+# Used for absolute links in email.
+public_base_url = "https://REPLACE_ME"
+default_from_email = "Astra <noreply@REPLACE_ME>"
+
+# --- FreeIPA runtime (required for core app features)
+freeipa_host = "ipa.REPLACE_ME"
+freeipa_verify_ssl = true
+freeipa_service_user = "admin"
+freeipa_service_password = "REPLACE_ME_CHANGE_ME"
+
+# --- Startup migrations
+django_auto_migrate = true
+django_migrate_retries = 30
+
+# --- Cron jobs on the host
+# cron_jobs = [
+#   {
+#     name    = "membership-operations"
+#     minute  = "0"
+#     hour    = "0"
+#     command = "podman exec astra-app-1 python manage.py membership_operations"
+#   }
+# ]
